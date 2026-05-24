@@ -1,0 +1,9 @@
+*.a
+*.so
+*.o
+*.cpu
+*.snd
+test_pure_lib
+xpinmame.x11
+roms/
+core.*

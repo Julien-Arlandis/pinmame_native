@@ -119,7 +119,7 @@ fi
 echo ""
 
 echo ""
-echo "=================================================="
+echo "==================================================================================="
 echo "🎉 ÉTAPE 1 RÉUSSIE : ÉMULATEUR COMPILÉ SANS ERREUR COUPLAGE !"
-echo "👉 Retrouve ton binaire ici : $OUTPUT_DIR/xpinmame.x11"
-echo "=================================================="
+echo "👉 Retrouve ton binaire ici : $OUTPUT_DIR/xpinmame.x11 -rompath ./roms bonebstr"
+echo "==================================================================================="

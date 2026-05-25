@@ -1,9 +1,19 @@
-*.a
-*.so
-*.o
-*.cpu
-*.snd
-test_pure_lib
-xpinmame.x11
+# Exécutables et archives de test
+test_pure_lib_exec/
+libpinmame_native.a
+vrai_mame_main.o
+
+# Dossiers de travail volumineux (à compiler localement)
+pinmame_workspace/
+pinmame_workspace_wasm/
+
+# Fichiers de ROMs et sauvegardes
 roms/
+*.zip
+*.nv
+
+# Résidus de build et logs
+*.o
+*.a
 core.*
+vgcore.*

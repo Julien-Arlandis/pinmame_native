@@ -1,107 +1,91 @@
+// 🌟 1. BLINDAGE DES ROTATIONS (Placé tout en haut pour devancer common.h)
+#ifndef __rolq
+#define __rolq(x,c) (((unsigned long long)(x) << (c)) | ((unsigned long long)(x) >> (64 - (c))))
+#endif
+#ifndef __rorq
+#define __rorq(x,c) (((unsigned long long)(x) >> (c)) | ((unsigned long long)(x) << (64 - (c))))
+#endif
+
+#ifndef INLINE
+#define INLINE static inline
+#endif
+#ifndef inline
+#define inline __inline__
+#endif
+
+#include <iostream>
 #include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <cstdint>
-#include <emscripten.h>
-
-struct core_tGlobals {
-    struct { unsigned short w; } segments[40];
-};
+#include <stdint.h>
 
 extern "C" {
-    extern struct core_tGlobals coreGlobals;
-    int run_game(int game_index);
-    
-    // Remplacement par la fonction de mise à jour stable de la boucle principale de PinMAME
-    void core_gameUpdate(void); 
+    int run_game(int game_num);
+    unsigned int cpunum_get_reg(int cpunum, int regnum);
+    uint8_t cpu_readmem16(int offset);
 }
 
-static char display_buffer[41]; 
+#define DISPLAY_BUFFER_SIZE 100
+static char g_display_text[DISPLAY_BUFFER_SIZE] = {0};
+static uint8_t g_dummy_buffer[1024] = {0};
 
-// Tampons statiques alimentés par le JS
-static uint8_t gprom_data[8192];
-static uint8_t dsprom_data[8192];
-static int gprom_size = 0;
-static int dsprom_size = 0;
-
-struct VirtualFile {
-    const uint8_t* data;
-    int size;
-    int offset;
-};
-
+// =========================================================================
+// 🌟 IMPLÉMENTATION ALIGNÉE DES COUCHES OSD (SIGNATURES CORRIGÉES)
+// =========================================================================
 extern "C" {
+    // Signature validée par le linker : (int) -> void
+    void osd_update_video_and_audio(int force) {
+        unsigned int current_pc = 0;
+        char buff_gottlieb[17];
+        
+        try {
+            current_pc = cpunum_get_reg(0, 1); // REG_PC du 6502
+            
+            for (int i = 0; i < 16; i++) {
+                uint8_t val = cpu_readmem16(0x3C00 + i); // Registres d'affichage Gottlieb
+                buff_gottlieb[i] = (val >= 32 && val <= 126) ? (char)val : '.';
+            }
+            buff_gottlieb[16] = '\0';
+        } catch(...) {
+            std::snprintf(buff_gottlieb, 17, "BOOTING SYSTEM..");
+        }
 
-EMSCRIPTEN_KEEPALIVE const char* pinmame_get_version() { return "2.8.0-CORE-UPDATE-ACTIVE"; }
-
-EMSCRIPTEN_KEEPALIVE const char* pinmame_get_display() {
-    memset(display_buffer, ' ', 40);
-    display_buffer[40] = '\0';
-    for (int i = 0; i < 40; i++) {
-        char c = (char)(coreGlobals.segments[i].w & 0x7F); 
-        display_buffer[i] = (c >= 32 && c <= 126) ? c : ' ';
+        if (current_pc != 0) {
+            std::snprintf(g_display_text, DISPLAY_BUFFER_SIZE, "PC: 0x%04X | DISPLAY: [%s]", current_pc, buff_gottlieb);
+            std::cout << "[📺 MAME OSD FRAME] " << g_display_text << std::endl;
+        }
     }
-    return display_buffer;
-}
 
-EMSCRIPTEN_KEEPALIVE uint8_t* pinmame_get_gprom_ptr() { return gprom_data; }
-EMSCRIPTEN_KEEPALIVE uint8_t* pinmame_get_dsprom_ptr() { return dsprom_data; }
-
-EMSCRIPTEN_KEEPALIVE void pinmame_web_tick(int cycles) {
-    // Fait avancer les cycles d'émulation de la machine
-    core_gameUpdate();
-}
-
-EMSCRIPTEN_KEEPALIVE int pinmame_web_entry(int cpu_sz, int dsp_sz) {
-    gprom_size = cpu_sz;
-    dsprom_size = dsp_sz;
-
-    printf("[⚙ C++] Virtual Hook Loaded: CPU=%d bytes, DSP=%d bytes\n", gprom_size, dsprom_size);
-
-    for(int i = 0; i < 40; i++) coreGlobals.segments[i].w = 0;
-
-    return run_game(0);
-}
-
-// 🌟 LE HOOK FORCE : Surchargé et marqué attribut "used" pour le Linker
-__attribute__((used)) void* osd_fopen(const char *gamename, const char *filename, int filetype, int openmode) {
-    if (filename != nullptr && (strcmp(filename, "gprom.bin") == 0 || strstr(filename, "prom1") != NULL)) {
-        VirtualFile* vfile = (VirtualFile*)malloc(sizeof(VirtualFile));
-        vfile->data = gprom_data;
-        vfile->size = gprom_size;
-        vfile->offset = 0;
-        return (void*)vfile;
+    // Signature validée par le linker : (int, int) -> int
+    int osd_display_loading_rom_message(int current, int total) {
+        std::cout << "[📦 MAME VFS LOAD] Progression : " << current << " / " << total << std::endl;
+        return 0; // 0 indique à MAME de poursuivre l'opération sans interruption
     }
-    
-    if (filename != nullptr && (strcmp(filename, "dsprommz.bin") == 0 || strstr(filename, "prom2") != NULL)) {
-        VirtualFile* vfile = (VirtualFile*)malloc(sizeof(VirtualFile));
-        vfile->data = dsprom_data;
-        vfile->size = dsprom_size;
-        vfile->offset = 0;
-        return (void*)vfile;
+}
+
+// =========================================================================
+// INTERFACE DE LIAISON HÔTE JAVASCRIPT
+// =========================================================================
+extern "C" {
+    uint8_t* pinmame_get_gprom_ptr() { return g_dummy_buffer; }
+    uint8_t* pinmame_get_dsprom_ptr() { return g_dummy_buffer; }
+    const char* pinmame_get_display() { return g_display_text; }
+    const char* pinmame_get_version() { return "PinMAME WASM Headless OSD-Driven v36.2"; }
+
+    void pinmame_web_entry(int gprom_size, int dsprom_size) {
+        std::cout << "[⚙️ C++] Enregistrement des hooks d'affichage..." << std::endl;
+        std::snprintf(g_display_text, DISPLAY_BUFFER_SIZE, "OSD READY");
     }
-    return nullptr; 
-}
 
-int osd_fread(void *file, void *buffer, int length) {
-    if (!file) return 0;
-    VirtualFile* vfile = (VirtualFile*)file;
-    int available = vfile->size - vfile->offset;
-    if (length > available) length = available;
-    if (length > 0) {
-        memcpy(buffer, vfile->data + vfile->offset, length);
-        vfile->offset += length;
+    void pinmame_web_boot() {
+        std::cout << "[⚡ C++] run_game(0) synchronisé démarré." << std::endl;
+        try {
+            run_game(0); 
+            std::cout << "[✅ C++] Arrêt normal." << std::endl;
+        } catch(...) {
+            std::cerr << "[❌ C++] Exception levée par la boucle d'exécution." << std::endl;
+        }
     }
-    return length;
-}
 
-void osd_fclose(void *file) {
-    if (file) free(file);
-}
-
-int osd_fseek(void *file, int64_t offset, int whence) { return 0; }
-int osd_display_loading_rom_message(const char *name, int current) { return 0; }
-void osd_update_video_and_audio(int forced) {}
-#define HARD_STUB(name) EMSCRIPTEN_KEEPALIVE void name(void* g) {}
-HARD_STUB(construct_gts3_1as) HARD_STUB(construct_gts3_21) HARD_STUB(construct_GP1) HARD_STUB(construct_GTS1C)
+    void pinmame_web_tick(int cycles) {
+        // Géré en interne de manière autonome
+    }
 }

@@ -1,21 +1,13 @@
 #!/bin/bash
 set -e
 
-SCRIPT_VERSION="WASM-WEB-LINKER-v3.3-STABLE"
-
-# 🌟 DÉTECTION DYNAMIQUE ET PORTABLE DU RÉPERTOIRE RACINE
-SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
-
-# Pointage sur l'unique source de vérité pour les headers (.h)
-PINMAME_STOCK="$SRC_DIR/pinmame_workspace/pinmame_stock"
-OUTPUT_DIR="$SRC_DIR"
-LIB_WASM_A="$SRC_DIR/libpinmame_wasm.a"
+SCRIPT_VERSION="WASM-WEB-LINKER-v5.2-NO-MAIN"
 
 echo "=================================================="
-echo "🔗 LIAISON GLOBALE ULTRA-PROPRE : VERSION $SCRIPT_VERSION"
+echo "🔗 LIAISON GLOBALE : VERSION $SCRIPT_VERSION"
 echo "=================================================="
 
-# 1. CHARGEMENT ET EXPORTATION STRICTE DE L'ENVIRONNEMENT EMSCRIPTEN
+# 1. Chargement de l'environnement Emscripten
 EMSDK_DIR="/home/julien/emsdk"
 if [ -f "$EMSDK_DIR/emsdk_env.sh" ]; then
     source "$EMSDK_DIR/emsdk_env.sh" > /dev/null 2>&1
@@ -24,62 +16,44 @@ elif [ -f "/etc/profile.d/emscripten.sh" ]; then
     source /etc/profile.d/emscripten.sh
 fi
 
-# Double vérification de sécurité du compilateur
-if ! command -v emcc &> /dev/null; then
-    echo "❌ Erreur : emcc est introuvable dans le PATH actuel."
-    exit 1
-fi
+SRC_DIR=$(pwd)
+LIB_WASM_A="$SRC_DIR/libpinmame_wasm.a"
+NATIVE_WORKSPACE="$SRC_DIR/pinmame_workspace/pinmame_stock"
+OUTPUT_DIR="$SRC_DIR"
 
-# Sécurité : On s'assure que la bibliothèque WASM existe bien
 if [ ! -f "$LIB_WASM_A" ]; then
-    echo "💥 Erreur : L'archive globale $LIB_WASM_A est introuvable !"
-    echo "▶️ Veuillez exécuter ./build_wasm_lib.sh au préalable."
+    echo "💥 Erreur : La bibliothèque statique $LIB_WASM_A est introuvable !"
     exit 1
 fi
 
-# Blindage : Création propre du dossier de sortie
-mkdir -p "$OUTPUT_DIR"
-rm -f "$OUTPUT_DIR/pinmame_web.js" "$OUTPUT_DIR/pinmame_web.wasm"
+echo "[*] Liaison chirurgicale avec ré-injection des chemins d'inclusion MAME..."
 
-echo "[*] Liaison chirurgicale de api.cpp avec l'archive de muscles unifiée WASM..."
+INCLUDES="-I$NATIVE_WORKSPACE/src -I$NATIVE_WORKSPACE/src/wpc -I$NATIVE_WORKSPACE/src/unix -I$NATIVE_WORKSPACE/src/cores -I$NATIVE_WORKSPACE/src/cpu -I$NATIVE_WORKSPACE/src/sound"
 
-# 🌟 MAGIE DE L'ALIGNEMENT : emcc prend api.cpp et aspire le nécessaire dans libpinmame_wasm.a
-emcc "$SRC_DIR/api.cpp" "$LIB_WASM_A" \
-    -O2 \
-    -g \
-    -I"$SRC_DIR" \
-    -I"$PINMAME_STOCK/src" \
-    -I"$PINMAME_STOCK/src/wpc" \
-    -I"$PINMAME_STOCK/src/unix" \
-    -I"$PINMAME_STOCK/src/cores" \
-    -I"$PINMAME_STOCK/src/cpu" \
-    -DINLINE="static inline" \
-    -DUNIX \
-    -D__inline__=inline \
-    -DBMTYPE=UINT16 \
-    -sWASM=1 \
-    -sASYNCIFY=1 \
-    -sMODULARIZE=1 \
-    -sEXPORT_NAME="createPinMAME" \
-    -sFORCE_FILESYSTEM=1 \
-    -sUSE_ZLIB=1 \
-    -sWARN_ON_UNDEFINED_SYMBOLS=0 \
-    -sERROR_ON_UNDEFINED_SYMBOLS=0 \
-    -sEMULATE_FUNCTION_POINTER_CASTS=1 \
-    -Wl,--allow-undefined \
-    -Wl,--unresolved-symbols=ignore-all \
-    -Wl,--allow-multiple-definition \
-    -sEXPORTED_FUNCTIONS='["_pinmame_get_version", "_pinmame_get_gprom_ptr", "_pinmame_get_dsprom_ptr", "_pinmame_get_display", "_pinmame_web_entry", "_pinmame_web_tick"]' \
-    -sEXPORTED_RUNTIME_METHODS='["FS", "cwrap", "ccall", "HEAPU8"]' \
-    -o "$OUTPUT_DIR/pinmame_web.js"
+# 🌟 NETTOYAGE : On retire définitivement "_main" de la liste des fonctions exportées
+EXPORT_FUNCS='["_pinmame_get_version","_pinmame_get_gprom_ptr","_pinmame_get_dsprom_ptr","_pinmame_get_display","_pinmame_web_entry","_pinmame_web_boot","_pinmame_web_tick"]'
+EXPORT_METHODS='["FS", "cwrap", "ccall", "HEAPU8"]'
 
-if [ $? -eq 0 ]; then
-    echo "=================================================="
-    echo "🎉 FUSION TERMINÉE : LE PACK BUNDLE JS/WASM EST PRÊT !"
-    ls -lh "$OUTPUT_DIR"/pinmame_web.*
-    echo "node launcher.js"
-    echo "=================================================="
-else
-    echo "💥 Échec de la compilation."
-    exit 1
-fi
+# Exécution de la compilation croisée
+emcc "$SRC_DIR/api.cpp" $INCLUDES \
+  -Wl,--whole-archive "$LIB_WASM_A" -Wl,--no-whole-archive \
+  -O2 \
+  -g \
+  -s WASM=1 \
+  -s ASYNCIFY=1 \
+  -s ASYNCIFY_STACK_SIZE=131072 \
+  -s MODULARIZE=1 \
+  -s EXPORT_NAME="createPinMAME" \
+  -s WARN_ON_UNDEFINED_SYMBOLS=0 \
+  -s ERROR_ON_UNDEFINED_SYMBOLS=0 \
+  -Wl,--allow-undefined \
+  -Wl,--unresolved-symbols=ignore-all \
+  -Wl,--allow-multiple-definition \
+  -s EXPORTED_FUNCTIONS="$EXPORT_FUNCS" \
+  -s EXPORTED_RUNTIME_METHODS="$EXPORT_METHODS" \
+  -o "$OUTPUT_DIR/pinmame_web.js"
+
+echo "=================================================="
+echo "🟢 Module WebAssembly binarisé avec succès !"
+ls -lh "$OUTPUT_DIR/pinmame_web.js" "$OUTPUT_DIR/pinmame_web.wasm"
+echo "=================================================="

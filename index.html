@@ -86,15 +86,10 @@
             transition: all 0.05s ease; 
             touch-action: none; 
             cursor: pointer;
-            -webkit-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
-            user-select: none;
         }
         .btn:active, .btn.forced-active { transform: translateY(3px); box-shadow: 0 1px #000; }
         .btn-coin { background-color: #ffcc00; color: #000; }
         .btn-start { background-color: #ff0044; color: #fff; }
-        /* Style distinct pour le bouton de diagnostic */
         .btn-test { background-color: #0099ff; color: #fff; box-shadow: 0 4px #0044aa; }
         .btn-test:active, .btn-test.forced-active { box-shadow: 0 1px #0044aa; }
 
@@ -132,10 +127,6 @@
             text-align: center; 
             touch-action: none; 
             cursor: default;
-            -webkit-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
-            user-select: none;
         }
         
         .cell.sw-user { background: #00ff44 !important; color: #000 !important; box-shadow: 0 0 6px #00ff44; border-color: #fff; }
@@ -283,13 +274,23 @@
                 setupButtons();
 
                 function renderFrame() {
-                    const vfdData = new Uint16Array(pinmameInstance.HEAPU8.buffer, vfdMemoryPointer, 40);
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                    // 🌟 FIX ALIGNEMENT 1 : Lecture sécurisée par octets pour le VFD
                     for (let i = 0; i < 20; i++) {
-                        drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 40, vfdData[i]);
-                        drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, vfdData[20 + i]);
+                        const low1 = pinmameInstance.HEAPU8[vfdMemoryPointer + (i * 2)];
+                        const high1 = pinmameInstance.HEAPU8[vfdMemoryPointer + (i * 2) + 1];
+                        const mask1 = low1 | (high1 << 8);
+
+                        const low2 = pinmameInstance.HEAPU8[vfdMemoryPointer + ((20 + i) * 2)];
+                        const high2 = pinmameInstance.HEAPU8[vfdMemoryPointer + ((20 + i) * 2) + 1];
+                        const mask2 = low2 | (high2 << 8);
+
+                        drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 40, mask1);
+                        drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, mask2);
                     }
 
+                    // Refresh Switch Matrix Feedback
                     for (let sw = 0; sw < 80; sw++) {
                         const byteIdx = Math.floor(sw / 8);
                         const bitIdx = sw % 8;
@@ -298,6 +299,7 @@
                         else swCells[sw].classList.remove('sw-cpu');
                     }
 
+                    // Refresh Transistors Lampes
                     for (let col = 0; col < 12; col++) {
                         const colByte = pinmameInstance.HEAPU8[vfdMemoryPointer + 300 + col];
                         for (let row = 0; row < 8; row++) {
@@ -308,7 +310,13 @@
                         }
                     }
 
-                    const solWord = new Uint32Array(pinmameInstance.HEAPU8.buffer, vfdMemoryPointer + 320, 1)[0];
+                    // 🌟 FIX ALIGNEMENT 2 : Reconstruction manuelle sécurisée du mot 32-bits des bobines
+                    const b0 = pinmameInstance.HEAPU8[vfdMemoryPointer + 320];
+                    const b1 = pinmameInstance.HEAPU8[vfdMemoryPointer + 321];
+                    const b2 = pinmameInstance.HEAPU8[vfdMemoryPointer + 322];
+                    const b3 = pinmameInstance.HEAPU8[vfdMemoryPointer + 323];
+                    const solWord = (b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)) >>> 0;
+
                     for (let s = 0; s < 32; s++) {
                         const isSolOn = (solWord & (1 << s)) !== 0;
                         if (isSolOn) solCells[s].classList.add('sol-on');

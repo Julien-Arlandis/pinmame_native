@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V140.0 (PASSAGE EN ET DECORATION 2x20)
+// 🏷️ VERSION : API-CORE-GATEWAY-V142.0 (SWITCH MATRIX ANALYZER BRIDGE)
 // =========================================================================
 
 #include <iostream>
@@ -21,8 +21,12 @@ extern "C" {
 #include "usrintrf.h"
 }
 
+// Tampon binaire d'export (Shared Memory)
+// Octets 0-79   : Données VFD 2x20
+// Octets 100-179: Switchs forcés par JS (0 = Relâché, 1 = Pressé)
+// Octets 200-209: Lecture de la matrice matérielle réelle pour l'analyseur JS
 static uint8_t g_dummy_buffer[4096] = {0};
-static char g_display_text[100] = "Mode Binaire VFD 2x20 Actif";
+static char g_display_text[100] = "Analyseur de Matrice Actif";
 static uint32_t g_font_security_anchor[100] = {0}; 
 
 extern "C" void emscripten_sleep(unsigned int ms);
@@ -40,7 +44,7 @@ extern "C" {
     extern int bailing;
     extern struct osd_bitmap *scrbitmap;
 
-    char build_version[] = "PinMAME-WASM-V140.0";
+    char build_version[] = "PinMAME-WASM-V142.0";
     int alpha_active = 0;
     int spriteram_size = 0;
     int spriteram_2_size = 0;
@@ -60,7 +64,6 @@ extern "C" {
     int pdrawgfx_shadow_lowpri = 0; 
 
     struct mame_bitmap *priority_bitmap = (struct mame_bitmap *)g_dummy_buffer; 
-
     char* rompath_extra = (char*)"/roms";
 
     cycles_t osd_cycles(void) {
@@ -190,17 +193,26 @@ extern "C" {
     void* playzsIntf = nullptr;   void* tecnoplayIntf = nullptr; void* joctronicIntf = nullptr; void* barniIntf = nullptr;
 
     // =========================================================================
-    // 💎 EXPORT BINAIRE ULTRA-RAPIDE VERS LA COUCHE JAVASCRIPT
+    // 💎 INTERCEPTIONS DE LA MATRICE ET ENVOI VIDEO
     // =========================================================================
     void artwork_update_video_and_audio(void* display) {
+        // 1. Mise à jour de la vidéo VFD 2x20
         uint16_t* vfd_export = (uint16_t*)g_dummy_buffer;
-
-        // 🌟 FIX 2x20 : On pousse la lecture à 20 caractères par ligne
         for (int i = 0; i < 20; i++) {
-            // Ligne supérieure : indices 0 à 19
             vfd_export[i]      = coreGlobals.segments[i].w & 0xFFFF;
-            // Ligne inférieure : indices 20 à 39
             vfd_export[20 + i] = coreGlobals.segments[20 + i].w & 0xFFFF;
+        }
+
+        // 2. 🌟 INJECTION DES INJECTS DE SWITCH MATRIX (JS -> C++)
+        // On scanne les switchs 0 à 79 envoyés depuis l'offset 100
+        for (int sw = 0; sw < 80; sw++) {
+            core_setSw(sw, g_dummy_buffer[100 + sw]);
+        }
+
+        // 3. 🌟 EXPORT DE LA VRAIE MATRICE INTERNE (C++ -> JS)
+        // coreGlobals.swMatrix est un tableau d'octets (8 bits par colonne/ligne)
+        for (int b = 0; b < 10; b++) {
+            g_dummy_buffer[200 + b] = coreGlobals.swMatrix[b];
         }
 
         emscripten_sleep(1);
@@ -209,12 +221,12 @@ extern "C" {
     uint8_t* pinmame_get_gprom_ptr() { return g_dummy_buffer; }
     uint8_t* pinmame_get_dsprom_ptr() { return g_dummy_buffer; } 
     const char* pinmame_get_display() { return g_display_text; }
-    const char* pinmame_get_version() { return "PinMAME WebAssembly Core V140.0"; }
+    const char* pinmame_get_version() { return "PinMAME Switch Matrix Analyzer V142.0"; }
     void pinmame_web_entry(int gprom_size, int dsprom_size) {}
     void pinmame_web_tick(int cycles) {}
 
     void pinmame_web_boot() {
-        std::cout << "🎰 [⚡ V140.0 C++] Mode 2x20 Gottlieb actif." << std::endl;
+        std::cout << "🎰 [⚡ V142.0 C++] Mode Analyseur Logique de Matrice Initialise." << std::endl;
         bailing = 0;
         run_game(0); 
     }

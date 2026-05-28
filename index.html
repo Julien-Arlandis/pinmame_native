@@ -2,7 +2,7 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>PinMAME WASM - Gottlieb System 80B</title>
+    <title>PinMAME WASM - Matrix Analyzer & Control Panel</title>
     <style>
         body { 
             background-color: #050505; 
@@ -12,9 +12,10 @@
             flex-direction: column; 
             align-items: center; 
             justify-content: center; 
-            height: 100vh; 
+            min-height: 100vh; 
             margin: 0; 
-            overflow: hidden; 
+            padding: 20px;
+            overflow-x: hidden;
         }
         canvas { 
             background-color: #0a1111; 
@@ -22,144 +23,234 @@
             border-radius: 10px; 
             box-shadow: 0 0 30px rgba(0, 255, 255, 0.15); 
             image-rendering: pixelated; 
-            margin-top: 20px; 
         }
         #status { 
             color: #ffcc00; 
             font-size: 1.2rem; 
             text-transform: uppercase; 
             letter-spacing: 2px; 
-            margin-bottom: 10px;
+            margin-bottom: 15px;
         }
-        #error-log { 
-            color: #ff0055; 
-            background: #222; 
-            padding: 15px; 
-            border-radius: 5px; 
-            white-space: pre-wrap; 
-            display: none; 
-            font-size: 1rem; 
-            max-width: 800px; 
-            text-align: left; 
-            border: 1px solid #ff0055;
+        
+        /* Style du Panneau Arcade */
+        .arcade-panel {
+            display: flex;
+            gap: 30px;
+            margin-top: 20px;
+            background: #111;
+            padding: 15px 35px;
+            border-radius: 12px;
+            border: 2px solid #282828;
+            box-shadow: inset 0 0 10px rgba(0,0,0,0.9);
         }
+        .btn {
+            padding: 12px 25px;
+            font-size: 1rem;
+            font-weight: bold;
+            font-family: monospace;
+            text-transform: uppercase;
+            border: none;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 4px #000, 0 6px 8px rgba(0,0,0,0.5);
+            transition: all 0.05s ease;
+            user-select: none;
+        }
+        .btn:active, .btn.forced-active {
+            transform: translateY(3px);
+            box-shadow: 0 1px #000, 0 2px 4px rgba(0,0,0,0.5);
+        }
+        .btn-coin { background-color: #ffcc00; color: #000; }
+        .btn-start { background-color: #ff0044; color: #fff; }
+
+        /* Style de la Grille d'Analyse Logique */
+        .matrix-container { 
+            background: #111; 
+            border: 2px solid #282828; 
+            padding: 20px; 
+            border-radius: 10px; 
+            margin-top: 20px; 
+            text-align: center; 
+            max-width: 1150px;
+        }
+        .matrix-title { color: #00ffcc; text-transform: uppercase; font-size: 0.9rem; margin-bottom: 15px; letter-spacing: 1px;}
+        .grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; }
+        
+        .sw-cell {
+            background: #1a1a1a; border: 1px solid #333; color: #777; padding: 8px 3px; font-size: 0.8rem;
+            font-weight: bold; border-radius: 4px; cursor: pointer; user-select: none; transition: all 0.05s ease;
+        }
+        /* ÉTAT 1 : Clic utilisateur (Injection dans l'offset 100) */
+        .sw-cell.user-pressed { background: #00ff44 !important; color: #000 !important; border-color: #fff; box-shadow: 0 0 10px #00ff44; }
+        /* ÉTAT 2 : CPU Actif (Retour de la puce via l'offset 200) */
+        .sw-cell.cpu-active { background: #ff9900; color: #000; border-color: #ffcc00; box-shadow: 0 0 8px #ff9900; }
     </style>
 </head>
 <body>
 
     <div id="status">🟡 Initialisation du Moteur WebAssembly...</div>
-    <div id="error-log"></div>
 
     <canvas id="vfdCanvas" width="1150" height="250"></canvas>
 
-    <script>
-        const statusEl = document.getElementById('status');
-        const errorLog = document.getElementById('error-log');
+    <div class="arcade-panel">
+        <button id="coinBtn" class="btn btn-coin">Coin 1 [Touche: 5] ➔ SW 04</button>
+        <button id="startBtn" class="btn btn-start">Start Game [Touche: 1] ➔ SW 03</button>
+    </div>
 
-        function triggerAlarm(msg) {
-            statusEl.textContent = "🔴 CRASH DÉTECTÉ";
-            statusEl.style.color = "#ff0055";
-            errorLog.style.display = "block";
-            errorLog.textContent += msg + "\n";
-        }
-        window.addEventListener('error', (e) => triggerAlarm("Erreur JS : " + e.message));
-        window.addEventListener('unhandledrejection', (e) => triggerAlarm("Promesse rejetée : " + e.reason));
-    </script>
+    <div class="matrix-container">
+        <div class="matrix-title">🔌 Analyseur Logique Matériel (Switch Matrix Reale 00 à 79)</div>
+        <div id="switchGrid" class="grid"></div>
+    </div>
 
     <script src="pinmame_web.js"></script>
 
     <script>
         const canvas = document.getElementById('vfdCanvas');
         const ctx = canvas.getContext('2d');
+        const statusEl = document.getElementById('status');
+        const gridEl = document.getElementById('switchGrid');
+
         const CHAR_WIDTH = 40; const CHAR_HEIGHT = 70; const SPACING = 15;
+        let pinmameInstance = null;
+        let vfdMemoryPointer = 0;
+        const totalSwitches = 80;
+        const cellElements = [];
+
+        // Identifiants des switchs Gottlieb ciblés
+        const COIN_SWITCH_ID = 4;
+        const START_SWITCH_ID = 3;
+
+        // Génération de la matrice
+        for (let i = 0; i < totalSwitches; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'sw-cell';
+            cell.textContent = 'SW ' + String(i).padStart(2, '0');
+            
+            cell.addEventListener('mousedown', () => triggerSwitch(i, true));
+            cell.addEventListener('mouseup', () => triggerSwitch(i, false));
+            cell.addEventListener('mouseleave', () => triggerSwitch(i, false));
+            
+            gridEl.appendChild(cell);
+            cellElements.push(cell);
+        }
+
+        function triggerSwitch(swId, isPressed) {
+            if (!pinmameInstance || !vfdMemoryPointer) return;
+            // Écriture de l'état du switch dans la mémoire partagée (C++ lit l'offset 100)
+            pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + swId] = isPressed ? 1 : 0;
+            
+            if (isPressed) {
+                cellElements[swId].classList.add('user-pressed');
+            } else {
+                cellElements[swId].classList.remove('user-pressed');
+            }
+        }
 
         async function startEmulation() {
             try {
-                statusEl.textContent = "🟡 Démarrage de l'instance createPinMAME()...";
-                
+                statusEl.textContent = "🟡 Démarrage de createPinMAME()...";
                 const instance = await createPinMAME({
-                    print: function(text) { console.log("[PinMAME] " + text); },
-                    printErr: function(err) { console.error("[PinMAME ERR] " + err); },
-                    locateFile: function(path, prefix) {
-                        if (path.endsWith('.wasm')) return 'pinmame_web.wasm';
-                        return prefix + path;
-                    }
+                    print: function(text) { console.log(text); },
+                    printErr: function(err) { console.error(err); },
+                    locateFile: function(path, prefix) { return path.endsWith('.wasm') ? 'pinmame_web.wasm' : prefix + path; }
                 });
 
-                statusEl.textContent = "🟡 Téléchargement de la ROM...";
                 const response = await fetch('roms/bonebstr.zip');
-                if (!response.ok) throw new Error("ROM introuvable.");
                 const romBuffer = await response.arrayBuffer();
-
                 instance.FS.mkdir('/roms');
                 instance.FS.writeFile('/roms/bonebstr.zip', new Uint8Array(romBuffer));
 
-                statusEl.textContent = "🟢 Boot C++...";
-                statusEl.style.color = "#00ffcc";
+                pinmameInstance = instance;
+                vfdMemoryPointer = instance._pinmame_get_dsprom_ptr();
 
-                instance._pinmame_web_boot();
-                const vfdPointer = instance._pinmame_get_dsprom_ptr();
+                // Branchement des gros boutons Arcade du panneau
+                setupPanelListeners();
 
                 function renderFrame() {
-                    // 🌟 FIX ARRAY LENGTH : On lit 40 éléments (20 par ligne)
-                    const vfdData = new Uint16Array(instance.HEAPU8.buffer, vfdPointer, 40);
+                    // 1. Rendu graphique VFD
+                    const vfdData = new Uint16Array(pinmameInstance.HEAPU8.buffer, vfdMemoryPointer, 40);
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    
-                    // 🌟 FIX RENDER RANGE : La boucle dessine désormais les 20 caractères complets
                     for (let i = 0; i < 20; i++) {
                         drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 40, vfdData[i]);
                         drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, vfdData[20 + i]);
                     }
+
+                    // 2. Lecture du retour de la matrice matérielle réelle (C++ écrit à l'offset 200)
+                    for (let sw = 0; sw < totalSwitches; sw++) {
+                        const byteIndex = Math.floor(sw / 8);
+                        const bitIndex = sw % 8;
+                        const byteValue = pinmameInstance.HEAPU8[vfdMemoryPointer + 200 + byteIndex];
+                        const isCpuActive = (byteValue & (1 << bitIndex)) !== 0;
+
+                        if (isCpuActive) {
+                            cellElements[sw].classList.add('cpu-active');
+                        } else {
+                            cellElements[sw].classList.remove('cpu-active');
+                        }
+                    }
+
                     requestAnimationFrame(renderFrame);
                 }
 
                 requestAnimationFrame(renderFrame);
-                statusEl.textContent = "🟢 Borne Active (Format 2x20) !";
+                statusEl.textContent = "🟢 Borne Active. Teste la capture des Switchs !";
+                instance._pinmame_web_boot();
 
             } catch (err) {
-                triggerAlarm(err.message);
+                statusEl.textContent = "🔴 ERREUR : " + err.message;
             }
         }
 
-        function drawGottlieb14Segment(ctx, x, y, mask) {
-            ctx.save();
-            ctx.translate(x, y);
-            ctx.transform(1, 0, -0.15, 1, 0, 0); 
-            ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        // Configuration des boutons d'arcade
+        function setupPanelListeners() {
+            const coinBtn = document.getElementById('coinBtn');
+            const startBtn = document.getElementById('startBtn');
 
+            // Touches Clavier
+            window.addEventListener('keydown', (e) => {
+                if (e.key === '5') { triggerSwitch(COIN_SWITCH_ID, true); coinBtn.classList.add('forced-active'); }
+                if (e.key === '1') { triggerSwitch(START_SWITCH_ID, true); startBtn.classList.add('forced-active'); }
+            });
+            window.addEventListener('keyup', (e) => {
+                if (e.key === '5') { triggerSwitch(COIN_SWITCH_ID, false); coinBtn.classList.remove('forced-active'); }
+                if (e.key === '1') { triggerSwitch(START_SWITCH_ID, false); startBtn.classList.remove('forced-active'); }
+            });
+
+            // Boutons Souris
+            coinBtn.addEventListener('mousedown', () => triggerSwitch(COIN_SWITCH_ID, true));
+            coinBtn.addEventListener('mouseup', () => triggerSwitch(COIN_SWITCH_ID, false));
+            coinBtn.addEventListener('mouseleave', () => triggerSwitch(COIN_SWITCH_ID, false));
+
+            startBtn.addEventListener('mousedown', () => triggerSwitch(START_SWITCH_ID, true));
+            startBtn.addEventListener('mouseup', () => triggerSwitch(START_SWITCH_ID, false));
+            startBtn.addEventListener('mouseleave', () => triggerSwitch(START_SWITCH_ID, false));
+        }
+
+        function drawGottlieb14Segment(ctx, x, y, mask) {
+            ctx.save(); ctx.translate(x, y); ctx.transform(1, 0, -0.15, 1, 0, 0); 
+            ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
             const drawSeg = (bit, drawFn) => {
-                if (mask & bit) {
-                    ctx.strokeStyle = '#00ffff'; ctx.shadowBlur = 10; ctx.shadowColor = '#00ffff';
-                } else {
-                    ctx.strokeStyle = '#122222'; ctx.shadowBlur = 0;
-                }
+                if (mask & bit) { ctx.strokeStyle = '#00ffff'; ctx.shadowBlur = 10; ctx.shadowColor = '#00ffff'; }
+                else { ctx.strokeStyle = '#122222'; ctx.shadowBlur = 0; }
                 ctx.beginPath(); drawFn(); ctx.stroke();
             };
-
-            const w = CHAR_WIDTH; const h = CHAR_HEIGHT; 
-            const m = h / 2; const hw = w / 2;
-
-            drawSeg(0x0001, () => { ctx.moveTo(2, 0); ctx.lineTo(w - 2, 0); });               // A (Plafond)
-            drawSeg(0x0002, () => { ctx.moveTo(w, 2); ctx.lineTo(w, m - 2); });               // B (Haut-Droite)
-            drawSeg(0x0004, () => { ctx.moveTo(w, m + 2); ctx.lineTo(w, h - 2); });           // C (Bas-Droite)
-            drawSeg(0x0008, () => { ctx.moveTo(2, h); ctx.lineTo(w - 2, h); });               // D (Sol)
-            drawSeg(0x0010, () => { ctx.moveTo(0, m + 2); ctx.lineTo(0, h - 2); });           // E (Bas-Gauche)
-            drawSeg(0x0020, () => { ctx.moveTo(0, 2); ctx.lineTo(0, m - 2); });               // F (Haut-Gauche)
-            
-            drawSeg(0x0040, () => { ctx.moveTo(2, m); ctx.lineTo(hw - 2, m); });              // G1 (Milieu-Gauche)
-            drawSeg(0x0800, () => { ctx.moveTo(hw + 2, m); ctx.lineTo(w - 2, m); });          // G2 (Milieu-Droite)
-            
-            drawSeg(0x0100, () => { ctx.moveTo(2, 2); ctx.lineTo(hw - 2, m - 2); });          // H (Diag Haut-Gauche \)
-            drawSeg(0x0200, () => { ctx.moveTo(hw, 2); ctx.lineTo(hw, m - 3); });             // I (Vertical Haut |)
-            drawSeg(0x0400, () => { ctx.moveTo(w - 2, 2); ctx.lineTo(hw + 2, m - 2); });      // J (Diag Haut-Droite /)
-            
-            drawSeg(0x4000, () => { ctx.moveTo(2, h - 2); ctx.lineTo(hw - 2, m + 2); });      // K (Diag Bas-Gauche /)
-            drawSeg(0x1000, () => { ctx.moveTo(w - 2, h - 2); ctx.lineTo(hw + 2, m + 2); });  // L (Diag Bas-Droite \)
-            drawSeg(0x2000, () => { ctx.moveTo(hw, h - 4); ctx.lineTo(hw, m + 3); });         // M (Vertical Bas |)
-            
-            drawSeg(0x0080, () => { ctx.moveTo(w + 2, h); ctx.lineTo(w + 6, h + 8); });       // Virgule
-            drawSeg(0x8000, () => { ctx.arc(w + 4, h, 2, 0, Math.PI*2); });                   // Point
-
+            const w = CHAR_WIDTH; const h = CHAR_HEIGHT; const m = h / 2; const hw = w / 2;
+            drawSeg(0x0001, () => { ctx.moveTo(2, 0); ctx.lineTo(w - 2, 0); });               
+            drawSeg(0x0002, () => { ctx.moveTo(w, 2); ctx.lineTo(w, m - 2); });               
+            drawSeg(0x0004, () => { ctx.moveTo(w, m + 2); ctx.lineTo(w, h - 2); });           
+            drawSeg(0x0008, () => { ctx.moveTo(2, h); ctx.lineTo(w - 2, h); });               
+            drawSeg(0x0010, () => { ctx.moveTo(0, m + 2); ctx.lineTo(0, h - 2); });           
+            drawSeg(0x0020, () => { ctx.moveTo(0, 2); ctx.lineTo(0, m - 2); });               
+            drawSeg(0x0040, () => { ctx.moveTo(2, m); ctx.lineTo(hw - 2, m); });              
+            drawSeg(0x0800, () => { ctx.moveTo(hw + 2, m); ctx.lineTo(w - 2, m); });          
+            drawSeg(0x0100, () => { ctx.moveTo(2, 2); ctx.lineTo(hw - 2, m - 2); });          
+            drawSeg(0x0200, () => { ctx.moveTo(hw, 2); ctx.lineTo(hw, m - 3); });             
+            drawSeg(0x0400, () => { ctx.moveTo(w - 2, 2); ctx.lineTo(hw + 2, m - 2); });      
+            drawSeg(0x4000, () => { ctx.moveTo(2, h - 2); ctx.lineTo(hw - 2, m + 2); });      
+            drawSeg(0x1000, () => { ctx.moveTo(w - 2, h - 2); ctx.lineTo(hw + 2, m + 2); });  
+            drawSeg(0x2000, () => { ctx.moveTo(hw, h - 4); ctx.lineTo(hw, m + 3); });         
+            drawSeg(0x0080, () => { ctx.moveTo(w + 2, h); ctx.lineTo(w + 6, h + 8); });       
+            drawSeg(0x8000, () => { ctx.arc(w + 4, h, 2, 0, Math.PI*2); });                   
             ctx.restore();
         }
 

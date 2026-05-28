@@ -4,10 +4,45 @@
     <meta charset="UTF-8">
     <title>PinMAME WASM - Gottlieb System 80B</title>
     <style>
-        body { background-color: #050505; color: #fff; font-family: monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; overflow: hidden; }
-        canvas { background-color: #0a1111; border: 4px solid #222; border-radius: 10px; box-shadow: 0 0 30px rgba(0, 255, 255, 0.15); image-rendering: pixelated; margin-top: 20px; }
-        #status { color: #ffcc00; font-size: 1.2rem; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 10px;}
-        #error-log { color: #ff0055; background: #222; padding: 15px; border-radius: 5px; white-space: pre-wrap; display: none; font-size: 1rem; max-width: 800px; text-align: left; border: 1px solid #ff0055;}
+        body { 
+            background-color: #050505; 
+            color: #fff; 
+            font-family: monospace; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+            justify-content: center; 
+            height: 100vh; 
+            margin: 0; 
+            overflow: hidden; 
+        }
+        canvas { 
+            background-color: #0a1111; 
+            border: 4px solid #222; 
+            border-radius: 10px; 
+            box-shadow: 0 0 30px rgba(0, 255, 255, 0.15); 
+            image-rendering: pixelated; 
+            margin-top: 20px; 
+        }
+        #status { 
+            color: #ffcc00; 
+            font-size: 1.2rem; 
+            text-transform: uppercase; 
+            letter-spacing: 2px; 
+            margin-bottom: 10px;
+        }
+        #error-log { 
+            color: #ff0055; 
+            background: #222; 
+            padding: 15px; 
+            border-radius: 5px; 
+            white-space: pre-wrap; 
+            display: none; 
+            font-size: 1rem; 
+            max-width: 800px; 
+            text-align: left; 
+            border: 1px solid #ff0055;
+        }
     </style>
 </head>
 <body>
@@ -15,7 +50,7 @@
     <div id="status">🟡 Initialisation du Moteur WebAssembly...</div>
     <div id="error-log"></div>
 
-    <canvas id="vfdCanvas" width="1000" height="250"></canvas>
+    <canvas id="vfdCanvas" width="1150" height="250"></canvas>
 
     <script>
         const statusEl = document.getElementById('status');
@@ -40,6 +75,8 @@
 
         async function startEmulation() {
             try {
+                statusEl.textContent = "🟡 Démarrage de l'instance createPinMAME()...";
+                
                 const instance = await createPinMAME({
                     print: function(text) { console.log("[PinMAME] " + text); },
                     printErr: function(err) { console.error("[PinMAME ERR] " + err); },
@@ -64,26 +101,27 @@
                 const vfdPointer = instance._pinmame_get_dsprom_ptr();
 
                 function renderFrame() {
-                    const vfdData = new Uint16Array(instance.HEAPU8.buffer, vfdPointer, 32);
+                    // 🌟 FIX ARRAY LENGTH : On lit 40 éléments (20 par ligne)
+                    const vfdData = new Uint16Array(instance.HEAPU8.buffer, vfdPointer, 40);
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                     
-                    for (let i = 0; i < 16; i++) {
-                        draw16Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 40, vfdData[i]);
-                        draw16Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, vfdData[16 + i]);
+                    // 🌟 FIX RENDER RANGE : La boucle dessine désormais les 20 caractères complets
+                    for (let i = 0; i < 20; i++) {
+                        drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 40, vfdData[i]);
+                        drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, vfdData[20 + i]);
                     }
                     requestAnimationFrame(renderFrame);
                 }
 
                 requestAnimationFrame(renderFrame);
-                statusEl.textContent = "🟢 Borne Active !";
+                statusEl.textContent = "🟢 Borne Active (Format 2x20) !";
 
             } catch (err) {
                 triggerAlarm(err.message);
             }
         }
 
-        // 🌟 NOUVEAU MAPPING : La vraie topologie 16-segments PinMAME
-        function draw16Segment(ctx, x, y, mask) {
+        function drawGottlieb14Segment(ctx, x, y, mask) {
             ctx.save();
             ctx.translate(x, y);
             ctx.transform(1, 0, -0.15, 1, 0, 0); 
@@ -101,22 +139,26 @@
             const w = CHAR_WIDTH; const h = CHAR_HEIGHT; 
             const m = h / 2; const hw = w / 2;
 
-            drawSeg(0x0001, () => { ctx.moveTo(2, 0); ctx.lineTo(hw - 1, 0); });       // Bit 0: A1 (Haut-Gauche)
-            drawSeg(0x0002, () => { ctx.moveTo(hw + 1, 0); ctx.lineTo(w - 2, 0); });   // Bit 1: A2 (Haut-Droite)
-            drawSeg(0x0004, () => { ctx.moveTo(w, 2); ctx.lineTo(w, m - 2); });        // Bit 2: B  (Droite-Haut)
-            drawSeg(0x0008, () => { ctx.moveTo(w, m + 2); ctx.lineTo(w, h - 2); });    // Bit 3: C  (Droite-Bas)
-            drawSeg(0x0010, () => { ctx.moveTo(hw + 1, h); ctx.lineTo(w - 2, h); });   // Bit 4: D2 (Bas-Droite)
-            drawSeg(0x0020, () => { ctx.moveTo(2, h); ctx.lineTo(hw - 1, h); });       // Bit 5: D1 (Bas-Gauche)
-            drawSeg(0x0040, () => { ctx.moveTo(0, m + 2); ctx.lineTo(0, h - 2); });    // Bit 6: E  (Gauche-Bas)
-            drawSeg(0x0080, () => { ctx.moveTo(0, 2); ctx.lineTo(0, m - 2); });        // Bit 7: F  (Gauche-Haut)
-            drawSeg(0x0100, () => { ctx.moveTo(2, m); ctx.lineTo(hw - 1, m); });       // Bit 8: G1 (Milieu-Gauche)
-            drawSeg(0x0200, () => { ctx.moveTo(hw + 1, m); ctx.lineTo(w - 2, m); });   // Bit 9: G2 (Milieu-Droite)
-            drawSeg(0x0400, () => { ctx.moveTo(4, 4); ctx.lineTo(hw - 3, m - 3); });   // Bit 10: H (Diag Haut-Gauche)
-            drawSeg(0x0800, () => { ctx.moveTo(hw, 4); ctx.lineTo(hw, m - 3); });      // Bit 11: I (Vertical-Haut)
-            drawSeg(0x1000, () => { ctx.moveTo(w - 4, 4); ctx.lineTo(hw + 3, m - 3); });// Bit 12: J (Diag Haut-Droite)
-            drawSeg(0x2000, () => { ctx.moveTo(4, h - 4); ctx.lineTo(hw - 3, m + 3); });// Bit 13: K (Diag Bas-Gauche)
-            drawSeg(0x4000, () => { ctx.moveTo(hw, h - 4); ctx.lineTo(hw, m + 3); });  // Bit 14: L (Vertical-Bas)
-            drawSeg(0x8000, () => { ctx.moveTo(w - 4, h - 4); ctx.lineTo(hw + 3, m + 3); });// Bit 15: M (Diag Bas-Droite)
+            drawSeg(0x0001, () => { ctx.moveTo(2, 0); ctx.lineTo(w - 2, 0); });               // A (Plafond)
+            drawSeg(0x0002, () => { ctx.moveTo(w, 2); ctx.lineTo(w, m - 2); });               // B (Haut-Droite)
+            drawSeg(0x0004, () => { ctx.moveTo(w, m + 2); ctx.lineTo(w, h - 2); });           // C (Bas-Droite)
+            drawSeg(0x0008, () => { ctx.moveTo(2, h); ctx.lineTo(w - 2, h); });               // D (Sol)
+            drawSeg(0x0010, () => { ctx.moveTo(0, m + 2); ctx.lineTo(0, h - 2); });           // E (Bas-Gauche)
+            drawSeg(0x0020, () => { ctx.moveTo(0, 2); ctx.lineTo(0, m - 2); });               // F (Haut-Gauche)
+            
+            drawSeg(0x0040, () => { ctx.moveTo(2, m); ctx.lineTo(hw - 2, m); });              // G1 (Milieu-Gauche)
+            drawSeg(0x0800, () => { ctx.moveTo(hw + 2, m); ctx.lineTo(w - 2, m); });          // G2 (Milieu-Droite)
+            
+            drawSeg(0x0100, () => { ctx.moveTo(2, 2); ctx.lineTo(hw - 2, m - 2); });          // H (Diag Haut-Gauche \)
+            drawSeg(0x0200, () => { ctx.moveTo(hw, 2); ctx.lineTo(hw, m - 3); });             // I (Vertical Haut |)
+            drawSeg(0x0400, () => { ctx.moveTo(w - 2, 2); ctx.lineTo(hw + 2, m - 2); });      // J (Diag Haut-Droite /)
+            
+            drawSeg(0x4000, () => { ctx.moveTo(2, h - 2); ctx.lineTo(hw - 2, m + 2); });      // K (Diag Bas-Gauche /)
+            drawSeg(0x1000, () => { ctx.moveTo(w - 2, h - 2); ctx.lineTo(hw + 2, m + 2); });  // L (Diag Bas-Droite \)
+            drawSeg(0x2000, () => { ctx.moveTo(hw, h - 4); ctx.lineTo(hw, m + 3); });         // M (Vertical Bas |)
+            
+            drawSeg(0x0080, () => { ctx.moveTo(w + 2, h); ctx.lineTo(w + 6, h + 8); });       // Virgule
+            drawSeg(0x8000, () => { ctx.arc(w + 4, h, 2, 0, Math.PI*2); });                   // Point
 
             ctx.restore();
         }

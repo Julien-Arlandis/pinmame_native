@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V139.0 (MVC BINAIRE + ANTI-CRASH VIDÉO)
+// 🏷️ VERSION : API-CORE-GATEWAY-V140.0 (PASSAGE EN ET DECORATION 2x20)
 // =========================================================================
 
 #include <iostream>
@@ -21,18 +21,12 @@ extern "C" {
 #include "usrintrf.h"
 }
 
-// Tampon binaire d'export (Shared Memory)
 static uint8_t g_dummy_buffer[4096] = {0};
-static char g_display_text[100] = "Mode Binaire VFD Actif";
-
-// 🌟 RESTAURATION DU BOUCLIER ANTI-CRASH
+static char g_display_text[100] = "Mode Binaire VFD 2x20 Actif";
 static uint32_t g_font_security_anchor[100] = {0}; 
 
 extern "C" void emscripten_sleep(unsigned int ms);
 
-// =========================================================================
-// 🚨 DEFINITIONS GLOBALES ET ALIGNEMENT STRICT DES TYPES MAME
-// =========================================================================
 extern "C" {
     extern const struct GameDriver driver_bonebstr;
     struct GameDriver *drivers[] = {
@@ -46,7 +40,7 @@ extern "C" {
     extern int bailing;
     extern struct osd_bitmap *scrbitmap;
 
-    char build_version[] = "PinMAME-WASM-V139.0";
+    char build_version[] = "PinMAME-WASM-V140.0";
     int alpha_active = 0;
     int spriteram_size = 0;
     int spriteram_2_size = 0;
@@ -65,7 +59,6 @@ extern "C" {
     void* samples_interface = nullptr;
     int pdrawgfx_shadow_lowpri = 0; 
 
-    // 🌟 ANTI-CRASH : Faux bitmap actif pour tromper tilemap.c
     struct mame_bitmap *priority_bitmap = (struct mame_bitmap *)g_dummy_buffer; 
 
     char* rompath_extra = (char*)"/roms";
@@ -97,7 +90,6 @@ extern "C" {
     void osd_stop_audio_stream(void) {}
     void osd_sound_enable(int enable) {}
 
-    // 🌟 ANTI-CRASH : Restauration des pointeurs leurres
     struct GfxElement *builduifont(void) { return (struct GfxElement *)g_font_security_anchor; }
     struct osd_bitmap* artwork_get_ui_bitmap(void) { return (struct osd_bitmap*)g_dummy_buffer; }
     void init_user_interface(void) {} 
@@ -138,7 +130,6 @@ extern "C" {
     int artwork_create_display(int p1, int p2, int p3) { return 0; }
     void freegfx(struct GfxElement *gfx) {}
     
-    // 🌟 ANTI-CRASH : Pointe vers un leurre pour éviter l'exit(1)
     struct GfxElement *decodegfx(const unsigned char *src, const struct GfxLayout *gl) { return (struct GfxElement *)g_font_security_anchor; }
     
     int showcopyright(struct mame_bitmap *bitmap) { return 0; }
@@ -198,31 +189,32 @@ extern "C" {
     void* play2sIntf = nullptr;   void* play3sIntf = nullptr;   void* play4sIntf = nullptr;   void* zsuIntf = nullptr;      
     void* playzsIntf = nullptr;   void* tecnoplayIntf = nullptr; void* joctronicIntf = nullptr; void* barniIntf = nullptr;
 
-// =========================================================================
+    // =========================================================================
     // 💎 EXPORT BINAIRE ULTRA-RAPIDE VERS LA COUCHE JAVASCRIPT
     // =========================================================================
     void artwork_update_video_and_audio(void* display) {
         uint16_t* vfd_export = (uint16_t*)g_dummy_buffer;
 
-        for (int i = 0; i < 16; i++) {
-            // 🌟 FIX : On exporte le mot de 16 bits COMPLET (0xFFFF)
+        // 🌟 FIX 2x20 : On pousse la lecture à 20 caractères par ligne
+        for (int i = 0; i < 20; i++) {
+            // Ligne supérieure : indices 0 à 19
             vfd_export[i]      = coreGlobals.segments[i].w & 0xFFFF;
-            vfd_export[16 + i] = coreGlobals.segments[20 + i].w & 0xFFFF;
+            // Ligne inférieure : indices 20 à 39
+            vfd_export[20 + i] = coreGlobals.segments[20 + i].w & 0xFFFF;
         }
 
         emscripten_sleep(1);
     }
 
-    // EXPORTS DE CONTROLE RUNTIME WEB
     uint8_t* pinmame_get_gprom_ptr() { return g_dummy_buffer; }
-    uint8_t* pinmame_get_dsprom_ptr() { return g_dummy_buffer; } // Transmission du VFD
+    uint8_t* pinmame_get_dsprom_ptr() { return g_dummy_buffer; } 
     const char* pinmame_get_display() { return g_display_text; }
-    const char* pinmame_get_version() { return "PinMAME WebAssembly Core V139.0"; }
+    const char* pinmame_get_version() { return "PinMAME WebAssembly Core V140.0"; }
     void pinmame_web_entry(int gprom_size, int dsprom_size) {}
     void pinmame_web_tick(int cycles) {}
 
     void pinmame_web_boot() {
-        std::cout << "🎰 [⚡ V139.0 C++] Securite video restauree. Booting MAME Core..." << std::endl;
+        std::cout << "🎰 [⚡ V140.0 C++] Mode 2x20 Gottlieb actif." << std::endl;
         bailing = 0;
         run_game(0); 
     }

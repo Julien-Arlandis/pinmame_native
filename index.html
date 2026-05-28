@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Physical Switch Panel</title>
+    <title>PinMAME WASM - Auto-Initialized Switch Board</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -129,7 +129,6 @@
             cursor: default;
         }
         
-        /* 🌟 SEULE COULEUR DE SELECTION INTERRUPTEUR : LE VERT PHYSIQUE */
         .cell.sw-user { background: var(--neon-green) !important; color: #000 !important; box-shadow: 0 0 6px var(--neon-green); border-color: #fff; }
         .cell.lamp-on { background: #ffff00 !important; color: #000 !important; box-shadow: 0 0 8px #ffff00; border-color: #fff; }
         .cell.sol-on { background: var(--neon-red) !important; color: #fff !important; box-shadow: 0 0 10px var(--neon-red); border-color: #fff; }
@@ -192,6 +191,10 @@
 
         const userSwitchStates = new Array(80).fill(false);
 
+        const COIN_ID = 2;   
+        const START_ID = 3;  
+        const TEST_ID = 7;   
+
         const swGridEl = document.getElementById('swGrid');
         for (let i = 0; i < 80; i++) {
             const cell = document.createElement('div');
@@ -250,6 +253,15 @@
                 pinmameInstance = instance;
                 vfdMemoryPointer = instance._pinmame_get_dsprom_ptr();
 
+                // 🌟 FIX UNIVERSEL V150.0 : ININITIALISATION AUTOMATIQUE AVANT LE BOOT
+                // SW 04 = Slam Tilt (Fermé pour débloquer le CPU)
+                // SW 50, 51, 52 = Ball Trough (Présence des 3 billes requise)
+                const autoSwitches = [4, 50, 51, 52];
+                autoSwitches.forEach(swId => {
+                    userSwitchStates[swId] = true;
+                    applySwitchState(swId, true);
+                });
+
                 setupButtons();
 
                 function renderFrame() {
@@ -274,8 +286,6 @@
                         drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 40, mask1);
                         drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, mask2);
                     }
-
-                    // 🌟 NETTOYAGE : La boucle qui scannait la matrice mémoire orange a été éradiquée.
 
                     // Refresh Transistors Lampes
                     for (let col = 0; col < 12; col++) {
@@ -305,7 +315,7 @@
                 }
 
                 requestAnimationFrame(renderFrame);
-                statusEl.textContent = "🟢 PinMAME Analyzer Gate V147.0";
+                statusEl.textContent = "🟢 PinMAME Analyzer Gate V150.0 - Ready to Play";
                 statusEl.style.color = "#00ffcc";
                 instance._pinmame_web_boot();
 
@@ -314,33 +324,34 @@
             }
         }
 
+        // Configuration boutons
         function setupButtons() {
             const coinBtn = document.getElementById('coinBtn');
             const startBtn = document.getElementById('startBtn');
             const testBtn = document.getElementById('testBtn');
             
             window.addEventListener('keydown', (e) => {
-                if (e.key === '5') { applySwitchState(4, true); coinBtn.classList.add('forced-active'); }
-                if (e.key === '1') { applySwitchState(3, true); startBtn.classList.add('forced-active'); }
-                if (e.key === '7') { applySwitchState(7, true); testBtn.classList.add('forced-active'); }
+                if (e.key === '5') { applySwitchState(COIN_ID, true); coinBtn.classList.add('forced-active'); }
+                if (e.key === '1') { applySwitchState(START_ID, true); startBtn.classList.add('forced-active'); }
+                if (e.key === '7') { applySwitchState(TEST_ID, true); testBtn.classList.add('forced-active'); }
             });
             window.addEventListener('keyup', (e) => {
-                if (e.key === '5') { applySwitchState(4, false); coinBtn.classList.remove('forced-active'); }
-                if (e.key === '1') { applySwitchState(3, false); startBtn.classList.remove('forced-active'); }
-                if (e.key === '7') { applySwitchState(7, false); testBtn.classList.remove('forced-active'); }
+                if (e.key === '5') { applySwitchState(COIN_ID, false); coinBtn.classList.remove('forced-active'); }
+                if (e.key === '1') { applySwitchState(START_ID, false); startBtn.classList.remove('forced-active'); }
+                if (e.key === '7') { applySwitchState(TEST_ID, false); testBtn.classList.remove('forced-active'); }
             });
 
-            coinBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); applySwitchState(4, true); });
-            coinBtn.addEventListener('pointerup', (e) => { e.preventDefault(); applySwitchState(4, false); });
-            coinBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); applySwitchState(4, false); });
+            coinBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); applySwitchState(COIN_ID, true); });
+            coinBtn.addEventListener('pointerup', (e) => { e.preventDefault(); applySwitchState(COIN_ID, false); });
+            coinBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); applySwitchState(COIN_ID, false); });
 
-            startBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); applySwitchState(3, true); });
-            startBtn.addEventListener('pointerup', (e) => { e.preventDefault(); applySwitchState(3, false); });
-            startBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); applySwitchState(3, false); });
+            startBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); applySwitchState(START_ID, true); });
+            startBtn.addEventListener('pointerup', (e) => { e.preventDefault(); applySwitchState(START_ID, false); });
+            startBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); applySwitchState(START_ID, false); });
 
-            testBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); applySwitchState(7, true); });
-            testBtn.addEventListener('pointerup', (e) => { e.preventDefault(); applySwitchState(7, false); });
-            testBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); applySwitchState(7, false); });
+            testBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); applySwitchState(TEST_ID, true); });
+            testBtn.addEventListener('pointerup', (e) => { e.preventDefault(); applySwitchState(TEST_ID, false); });
+            testBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); applySwitchState(TEST_ID, false); });
         }
 
         function drawGottlieb14Segment(ctx, x, y, mask) {

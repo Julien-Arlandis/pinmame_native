@@ -55,7 +55,7 @@
             font-size: 1rem; 
             text-transform: uppercase; 
             letter-spacing: 1px; 
-            margin-bottom: 10px;
+            margin-bottom: 15px;
             text-align: center;
             font-weight: bold;
         }
@@ -134,19 +134,6 @@
         .cell.lamp-on { background: #ffff00 !important; color: #000 !important; box-shadow: 0 0 8px #ffff00; border-color: #fff; }
         .cell.sol-on { background: var(--neon-red) !important; color: #fff !important; box-shadow: 0 0 10px var(--neon-red); border-color: #fff; }
 
-        #versionTag {
-            position: fixed;
-            bottom: 12px;
-            right: 15px;
-            color: #252525; 
-            font-size: 0.75rem;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-            pointer-events: none;
-            font-weight: bold;
-            z-index: 9999;
-        }
-
         @media (max-width: 768px) {
             body { padding: 8px; }
             .dashboard { flex-direction: column; gap: 12px; }
@@ -155,7 +142,6 @@
             .grid-lamp { grid-template-columns: repeat(8, 1fr); gap: 3px; } 
             .grid-sol { grid-template-columns: repeat(4, 1fr); gap: 3px; }  
             .cell { padding: 8px 1px; font-size: 0.6rem; }
-            #versionTag { position: static; margin-top: 20px; color: #444; text-align: center; width: 100%; }
         }
     </style>
 </head>
@@ -189,15 +175,12 @@
         </div>
     </div>
 
-    <div id="versionTag">LOGIC GATE V144.0</div>
-
     <script src="pinmame_web.js"></script>
 
     <script>
         const canvas = document.getElementById('vfdCanvas');
         const ctx = canvas.getContext('2d');
         const statusEl = document.getElementById('status');
-        const versionTagEl = document.getElementById('versionTag');
 
         const CHAR_WIDTH = 40; const CHAR_HEIGHT = 70; const SPACING = 15;
         let pinmameInstance = null;
@@ -261,26 +244,26 @@
                 pinmameInstance = instance;
                 vfdMemoryPointer = instance._pinmame_get_dsprom_ptr();
 
-                // 🌟 LECTEUR SECURISÉ OCTET PAR OCTET DE LA VERSION C++ (ANTI-CRASH)
+                // 🌟 EXTRACTEUR BI-DIRECTIONNEL DE VERSION (VALEUR PAR DÉFAUT EN V145.0)
+                let versionStr = "PinMAME Analyzer Gate V145.0";
                 try {
                     if (instance._pinmame_get_version) {
                         const ptr = instance._pinmame_get_version();
-                        let versionStr = "";
+                        let nativeVersion = "";
                         let idx = 0;
                         while (instance.HEAPU8[ptr + idx] !== 0 && idx < 100) {
-                            versionStr += String.fromCharCode(instance.HEAPU8[ptr + idx]);
+                            nativeVersion += String.fromCharCode(instance.HEAPU8[ptr + idx]);
                             idx++;
                         }
-                        if (versionStr) versionTagEl.textContent = versionStr;
+                        if (nativeVersion) versionStr = nativeVersion;
                     }
                 } catch(e) {
-                    console.log("Extraction string native impossible, conservation du tag de secours.");
+                    console.log("Lecture de version native impossible.");
                 }
 
                 setupButtons();
 
                 function renderFrame() {
-                    // Sécurité d'initialisation mémoire
                     if (!pinmameInstance || !vfdMemoryPointer) {
                         requestAnimationFrame(renderFrame);
                         return;
@@ -289,7 +272,7 @@
                     const heap = pinmameInstance.HEAPU8;
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                    // 1. Lecture VFD sécurisée
+                    // Refresh VFD
                     for (let i = 0; i < 20; i++) {
                         const low1 = heap[vfdMemoryPointer + (i * 2)];
                         const high1 = heap[vfdMemoryPointer + (i * 2) + 1];
@@ -303,7 +286,7 @@
                         drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, mask2);
                     }
 
-                    // 2. Feedback Switch Matrix
+                    // Refresh Switch Matrix Feedback
                     for (let sw = 0; sw < 80; sw++) {
                         const byteIdx = Math.floor(sw / 8);
                         const bitIdx = sw % 8;
@@ -312,7 +295,7 @@
                         else swCells[sw].classList.remove('sw-cpu');
                     }
 
-                    // 3. Transistors Lampes
+                    // Refresh Transistors Lampes
                     for (let col = 0; col < 12; col++) {
                         const colByte = heap[vfdMemoryPointer + 300 + col];
                         for (let row = 0; row < 8; row++) {
@@ -323,7 +306,7 @@
                         }
                     }
 
-                    // 4. Lecture Bobines par reconstruction sécurisée
+                    // Refresh Solénoïdes
                     const b0 = heap[vfdMemoryPointer + 320];
                     const b1 = heap[vfdMemoryPointer + 321];
                     const b2 = heap[vfdMemoryPointer + 322];
@@ -340,11 +323,16 @@
                 }
 
                 requestAnimationFrame(renderFrame);
-                statusEl.textContent = "🟢 Système d'analyse en ligne";
+                
+                // 🌟 REMPLACEMENT DU MESSAGE DE STATUT PAR LA VERSION EXTRAITE (EN HAUT)
+                statusEl.textContent = "🟢 " + versionStr;
+                statusEl.style.color = "#00ffcc";
+                
                 instance._pinmame_web_boot();
 
             } catch (err) {
                 statusEl.textContent = "🔴 ERREUR CRITIQUE : " + err.message;
+                statusEl.style.color = "#ff0055";
             }
         }
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Responsive Board Analyzer</title>
+    <title>PinMAME WASM - Full Logic & Driver Analyzer</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -24,8 +24,7 @@
             justify-content: flex-start; 
             min-height: 100vh; 
             margin: 0; 
-            padding: 15px;
-            box-sizing: border-box;
+            padding: 20px;
             overflow-x: hidden;
             -webkit-user-select: none;
             -moz-user-select: none;
@@ -33,7 +32,6 @@
             user-select: none;
         }
 
-        /* 🌟 RETINA & MOBILE CANVAS SCALING */
         .canvas-container {
             width: 100%;
             max-width: 1150px;
@@ -47,8 +45,8 @@
             border-radius: 8px; 
             box-shadow: 0 0 25px rgba(0, 255, 255, 0.12); 
             image-rendering: pixelated; 
-            width: 100%; /* S'adapte dynamiquement à la largeur du téléphone */
-            height: auto; /* Conserve le ratio géométrique 1150x250 */
+            width: 100%; 
+            height: auto; 
             display: block;
         }
 
@@ -62,12 +60,11 @@
             font-weight: bold;
         }
         
-        /* Panneau Arcade Unifié */
         .arcade-panel { 
             display: flex; 
-            gap: 20px; 
+            gap: 15px; 
             width: 100%;
-            max-width: 500px;
+            max-width: 650px;
             justify-content: center;
             background: var(--bg-box); 
             padding: 12px; 
@@ -89,15 +86,21 @@
             transition: all 0.05s ease; 
             touch-action: none; 
             cursor: pointer;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
         }
         .btn:active, .btn.forced-active { transform: translateY(3px); box-shadow: 0 1px #000; }
         .btn-coin { background-color: #ffcc00; color: #000; }
         .btn-start { background-color: #ff0044; color: #fff; }
+        /* Style distinct pour le bouton de diagnostic */
+        .btn-test { background-color: #0099ff; color: #fff; box-shadow: 0 4px #0044aa; }
+        .btn-test:active, .btn-test.forced-active { box-shadow: 0 1px #0044aa; }
 
-        /* 🌟 ARCHITECTURE DES TABLEAUX DE BORD FLEXIBLE */
         .dashboard { 
             display: flex; 
-            flex-direction: row; /* Côte à côte sur PC */
+            flex-direction: row; 
             gap: 15px; 
             max-width: 1150px; 
             width: 100%; 
@@ -114,7 +117,6 @@
         .box-title { color: var(--neon-cyan); text-transform: uppercase; font-size: 0.8rem; margin-bottom: 10px; letter-spacing: 1px; font-weight: bold;}
         .sub-title { color: #777; font-size: 0.7rem; margin: 8px 0 4px 0; font-weight: bold;}
         
-        /* Grilles d'analyse */
         .grid-sw { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; touch-action: none; }
         .grid-lamp { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; }
         .grid-sol { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
@@ -130,32 +132,39 @@
             text-align: center; 
             touch-action: none; 
             cursor: default;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
         }
         
-        /* Micro-animations et néons */
         .cell.sw-user { background: #00ff44 !important; color: #000 !important; box-shadow: 0 0 6px #00ff44; border-color: #fff; }
         .cell.sw-cpu { background: var(--neon-orange) !important; color: #000 !important; font-weight: bold; }
         .cell.lamp-on { background: #ffff00 !important; color: #000 !important; box-shadow: 0 0 8px #ffff00; border-color: #fff; }
         .cell.sol-on { background: var(--neon-red) !important; color: #fff !important; box-shadow: 0 0 10px var(--neon-red); border-color: #fff; }
 
-        /* 📱 COMPRESSIONS EXTRIEVES POUR MODE MOBILE (SMARTPHONES) */
+        #versionTag {
+            position: fixed;
+            bottom: 12px;
+            right: 15px;
+            color: #252525; 
+            font-size: 0.75rem;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            pointer-events: none;
+            font-weight: bold;
+            z-index: 9999;
+        }
+
         @media (max-width: 768px) {
             body { padding: 8px; }
-            .dashboard { 
-                flex-direction: column; /* On empile les boîtes verticalement sur smartphone */
-                gap: 12px; 
-            }
+            .dashboard { flex-direction: column; gap: 12px; }
             .panel-box { padding: 10px; }
-            
-            /* Ajustement des colonnes pour éviter l'écrasement du texte */
             .grid-sw { grid-template-columns: repeat(8, 1fr); gap: 3px; }
-            .grid-lamp { grid-template-columns: repeat(8, 1fr); gap: 3px; } /* Passe de 12 à 8 colonnes pour rester lisible */
-            .grid-sol { grid-template-columns: repeat(4, 1fr); gap: 3px; }  /* Passe de 8 à 4 colonnes */
-            
-            .cell { 
-                padding: 8px 1px; /* Boutons légèrement plus hauts pour faciliter le ciblage au doigt */
-                font-size: 0.6rem; 
-            }
+            .grid-lamp { grid-template-columns: repeat(8, 1fr); gap: 3px; } 
+            .grid-sol { grid-template-columns: repeat(4, 1fr); gap: 3px; }  
+            .cell { padding: 8px 1px; font-size: 0.6rem; }
+            #versionTag { position: static; margin-top: 20px; color: #444; text-align: center; width: 100%; }
         }
     </style>
 </head>
@@ -169,7 +178,8 @@
 
     <div class="arcade-panel">
         <button id="coinBtn" class="btn btn-coin">Coin 1 [5]</button>
-        <button id="startBtn" class="btn btn-start">Start Game [1]</button>
+        <button id="startBtn" class="btn btn-start">Start [1]</button>
+        <button id="testBtn" class="btn btn-test">Test [7]</button>
     </div>
 
     <div class="dashboard">
@@ -188,12 +198,15 @@
         </div>
     </div>
 
+    <div id="versionTag">LOGIC GATE V143.0</div>
+
     <script src="pinmame_web.js"></script>
 
     <script>
         const canvas = document.getElementById('vfdCanvas');
         const ctx = canvas.getContext('2d');
         const statusEl = document.getElementById('status');
+        const versionTagEl = document.getElementById('versionTag');
 
         const CHAR_WIDTH = 40; const CHAR_HEIGHT = 70; const SPACING = 15;
         let pinmameInstance = null;
@@ -257,6 +270,16 @@
                 pinmameInstance = instance;
                 vfdMemoryPointer = instance._pinmame_get_dsprom_ptr();
 
+                try {
+                    if (instance.UTF8ToString && instance._pinmame_get_version) {
+                        versionTagEl.textContent = instance.UTF8ToString(instance._pinmame_get_version());
+                    } else if (instance.Pointer_stringify && instance._pinmame_get_version) {
+                        versionTagEl.textContent = instance.Pointer_stringify(instance._pinmame_get_version());
+                    }
+                } catch(e) {
+                    console.log("Extraction de version native non supportée, fallback standard.");
+                }
+
                 setupButtons();
 
                 function renderFrame() {
@@ -307,14 +330,17 @@
         function setupButtons() {
             const coinBtn = document.getElementById('coinBtn');
             const startBtn = document.getElementById('startBtn');
+            const testBtn = document.getElementById('testBtn');
             
             window.addEventListener('keydown', (e) => {
                 if (e.key === '5') { injectSwitch(4, true); coinBtn.classList.add('forced-active'); }
                 if (e.key === '1') { injectSwitch(3, true); startBtn.classList.add('forced-active'); }
+                if (e.key === '7') { injectSwitch(7, true); testBtn.classList.add('forced-active'); }
             });
             window.addEventListener('keyup', (e) => {
                 if (e.key === '5') { injectSwitch(4, false); coinBtn.classList.remove('forced-active'); }
                 if (e.key === '1') { injectSwitch(3, false); startBtn.classList.remove('forced-active'); }
+                if (e.key === '7') { injectSwitch(7, false); testBtn.classList.remove('forced-active'); }
             });
 
             coinBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); injectSwitch(4, true); });
@@ -324,6 +350,10 @@
             startBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); injectSwitch(3, true); });
             startBtn.addEventListener('pointerup', (e) => { e.preventDefault(); injectSwitch(3, false); });
             startBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); injectSwitch(3, false); });
+
+            testBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); injectSwitch(7, true); });
+            testBtn.addEventListener('pointerup', (e) => { e.preventDefault(); injectSwitch(7, false); });
+            testBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); injectSwitch(7, false); });
         }
 
         function drawGottlieb14Segment(ctx, x, y, mask) {

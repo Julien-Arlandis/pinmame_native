@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Full Logic & Driver Analyzer</title>
+    <title>PinMAME WASM - Physical Switch Panel</title>
     <style>
         :root {
             --bg-main: #050505;
             --bg-box: #111;
             --border-color: #252525;
             --neon-cyan: #00ffff;
-            --neon-orange: #ff9900;
+            --neon-green: #00ff44;
             --neon-red: #ff3300;
         }
 
@@ -129,8 +129,8 @@
             cursor: default;
         }
         
-        .cell.sw-user { background: #00ff44 !important; color: #000 !important; box-shadow: 0 0 6px #00ff44; border-color: #fff; }
-        .cell.sw-cpu { background: var(--neon-orange) !important; color: #000 !important; font-weight: bold; }
+        /* 🌟 SEULE COULEUR DE SELECTION INTERRUPTEUR : LE VERT PHYSIQUE */
+        .cell.sw-user { background: var(--neon-green) !important; color: #000 !important; box-shadow: 0 0 6px var(--neon-green); border-color: #fff; }
         .cell.lamp-on { background: #ffff00 !important; color: #000 !important; box-shadow: 0 0 8px #ffff00; border-color: #fff; }
         .cell.sol-on { background: var(--neon-red) !important; color: #fff !important; box-shadow: 0 0 10px var(--neon-red); border-color: #fff; }
 
@@ -161,7 +161,7 @@
 
     <div class="dashboard">
         <div class="panel-box">
-            <div class="box-title">🔌 Matrice Entrées (Switchs 00-79)</div>
+            <div class="box-title">🔌 Panneau des Switchs Physiques (00-79)</div>
             <div id="swGrid" class="grid-sw"></div>
         </div>
 
@@ -190,7 +190,6 @@
         const lampCells = [];
         const solCells = [];
 
-        // 🌟 TABLEAU DE MEMORISATION PURE DES SWITCHS MATRICIELS (TOGGLES)
         const userSwitchStates = new Array(80).fill(false);
 
         const swGridEl = document.getElementById('swGrid');
@@ -199,10 +198,9 @@
             cell.className = 'cell';
             cell.textContent = String(i).padStart(2, '0');
             
-            // 🌟 COMPORTEMENT EN INTERRUPTEUR DE VERROUILLAGE (TOGGLE) SUR LE BANC DE TEST
             cell.addEventListener('pointerdown', (e) => { 
                 e.preventDefault(); 
-                userSwitchStates[i] = !userSwitchStates[i]; // Inversion de l'état (ON <-> OFF)
+                userSwitchStates[i] = !userSwitchStates[i];
                 applySwitchState(i, userSwitchStates[i]);
             });
             
@@ -252,20 +250,6 @@
                 pinmameInstance = instance;
                 vfdMemoryPointer = instance._pinmame_get_dsprom_ptr();
 
-                let versionStr = "PinMAME Analyzer Gate V146.0";
-                try {
-                    if (instance._pinmame_get_version) {
-                        const ptr = instance._pinmame_get_version();
-                        let nativeVersion = "";
-                        let idx = 0;
-                        while (instance.HEAPU8[ptr + idx] !== 0 && idx < 100) {
-                            nativeVersion += String.fromCharCode(instance.HEAPU8[ptr + idx]);
-                            idx++;
-                        }
-                        if (nativeVersion) versionStr = nativeVersion.replace("V145.0", "V146.0");
-                    }
-                } catch(e) {}
-
                 setupButtons();
 
                 function renderFrame() {
@@ -291,14 +275,7 @@
                         drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, mask2);
                     }
 
-                    // Refresh Switch Matrix Feedback
-                    for (let sw = 0; sw < 80; sw++) {
-                        const byteIdx = Math.floor(sw / 8);
-                        const bitIdx = sw % 8;
-                        const isCpuActive = (heap[vfdMemoryPointer + 200 + byteIdx] & (1 << bitIdx)) !== 0;
-                        if (isCpuActive) swCells[sw].classList.add('sw-cpu');
-                        else swCells[sw].classList.remove('sw-cpu');
-                    }
+                    // 🌟 NETTOYAGE : La boucle qui scannait la matrice mémoire orange a été éradiquée.
 
                     // Refresh Transistors Lampes
                     for (let col = 0; col < 12; col++) {
@@ -328,7 +305,7 @@
                 }
 
                 requestAnimationFrame(renderFrame);
-                statusEl.textContent = "🟢 " + versionStr;
+                statusEl.textContent = "🟢 PinMAME Analyzer Gate V147.0";
                 statusEl.style.color = "#00ffcc";
                 instance._pinmame_web_boot();
 
@@ -342,7 +319,6 @@
             const startBtn = document.getElementById('startBtn');
             const testBtn = document.getElementById('testBtn');
             
-            // Les boutons physiques de la carrosserie restent éphémères (momentary)
             window.addEventListener('keydown', (e) => {
                 if (e.key === '5') { applySwitchState(4, true); coinBtn.classList.add('forced-active'); }
                 if (e.key === '1') { applySwitchState(3, true); startBtn.classList.add('forced-active'); }
@@ -367,7 +343,6 @@
             testBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); applySwitchState(7, false); });
         }
 
-        // Dessin vectoriel 14 segments
         function drawGottlieb14Segment(ctx, x, y, mask) {
             ctx.save(); ctx.translate(x, y); ctx.transform(1, 0, -0.15, 1, 0, 0); 
             ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';

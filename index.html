@@ -2,35 +2,36 @@
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>PinMAME WASM - Full Logic & Driver Analyzer</title>
     <style>
-        body { background-color: #050505; color: #fff; font-family: monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 20px;}
-        canvas { background-color: #0a1111; border: 4px solid #222; border-radius: 10px; box-shadow: 0 0 30px rgba(0, 255, 255, 0.15); image-rendering: pixelated; }
-        #status { color: #ffcc00; font-size: 1.2rem; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 15px;}
+        body { background-color: #050505; color: #fff; font-family: monospace; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; padding: 10px;}
+        canvas { background-color: #0a1111; border: 4px solid #222; border-radius: 10px; box-shadow: 0 0 30px rgba(0, 255, 255, 0.15); image-rendering: pixelated; max-width: 100%; height: auto; }
+        #status { color: #ffcc00; font-size: 1.1rem; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 15px; text-align: center;}
         
-        .arcade-panel { display: flex; gap: 30px; margin-top: 15px; background: #111; padding: 12px 30px; border-radius: 10px; border: 2px solid #222; }
-        .btn { padding: 10px 20px; font-size: 0.95rem; font-weight: bold; font-family: monospace; text-transform: uppercase; border: none; border-radius: 50px; cursor: pointer; box-shadow: 0 4px #000; transition: all 0.05s ease; user-select: none; }
-        .btn:all { transform: translateY(3px); box-shadow: 0 1px #000; }
+        .arcade-panel { display: flex; gap: 20px; margin-top: 15px; background: #111; padding: 12px 30px; border-radius: 10px; border: 2px solid #222; }
+        .btn { padding: 12px 22px; font-size: 0.95rem; font-weight: bold; font-family: monospace; text-transform: uppercase; border: none; border-radius: 50px; cursor: pointer; box-shadow: 0 4px #000; transition: all 0.05s ease; user-select: none; touch-action: none; }
+        .btn:active, .btn.forced-active { transform: translateY(3px); box-shadow: 0 1px #000; }
         .btn-coin { background-color: #ffcc00; color: #000; }
         .btn-start { background-color: #ff0044; color: #fff; }
 
-        /* Conteneurs des matrices */
-        .dashboard { display: flex; gap: 20px; margin-top: 20px; max-width: 1150px; width: 1150px; }
-        .panel-box { background: #111; border: 2px solid #252525; padding: 15px; border-radius: 8px; flex: 1; }
+        /* Conteneurs des matrices réponsives */
+        .dashboard { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px; max-width: 1150px; width: 100%; }
+        .panel-box { background: #111; border: 2px solid #252525; padding: 15px; border-radius: 8px; flex: 1; min-width: 300px; }
         .box-title { color: #00ffcc; text-transform: uppercase; font-size: 0.85rem; margin-bottom: 12px; letter-spacing: 1px; font-weight: bold;}
         
-        /* Grilles */
-        .grid-sw { display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; }
+        /* Grilles avec blocage du défilement tactile */
+        .grid-sw { display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; touch-action: none; }
         .grid-lamp { display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px; }
         .grid-sol { display: grid; grid-template-columns: repeat(8, 1fr); gap: 5px; margin-top: 10px; }
 
-        .cell { background: #161616; border: 1px solid #2a2a2a; color: #555; padding: 6px 2px; font-size: 0.7rem; font-weight: bold; border-radius: 3px; text-align: center; }
+        .cell { background: #161616; border: 1px solid #2a2a2a; color: #555; padding: 8px 2px; font-size: 0.7rem; font-weight: bold; border-radius: 3px; text-align: center; user-select: none; touch-action: none; }
         
         /* États logiques switchs */
         .cell.sw-user { background: #00ff44 !important; color: #000 !important; box-shadow: 0 0 8px #00ff44; }
         .cell.sw-cpu { background: #ff9900 !important; color: #000 !important; }
 
-        /* 🌟 ÉTATS THERMIQUES TRANSISTORS (OUTPUTS) */
+        /* États thermiques transistors (Outputs) */
         .cell.lamp-on { background: #ffff00 !important; color: #000 !important; border-color: #fff; box-shadow: 0 0 10px #ffff00; }
         .cell.sol-on { background: #ff3300 !important; color: #fff !important; border-color: #fff; box-shadow: 0 0 12px #ff3300; }
     </style>
@@ -85,14 +86,17 @@
             const cell = document.createElement('div');
             cell.className = 'cell';
             cell.textContent = String(i).padStart(2, '0');
-            cell.addEventListener('mousedown', () => injectSwitch(i, true));
-            cell.addEventListener('mouseup', () => injectSwitch(i, false));
-            cell.addEventListener('mouseleave', () => injectSwitch(i, false));
+            
+            // 🌟 FIX POINTER EVENTS POUR MOBILE SMARTPHONE
+            cell.addEventListener('pointerdown', (e) => { e.preventDefault(); injectSwitch(i, true); });
+            cell.addEventListener('pointerup', (e) => { e.preventDefault(); injectSwitch(i, false); });
+            cell.addEventListener('pointerleave', (e) => { e.preventDefault(); injectSwitch(i, false); });
+            
             swGridEl.appendChild(cell);
             swCells.push(cell);
         }
 
-        // Construction Grille Lampes (12 Colonnes x 8 Lignes = 96)
+        // Construction Grille Lampes (96)
         const lampGridEl = document.getElementById('lampGrid');
         for (let i = 0; i < 96; i++) {
             const cell = document.createElement('div');
@@ -139,7 +143,6 @@
                 setupButtons();
 
                 function renderFrame() {
-                    // 1. Refresh Affichage VFD
                     const vfdData = new Uint16Array(pinmameInstance.HEAPU8.buffer, vfdMemoryPointer, 40);
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                     for (let i = 0; i < 20; i++) {
@@ -147,7 +150,6 @@
                         drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, vfdData[20 + i]);
                     }
 
-                    // 2. Refresh Switch Matrix Feedback (Offset 200)
                     for (let sw = 0; sw < 80; sw++) {
                         const byteIdx = Math.floor(sw / 8);
                         const bitIdx = sw % 8;
@@ -156,7 +158,6 @@
                         else swCells[sw].classList.remove('sw-cpu');
                     }
 
-                    // 3. 🌟 REFRESH TRANSISTORS LAMPES (Offset 300)
                     for (let col = 0; col < 12; col++) {
                         const colByte = pinmameInstance.HEAPU8[vfdMemoryPointer + 300 + col];
                         for (let row = 0; row < 8; row++) {
@@ -167,8 +168,6 @@
                         }
                     }
 
-                    // 4. 🌟 REFRESH TRANSISTORS BOBINES SOLENOIDES (Offset 320)
-                    // Lecture du mot de 32 bits
                     const solWord = new Uint32Array(pinmameInstance.HEAPU8.buffer, vfdMemoryPointer + 320, 1)[0];
                     for (let s = 0; s < 32; s++) {
                         const isSolOn = (solWord & (1 << s)) !== 0;
@@ -192,6 +191,7 @@
             const coinBtn = document.getElementById('coinBtn');
             const startBtn = document.getElementById('startBtn');
             
+            // Événements clavier (Desktop toujours actif)
             window.addEventListener('keydown', (e) => {
                 if (e.key === '5') { injectSwitch(4, true); coinBtn.classList.add('forced-active'); }
                 if (e.key === '1') { injectSwitch(3, true); startBtn.classList.add('forced-active'); }
@@ -201,10 +201,14 @@
                 if (e.key === '1') { injectSwitch(3, false); startBtn.classList.remove('forced-active'); }
             });
 
-            coinBtn.addEventListener('mousedown', () => injectSwitch(4, true));
-            coinBtn.addEventListener('mouseup', () => injectSwitch(4, false));
-            startBtn.addEventListener('mousedown', () => injectSwitch(3, true));
-            startBtn.addEventListener('mouseup', () => injectSwitch(3, false));
+            // 🌟 FIX POINTER EVENTS POUR BOUTONS ARCADE SUR SMARTPHONE
+            coinBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); injectSwitch(4, true); });
+            coinBtn.addEventListener('pointerup', (e) => { e.preventDefault(); injectSwitch(4, false); });
+            coinBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); injectSwitch(4, false); });
+
+            startBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); injectSwitch(3, true); });
+            startBtn.addEventListener('pointerup', (e) => { e.preventDefault(); injectSwitch(3, false); });
+            startBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); injectSwitch(3, false); });
         }
 
         function drawGottlieb14Segment(ctx, x, y, mask) {

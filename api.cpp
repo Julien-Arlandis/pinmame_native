@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V142.0 (SWITCH MATRIX ANALYZER BRIDGE)
+// 🏷️ VERSION : API-CORE-GATEWAY-V143.0 (DRIVER BOARD TRANSISTOR MATRIX)
 // =========================================================================
 
 #include <iostream>
@@ -23,10 +23,12 @@ extern "C" {
 
 // Tampon binaire d'export (Shared Memory)
 // Octets 0-79   : Données VFD 2x20
-// Octets 100-179: Switchs forcés par JS (0 = Relâché, 1 = Pressé)
-// Octets 200-209: Lecture de la matrice matérielle réelle pour l'analyseur JS
+// Octets 100-179: Switchs forcés par JS (Inputs)
+// Octets 200-209: Feedback Switch Matrix (C++ -> JS)
+// Octets 300-311: Matrice des Transistors Lampes (12 cols x 8 bits)
+// Octets 320-323: Registre des Transistors Bobines (32 bits)
 static uint8_t g_dummy_buffer[4096] = {0};
-static char g_display_text[100] = "Analyseur de Matrice Actif";
+static char g_display_text[100] = "Analyseur Global Actif";
 static uint32_t g_font_security_anchor[100] = {0}; 
 
 extern "C" void emscripten_sleep(unsigned int ms);
@@ -44,7 +46,7 @@ extern "C" {
     extern int bailing;
     extern struct osd_bitmap *scrbitmap;
 
-    char build_version[] = "PinMAME-WASM-V142.0";
+    char build_version[] = "PinMAME-WASM-V143.0";
     int alpha_active = 0;
     int spriteram_size = 0;
     int spriteram_2_size = 0;
@@ -193,27 +195,34 @@ extern "C" {
     void* playzsIntf = nullptr;   void* tecnoplayIntf = nullptr; void* joctronicIntf = nullptr; void* barniIntf = nullptr;
 
     // =========================================================================
-    // 💎 INTERCEPTIONS DE LA MATRICE ET ENVOI VIDEO
+    // 💎 INTERCEPTIONS DES ENTRÉES/SORTIES ET ENVOI VIDÉO MULTIPLEXÉ
     // =========================================================================
     void artwork_update_video_and_audio(void* display) {
-        // 1. Mise à jour de la vidéo VFD 2x20
+        // 1. Vidéo VFD 2x20
         uint16_t* vfd_export = (uint16_t*)g_dummy_buffer;
         for (int i = 0; i < 20; i++) {
             vfd_export[i]      = coreGlobals.segments[i].w & 0xFFFF;
             vfd_export[20 + i] = coreGlobals.segments[20 + i].w & 0xFFFF;
         }
 
-        // 2. 🌟 INJECTION DES INJECTS DE SWITCH MATRIX (JS -> C++)
-        // On scanne les switchs 0 à 79 envoyés depuis l'offset 100
+        // 2. Injection Matrix Switchs (JS -> C++)
         for (int sw = 0; sw < 80; sw++) {
             core_setSw(sw, g_dummy_buffer[100 + sw]);
         }
 
-        // 3. 🌟 EXPORT DE LA VRAIE MATRICE INTERNE (C++ -> JS)
-        // coreGlobals.swMatrix est un tableau d'octets (8 bits par colonne/ligne)
+        // 3. Feedback Matrix Switchs (C++ -> JS)
         for (int b = 0; b < 10; b++) {
             g_dummy_buffer[200 + b] = coreGlobals.swMatrix[b];
         }
+
+        // 4. 🌟 EXPORT MATRICE TRANSISTORS LAMPES (C++ -> JS) [Offset 300]
+        for (int l = 0; l < 12; l++) {
+            g_dummy_buffer[300 + l] = coreGlobals.lampMatrix[l];
+        }
+
+        // 5. 🌟 EXPORT TRANSISTORS BOBINES SOLENOIDES (C++ -> JS) [Offset 320]
+        uint32_t solenoids_state = coreGlobals.solenoids;
+        memcpy(&g_dummy_buffer[320], &solenoids_state, 4);
 
         emscripten_sleep(1);
     }
@@ -221,12 +230,12 @@ extern "C" {
     uint8_t* pinmame_get_gprom_ptr() { return g_dummy_buffer; }
     uint8_t* pinmame_get_dsprom_ptr() { return g_dummy_buffer; } 
     const char* pinmame_get_display() { return g_display_text; }
-    const char* pinmame_get_version() { return "PinMAME Switch Matrix Analyzer V142.0"; }
+    const char* pinmame_get_version() { return "PinMAME Analyzer Gate V143.0"; }
     void pinmame_web_entry(int gprom_size, int dsprom_size) {}
     void pinmame_web_tick(int cycles) {}
 
     void pinmame_web_boot() {
-        std::cout << "🎰 [⚡ V142.0 C++] Mode Analyseur Logique de Matrice Initialise." << std::endl;
+        std::cout << "🎰 [⚡ V143.0 C++] Export de la carte Driver (Transistors Matrix) operationnel." << std::endl;
         bailing = 0;
         run_game(0); 
     }

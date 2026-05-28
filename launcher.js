@@ -1,88 +1,91 @@
+// =========================================================================
+// 🚀 INFRASTRUCTURE PINMAME WASM - RUNTIME ENGINE LANCIER NODE.JS
+// 🏷️ VERSION : LAUNCHER-NODE-HEADLESS-V57.0
+// =========================================================================
+
 const fs = require('fs');
-const zlib = require('zlib');
+const path = require('path');
 const createPinMAME = require('./pinmame_web.js');
 
-console.log("==================================================");
-console.log("[🚀] Amorce du moteur officiel PinMAME Headless...");
-console.log("==================================================");
+const VERSION_HOTE = "V57.0";
 
-function extractExactFile(zipBuffer, targetPath) {
-    let offset = 0;
-    while (offset < zipBuffer.length) {
-        const signature = zipBuffer.readUInt32LE(offset);
-        if (signature !== 0x04034b50) break;
-        const fileNameLength = zipBuffer.readUInt16LE(offset + 26);
-        const extraFieldLength = zipBuffer.readUInt16LE(offset + 28);
-        const compressionMethod = zipBuffer.readUInt16LE(offset + 8);
-        const compressedSize = zipBuffer.readUInt32LE(offset + 18);
-        const currentFilename = zipBuffer.toString('utf8', offset + 30, offset + 30 + fileNameLength);
-        const dataOffset = offset + 30 + fileNameLength + extraFieldLength;
-
-        if (currentFilename.toLowerCase() === targetPath.toLowerCase() || 
-            currentFilename.toLowerCase().endsWith(targetPath.toLowerCase())) {
-            const compressedData = zipBuffer.slice(dataOffset, dataOffset + compressedSize);
-            if (compressionMethod === 0) return compressedData;
-            if (compressionMethod === 8) return zlib.inflateRawSync(compressedData);
-        }
-        offset = dataOffset + compressedSize;
+function readStringFromWasm(instance, pointer) {
+    if (!pointer) return "";
+    let result = "";
+    let offset = pointer;
+    while (instance.HEAPU8[offset] !== 0) {
+        result += String.fromCharCode(instance.HEAPU8[offset]);
+        offset++;
     }
-    return null;
+    return result;
 }
 
-createPinMAME().then((Module) => {
-    console.log("[✅] Module WebAssembly chargé.");
+const outputModule = {
+    print: function(text) {
+        console.log(`[🎰 PINMAME-CORE V${VERSION_HOTE}] ${text}`);
+    },
+    printErr: function(text) {
+        console.error(`[🚨 PINMAME-WARN V${VERSION_HOTE}] ${text}`);
+    },
+    onAbort: function(what) {
+        console.error("==================================================");
+        console.error(`[💥 CRASH INTERCEPTÉ V${VERSION_HOTE}] Le moteur WebAssembly a avorté !`);
+        console.error(`Raison : ${what}`);
+        console.error("==================================================");
+    }
+};
 
-    // 1. Déclaration des passerelles Cwrap
-    const pinmameWebEntry   = Module.cwrap('pinmame_web_entry', null, ['number', 'number']);
-    const pinmameWebBoot    = Module.cwrap('pinmame_web_boot', null, []);
-    const pinmameGetDisplay = Module.cwrap('pinmame_get_display', 'string', []);
-
-    // Allocation initiale du pont
-    pinmameWebEntry(8192, 4096);
+async function main() {
+    console.log("==================================================");
+    console.log(`[🚀] Amorce du moteur officiel PinMAME Headless - VERSION ${VERSION_HOTE}`);
+    console.log("==================================================");
 
     try {
-        const zipBuffer = fs.readFileSync('./roms/bonebstr.zip');
-        
-        // Extraction des puces CPU requises par run_game()
-        const prom1Buf = extractExactFile(zipBuffer, 'prom1.cpu');
-        const prom2Buf = extractExactFile(zipBuffer, 'prom2.cpu');
+        const instance = await createPinMAME(outputModule);
+        console.log(`[✅] Module WebAssembly chargé avec succès (Runtime ${VERSION_HOTE}).`);
 
-        if (prom1Buf && prom2Buf) {
-            // Écriture forcée à la racine du VFS virtuel d'Emscripten
-            Module.FS.writeFile('prom1.cpu', prom1Buf);
-            Module.FS.writeFile('prom2.cpu', prom2Buf);
-            console.log("  -> [📦 VFS] Puces prom1.cpu et prom2.cpu montées avec succès.");
-        } else {
-            console.error("[❌ HÔTE] Fichiers ROM corrompus ou manquants.");
+        const vfsRomDir = '/roms';
+        const hostZipPath = path.join(__dirname, 'roms', 'bonebstr.zip');
+
+        if (!fs.existsSync(hostZipPath)) {
+            console.error(`[❌ HÔTE V${VERSION_HOTE}] Fichier de ROM introuvable sur le disque : ${hostZipPath}`);
             process.exit(1);
         }
 
-    } catch(err) {
-        console.error("[❌ HÔTE] Échec du montage VFS :", err.message);
+        try {
+            instance.FS.mkdir(vfsRomDir);
+        } catch (e) {}
+
+        const zipData = fs.readFileSync(hostZipPath);
+        instance.FS.writeFile(`${vfsRomDir}/bonebstr.zip`, new Uint8Array(zipData));
+        console.log(`[📦 VFS V${VERSION_HOTE}] Fichier bonebstr.zip injecté avec succès dans ${vfsRomDir}/`);
+
+        console.log("==================================================");
+        console.log(`[🎰 BOOT V${VERSION_HOTE}] Allumage électrique de run_game(0)...`);
+        console.log("==================================================");
+
+        instance._pinmame_web_boot();
+
+        console.log("==================================================");
+        console.log(`[🎰 RUNNING V${VERSION_HOTE}] Boucle d'horloge asynchrone active (60Hz)`);
+        console.log("==================================================");
+
+        setInterval(() => {
+            instance._pinmame_web_tick(33333);
+            const displayPointer = instance._pinmame_get_display();
+            const displayOutput = readStringFromWasm(instance, displayPointer);
+            if (displayOutput) {
+                console.log(`[📺 ÉCRAN V${VERSION_HOTE}] ${displayOutput}`);
+            }
+        }, 1000 / 60);
+
+    } catch (err) {
+        console.error("==================================================");
+        console.error(`[❌ HÔTE V${VERSION_HOTE}] Fatal crash lors de l'exécution :`);
+        console.error(err);
+        console.error("==================================================");
         process.exit(1);
     }
+}
 
-    console.log("==================================================");
-    console.log("[🎰 BOOT] Allumage électrique de run_game(0)...");
-    console.log("==================================================");
-
-    // 2. 🌟 L'APPEL CRITIQUE ASYNCHRONE : On lance le moteur MAME
-    // Grâce au flag -sASYNCIFY, cette fonction va s'élancer sans bloquer Node.js
-    try {
-        pinmameWebBoot();
-    } catch (bootError) {
-        console.error("[❌ HÔTE] Crash immédiat au boot :", bootError);
-    }
-
-    // 3. Boucle de monitoring passive à 60Hz
-    setInterval(() => {
-        try {
-            const displayStr = pinmameGetDisplay();
-            if (displayStr) {
-                console.log(`[📺 ÉCRAN] ${displayStr}`);
-            }
-        } catch (e) {
-            // Ignorer les latences de rafraîchissement
-        }
-    }, 1000 / 60);
-});
+main();

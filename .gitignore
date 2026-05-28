@@ -8,7 +8,6 @@ pinmame_workspace/
 pinmame_workspace_wasm/
 
 # Fichiers de ROMs et sauvegardes
-roms/
 *.zip
 *.nv
 

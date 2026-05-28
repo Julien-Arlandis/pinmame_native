@@ -1,10 +1,13 @@
 #!/bin/bash
 set -e
 
-SCRIPT_VERSION="WASM-GTS80B-PURE-GOLD-V36"
+# =========================================================================
+# ⚙️ INFRASTRUCTURE PINMAME WASM - SCRIPT COMPILATION LIB STATIQUE
+# 🏷️ VERSION : WASM-GTS80B-STRICT-SEQUENTIAL-V112.0
+# =========================================================================
 
 echo "=================================================="
-echo "⚙️  COMPILATION PURIFIÉE PINMAME WASM - VERSION $SCRIPT_VERSION"
+echo "⚙️ COMPILATION PURIFIÉE PINMAME WASM - VERSION V112.0"
 echo "=================================================="
 
 EMSDK_DIR="/home/julien/emsdk"
@@ -16,7 +19,7 @@ elif [ -f "/etc/profile.d/emscripten.sh" ]; then
 fi
 
 if ! command -v emcc &> /dev/null; then
-    echo "❌ Erreur : emcc est introuvable."
+    echo "❌ [V112.0] Erreur : emcc est introuvable."
     exit 1
 fi
 
@@ -26,122 +29,167 @@ WASM_TEMP_OBJ_DIR="$BASE_DIR/pinmame_workspace_wasm_objs"
 
 rm -f "libpinmame_wasm.a"
 rm -rf "$WASM_TEMP_OBJ_DIR"
-mkdir -p "$WASM_TEMP_OBJ_DIR"
+mkdir -p "$WASM_TEMP_OBJ_DIR/include"
 
-# 🌟 EN-TÊTE DE MAP COMPATIBILITÉ ET EXTINCTION DES PROCESSEURS PARASITES
-cat << 'EOF' > "$WASM_TEMP_OBJ_DIR/emscripten_macros.h"
-#ifndef EMSCRIPTEN_MACROS_H
-#define EMSCRIPTEN_MACROS_H
+# GÉNÉRATION DU HEADER SYSTÈME V112.0
+cat << 'EOF' > "$WASM_TEMP_OBJ_DIR/include/osd_cpu.h"
+#ifndef OSD_CPU_H_V112
+#define OSD_CPU_H_V112
 
-#undef __rolq
-#undef __rorq
-#define __rolq(x,c) (((unsigned long long)(x) << (c)) | ((unsigned long long)(x) >> (64 - (c))))
-#define __rorq(x,c) (((unsigned long long)(x) >> (c)) | ((unsigned long long)(x) << (64 - (c))))
+#include <stdint.h>
+#include <stdlib.h>
 
-#ifndef INLINE
-#define INLINE static inline
-#endif
-#ifndef inline
-#define inline __inline__
-#endif
+typedef uint8_t UINT8;
+typedef int8_t INT8;
+typedef uint16_t UINT16;
+typedef int16_t INT16;
+typedef uint32_t UINT32;
+typedef int32_t INT32;
+typedef uint64_t UINT64;
+typedef int64_t INT64;
 
-// Définitions de types de processeurs requises pour compiler gts80.c sans erreur
-#define CPU_I86 0
-#define CPU_M6800 0
-#define CPU_M6802 0
-#define CPU_M6803 0
-#define CPU_M6808 0
-#define CPU_M6809 0
+#define LSB_FIRST 1
 
-// Matériel requis et activé pour Gottlieb System 80B et System 3
-#define HAS_M6502 1
-#define HAS_M65C02 1
-#define HAS_TMS7000 1
-#define HAS_VOTRAXSC01 1
-#define HAS_DAC 1
-#define HAS_SAMPLES 1
-#define HAS_YM2151 1
-#define HAS_OKIM6295 1
-#define PINMAME_GTS80 1
+typedef union {
+    struct { UINT8 l, h, h2, h3; } b;
+    struct { UINT16 l, h; } w;
+    UINT32 d;
+} PAIR;
 
-#define XMAMEROOT "."
-#define NAME "pinmame"
+typedef union {
+    struct { UINT32 l, h; } d;
+    UINT64 q;
+} PAIR64;
 
 #endif
 EOF
 
-EMCC_FLAGS="-O2 -g \
-    -I$NATIVE_WORKSPACE/src \
-    -I$NATIVE_WORKSPACE/src/wpc \
-    -I$NATIVE_WORKSPACE/src/unix \
-    -I$NATIVE_WORKSPACE/src/cores \
-    -I$NATIVE_WORKSPACE/src/cpu \
-    -I$NATIVE_WORKSPACE/src/zlib \
-    -I$NATIVE_WORKSPACE/src/vidhrdw \
-    -I$NATIVE_WORKSPACE/src/sound \
-    -DUNIX \
-    -DPINMAME \
-    -DDECL_SPEC= \
-    -DBMTYPE=UINT16 \
-    -include $WASM_TEMP_OBJ_DIR/emscripten_macros.h"
+# GÉNÉRATION DES MACROS MATÉRIELLES V112.0
+cat << 'EOF' > "$WASM_TEMP_OBJ_DIR/emscripten_macros.h"
+#ifndef EMSCRIPTEN_MACROS_H_V112
+#define EMSCRIPTEN_MACROS_H_V112
 
-cd "$NATIVE_WORKSPACE"
+#include <stdint.h>
 
-# 🌟 LA MATRICE SÉCURISÉE DES FICHIERS MAÎTRES DE MAME & GOTTLIEB
-# On ne prend QUE les briques de base de l'émulateur et la plomberie Gottlieb.
-# Cela évite les erreurs sur les 150 autres fabricants inutiles.
-COEUR_PILES=(
-    "src/mame.c" "src/common.c" "src/driver.c" "src/cpuintrf.c" "src/sndintrf.c"
-    "src/memory.c" "src/timer.c" "src/state.c" "src/audit.c" "src/version.c"
-    "src/artwork.c" "src/drawgfx.c" "src/palette.c" "src/profiler.c"
-    "src/wpc/core.c" "src/wpc/sndbrd.c" "src/wpc/mech.c" "src/wpc/vp9.c"
-    "src/wpc/gts3.c" "src/wpc/gts3games.c"
-    "src/wpc/gts80.c" "src/wpc/gts80games.c" "src/wpc/gts80s.c" "src/wpc/gts80ss.c"
-    "src/cpu/m6502/m6502.c" "src/cpu/tms7000/tms7000.c"
-    "src/sound/votrax.c" "src/sound/dac.c" "src/sound/samples.c" "src/sound/ym2151.c" "src/sound/2151intf.c"
-    "src/sound/streams.c" "src/sound/mixer.c" "src/sound/oki6295.c"
+#define PINMAME 1
+#define NAME "pinmame"
+#define XMAMEROOT "/roms"
+
+#define HAS_M6502 1
+#define PINMAME_GTS80 1
+#define CPU_I86 0
+#define CPU_TMS7000 0
+
+#ifndef PI
+#define PI 3.14159265358979323846
+#endif
+
+#define HAS_CUSTOM 1
+#define BUILD_CUSTOM 1
+#define HAS_SAMPLES 1
+#define BUILD_SAMPLES 1
+#define HAS_VOTRAXSC01 1
+#define BUILD_VOTRAXSC01 1
+#define HAS_DAC 1
+#define BUILD_DAC 1
+#define HAS_AY8910 1
+#define BUILD_AY8910 1
+#define HAS_SP0250 1
+#define BUILD_SP0250 1
+#define HAS_OKIM6295 1
+#define BUILD_OKIM6295 1
+#define HAS_YM2151 1
+#define BUILD_YM2151 1
+
+void OPMUpdateOne(int num, int16_t **buffer, int length);
+
+#define PINMAME_NO_WPC 1
+#define PINMAME_NO_WILLIAMS 1
+#define PINMAME_NO_STERN 1
+#define PINMAME_NO_BALLY 1
+#define PINMAME_NO_SEGA 1
+#define PINMAME_NO_DATAEAST 1
+
+#ifndef __rolq
+#define __rolq(x,c) (((uint64_t)(x) << (c)) | ((uint64_t)(x) >> (64 - (c))))
+#endif
+#ifndef __rorq
+#define __rorq(x,c) (((uint64_t)(x) >> (c)) | ((uint64_t)(x) << (64 - (c))))
+#endif
+
+#endif
+EOF
+
+EMCC_FLAGS=(
+    "-O3"
+    "-include" "$WASM_TEMP_OBJ_DIR/emscripten_macros.h"
+    "-I$WASM_TEMP_OBJ_DIR/include"
+    "-I$NATIVE_WORKSPACE/src"
+    "-I$NATIVE_WORKSPACE/src/wpc"
+    "-I$NATIVE_WORKSPACE/src/machine" # 🚨 INCLUSION CRITIQUE DU DOSSIER DES COMPOSANTS
+    "-I$NATIVE_WORKSPACE/src/unix"
+    "-I$NATIVE_WORKSPACE/src/cores"
+    "-I$NATIVE_WORKSPACE/src/cpu"
+    "-I$NATIVE_WORKSPACE/src/sound"
+    "-DINLINE=static inline"
+    "-Wno-implicit-function-declaration"
+    "-Wno-static-in-inline"
 )
 
-echo "[*] Compilation contrôlée du cœur de l'émulateur..."
+COEUR_PILES=(
+    "src/mame.c" "src/common.c" "src/cpuintrf.c" "src/memory.c"
+    "src/timer.c" "src/palette.c" "src/state.c"
+    "src/cpuexec.c" "src/sndintrf.c" "src/fileio.c" "src/inptport.c" "src/hash.c"
+    "src/cpuint.c" "src/unzip.c" "src/md5.c" "src/sha1.c" "src/config.c" "src/input.c"
+    "src/cpu/m6502/m6502.c"
+    "src/wpc/gts80.c" "src/wpc/gts80s.c" "src/wpc/gts80games.c" "src/wpc/core.c"
+    "src/wpc/sim.c" "src/wpc/sndbrd.c" "src/wpc/snd_cmd.c" "src/wpc/mech.c"
+    "src/machine/6532riot.c" "src/machine/6530riot.c" # 🚨 INTEGRATION REELLE DES DEUX CIRCUITS VERITABLES
+    "src/sound/dac.c" "src/sound/ym2151.c" "src/sound/2151intf.c"
+    "src/sound/streams.c" "src/sound/mixer.c" "src/sound/filter.c"
+)
+
+if [ -f "$NATIVE_WORKSPACE/src/mame.c" ]; then
+    echo "[*] [V112.0] Application du court-circuit de sécurité sur video_init()..."
+    sed -i 's/int old_video_init_disabled(void)/int video_init(void)/' "$NATIVE_WORKSPACE/src/mame.c"
+    sed -i 's/int video_init[[:space:]]*(void)/int video_init(void) { return 0; } int old_video_init_disabled(void)/' "$NATIVE_WORKSPACE/src/mame.c"
+fi
+
+echo "[*] [V112.0] Compilation STRICTE du cœur de l'émulateur..."
 for f in "${COEUR_PILES[@]}"; do
-    if [ -f "$f" ]; then
+    if [ -f "$NATIVE_WORKSPACE/$f" ]; then
         dir_obj="$WASM_TEMP_OBJ_DIR/$(dirname "$f")"
         mkdir -p "$dir_obj"
         b=$(basename "$f" .c)
-        emcc $EMCC_FLAGS -c "$f" -o "$dir_obj/$b.o" &
-        count=$((count + 1))
-        if [ $((count % $(nproc))) -eq 0 ]; then wait; fi
+        echo "   -> [V112.0] Compilation de $f..."
+        emcc "${EMCC_FLAGS[@]}" -c "$NATIVE_WORKSPACE/$f" -o "$dir_obj/$b.o"
+    else
+        echo "❌ [V112.0] Erreur fatale : Le fichier $NATIVE_WORKSPACE/$f est introuvable !"
+        exit 1
     fi
 done
-wait
 
-echo "[*] Compilation de la Zlib interne..."
-if [ -d "src/zlib" ]; then
+echo "[*] [V112.0] Compilation de la Zlib interne..."
+if [ -d "$NATIVE_WORKSPACE/src/zlib" ]; then
     mkdir -p "$WASM_TEMP_OBJ_DIR/zlib"
-    for f in src/zlib/*.c; do
+    for f in "$NATIVE_WORKSPACE/src/zlib"/*.c; do
         if [ -f "$f" ]; then
             b=$(basename "$f" .c)
-            emcc $EMCC_FLAGS -c "$f" -o "$WASM_TEMP_OBJ_DIR/zlib/$b.o" &
+            emcc "${EMCC_FLAGS[@]}" -c "$f" -o "$WASM_TEMP_OBJ_DIR/zlib/$b.o"
         fi
     done
 fi
-wait
 
-echo "[*] Compilation du module d'E/S fileio..."
-FILEIO_SRC=""
-if [ -f "src/unix/fileio.c" ]; then FILEIO_SRC="src/unix/fileio.c"; elif [ -f "src/fileio.c" ]; then FILEIO_SRC="src/fileio.c"; fi
-if [ -n "$FILEIO_SRC" ]; then
-    emcc $EMCC_FLAGS -c "$FILEIO_SRC" -o "$WASM_TEMP_OBJ_DIR/fileio.o"
+echo "[*] [V112.0] Compilation du module d'E/S fileio..."
+if [ -f "$NATIVE_WORKSPACE/src/unix/fileio.c" ]; then
+    mkdir -p "$WASM_TEMP_OBJ_DIR/src/unix"
+    emcc "${EMCC_FLAGS[@]}" -Dosd_display_loading_rom_message=native_broken_osd_msg -c "$NATIVE_WORKSPACE/src/unix/fileio.c" -o "$WASM_TEMP_OBJ_DIR/src/unix/fileio.o"
 fi
 
-echo "=== Empaquetage final de libpinmame_wasm.a ==="
-cd "$WASM_TEMP_OBJ_DIR"
-emar rcs "$BASE_DIR/libpinmame_wasm.a" $(find . -name "*.o")
+echo "[*] [V112.0] Assemblage final de l'archive statique..."
+find "$WASM_TEMP_OBJ_DIR" -name "*.o" | xargs emar rcs "libpinmame_wasm.a"
 
-cd "$BASE_DIR"
-rm -rf "$WASM_TEMP_OBJ_DIR"
-
+FILE_SIZE=$(du -sh "libpinmame_wasm.a" | cut -f1)
 echo "=================================================="
-echo "🟢 Bibliothèque statique NATIVE INTÉGRALE GTS80B générée !"
-ls -lh "libpinmame_wasm.a"
+echo "🟢 [V112.0] libpinmame_wasm.a généré avec succès ! ($FILE_SIZE)"
 echo "=================================================="

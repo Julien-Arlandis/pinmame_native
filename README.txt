@@ -15,7 +15,9 @@ Pour générer pinmame_web.js et pinmame_web.wasm
 
 
 Pour lancer l'émulateur :
+./test_native_exec/xpinmame.x11 -rompath ./roms bonebstr
 ./test_pure_lib_exec/test_pure_lib -rompath ./roms bonebstr
+
 
 Pour générer un binaire d'exécution à partir de la librairie :
 ./build_exec_with_lib.sh

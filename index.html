@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Auto-Initialized Switch Board</title>
+    <title>PinMAME WASM - Full Diagnostic & DIP Switch Panel</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -24,7 +24,7 @@
             justify-content: flex-start; 
             min-height: 100vh; 
             margin: 0; 
-            padding: 20px;
+            padding: 15px;
             overflow-x: hidden;
             -webkit-user-select: none;
             -moz-user-select: none;
@@ -74,40 +74,20 @@
             margin-bottom: 15px;
         }
         .btn { 
-            flex: 1;
-            padding: 14px 10px; 
-            font-size: 0.9rem; 
-            font-weight: bold; 
-            font-family: monospace; 
-            text-transform: uppercase; 
-            border: none; 
-            border-radius: 8px; 
-            box-shadow: 0 4px #000; 
-            transition: all 0.05s ease; 
-            touch-action: none; 
-            cursor: pointer;
+            flex: 1; padding: 14px 10px; font-size: 0.9rem; font-weight: bold; font-family: monospace; 
+            text-transform: uppercase; border: none; border-radius: 8px; box-shadow: 0 4px #000; 
+            transition: all 0.05s ease; touch-action: none; cursor: pointer;
         }
         .btn:active, .btn.forced-active { transform: translateY(3px); box-shadow: 0 1px #000; }
         .btn-coin { background-color: #ffcc00; color: #000; }
         .btn-start { background-color: #ff0044; color: #fff; }
         .btn-test { background-color: #0099ff; color: #fff; box-shadow: 0 4px #0044aa; }
-        .btn-test:active, .btn-test.forced-active { box-shadow: 0 1px #0044aa; }
 
         .dashboard { 
-            display: flex; 
-            flex-direction: row; 
-            gap: 15px; 
-            max-width: 1150px; 
-            width: 100%; 
-            box-sizing: border-box;
+            display: flex; flex-direction: row; gap: 15px; max-width: 1150px; width: 100%; box-sizing: border-box; margin-bottom: 15px;
         }
         .panel-box { 
-            background: var(--bg-box); 
-            border: 2px solid var(--border-color); 
-            padding: 12px; 
-            border-radius: 8px; 
-            flex: 1; 
-            box-sizing: border-box;
+            background: var(--bg-box); border: 2px solid var(--border-color); padding: 12px; border-radius: 8px; flex: 1; box-sizing: border-box;
         }
         .box-title { color: var(--neon-cyan); text-transform: uppercase; font-size: 0.8rem; margin-bottom: 10px; letter-spacing: 1px; font-weight: bold;}
         .sub-title { color: #777; font-size: 0.7rem; margin: 8px 0 4px 0; font-weight: bold;}
@@ -117,31 +97,23 @@
         .grid-sol { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
 
         .cell { 
-            background: #141414; 
-            border: 1px solid #222; 
-            color: #444; 
-            padding: 6px 1px; 
-            font-size: 0.65rem; 
-            font-weight: bold; 
-            border-radius: 2px; 
-            text-align: center; 
-            touch-action: none; 
-            cursor: default;
+            background: #141414; border: 1px solid #222; color: #444; padding: 6px 1px; 
+            font-size: 0.65rem; font-weight: bold; border-radius: 2px; text-align: center; touch-action: none; 
         }
-        
         .cell.sw-user { background: var(--neon-green) !important; color: #000 !important; box-shadow: 0 0 6px var(--neon-green); border-color: #fff; }
-        .cell.lamp-on { background: #ffff00 !important; color: #000 !important; box-shadow: 0 0 8px #ffff00; border-color: #fff; }
-        .cell.sol-on { background: var(--neon-red) !important; color: #fff !important; box-shadow: 0 0 10px var(--neon-red); border-color: #fff; }
+        .cell.lamp-on { background: #ffff00 !important; color: #000 !important; box-shadow: 0 0 8px #ffff00; }
+        .cell.sol-on { background: var(--neon-red) !important; color: #fff !important; box-shadow: 0 0 10px var(--neon-red); }
 
-        @media (max-width: 768px) {
-            body { padding: 8px; }
-            .dashboard { flex-direction: column; gap: 12px; }
-            .panel-box { padding: 10px; }
-            .grid-sw { grid-template-columns: repeat(8, 1fr); gap: 3px; }
-            .grid-lamp { grid-template-columns: repeat(8, 1fr); gap: 3px; } 
-            .grid-sol { grid-template-columns: repeat(4, 1fr); gap: 3px; }  
-            .cell { padding: 8px 1px; font-size: 0.6rem; }
-        }
+        /* 🌟 RÉTRO STYLE PIANO DIP SWITCH BLOCKS */
+        .dip-container { display: flex; gap: 10px; flex-wrap: wrap; justify-content: space-between; margin-top: 5px; }
+        .dip-bank { background: #8b0000; padding: 6px; border-radius: 4px; border: 2px solid #5a0000; display: flex; gap: 5px; box-shadow: inset 0 0 8px rgba(0,0,0,0.6); }
+        .dip-switch { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 0.55rem; color: #c0c0c0; font-weight: bold; }
+        .dip-toggle { width: 14px; height: 26px; background: #1a1a1a; border-radius: 2px; position: relative; cursor: pointer; touch-action: none; border: 1px solid #000; }
+        .dip-toggle::after { content: '0'; position: absolute; bottom: 1px; left: 1px; right: 1px; height: 10px; background: #fff; color: #000; font-size: 0.5rem; text-align: center; line-height: 10px; border-radius: 1px; }
+        .dip-toggle.dip-on::after { content: '1'; bottom: auto; top: 1px; background: var(--neon-green); color: #000; }
+
+        .terminal-box { width: 100%; max-width: 1150px; background: #030a0a; border: 2px solid #142828; border-radius: 6px; padding: 10px; box-sizing: border-box; }
+        .terminal-content { height: 100px; overflow-y: auto; color: #00ff66; font-size: 0.8rem; line-height: 1.3rem; white-space: pre-wrap; text-align: left; }
     </style>
 </head>
 <body>
@@ -159,19 +131,31 @@
     </div>
 
     <div class="dashboard">
-        <div class="panel-box">
-            <div class="box-title">🔌 Panneau des Switchs Physiques (00-79)</div>
-            <div id="swGrid" class="grid-sw"></div>
+        <div class="panel-box" style="display: flex; flex-direction: column; gap: 12px;">
+            <div>
+                <div class="box-title">🔌 Panneau des Switchs Physiques (00-79)</div>
+                <div id="swGrid" class="grid-sw"></div>
+            </div>
+            
+            <div>
+                <div class="box-title" style="color: #ff9900;">🎛️ Configuration DIP Switches (Options System 80B)</div>
+                <div id="dipContainer" class="dip-container"></div>
+            </div>
         </div>
 
         <div class="panel-box">
             <div class="box-title">🎛️ Carte Driver MA-789</div>
-            <div class="sub-title">💡 Transistors Lampes (Matrix) :</div>
+            <div class="sub-title">💡 Transistors Lampes :</div>
             <div id="lampGrid" class="grid-lamp"></div>
             
             <div class="sub-title">⚡ Transistors Puissance Solénoïdes :</div>
             <div id="solGrid" class="grid-sol"></div>
         </div>
+    </div>
+
+    <div class="terminal-box">
+        <div style="color: #00ff66; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 5px; border-bottom: 1px solid #142828; padding-bottom: 3px;">📟 Moniteur de sortie PinMAME Core</div>
+        <div id="terminal" class="terminal-content">Démarrage du flux de log...</div>
     </div>
 
     <script src="pinmame_web.js"></script>
@@ -180,6 +164,8 @@
         const canvas = document.getElementById('vfdCanvas');
         const ctx = canvas.getContext('2d');
         const statusEl = document.getElementById('status');
+        const termEl = document.getElementById('terminal');
+        const dipContainer = document.getElementById('dipContainer');
 
         const CHAR_WIDTH = 40; const CHAR_HEIGHT = 70; const SPACING = 15;
         let pinmameInstance = null;
@@ -188,27 +174,60 @@
         const swCells = [];
         const lampCells = [];
         const solCells = [];
-
+        const dipToggles = [];
         const userSwitchStates = new Array(80).fill(false);
+        const userDipStates = new Array(32).fill(false);
 
-        const COIN_ID = 2;   
-        const START_ID = 3;  
+        const COIN_ID = 3;   
+        const START_ID = 6;  
         const TEST_ID = 7;   
 
+        function logToTerminal(msg) {
+            termEl.textContent += "\n" + msg;
+            termEl.scrollTop = termEl.scrollHeight;
+        }
+
+        // Init Switchs
         const swGridEl = document.getElementById('swGrid');
         for (let i = 0; i < 80; i++) {
             const cell = document.createElement('div');
             cell.className = 'cell';
             cell.textContent = String(i).padStart(2, '0');
-            
             cell.addEventListener('pointerdown', (e) => { 
                 e.preventDefault(); 
                 userSwitchStates[i] = !userSwitchStates[i];
                 applySwitchState(i, userSwitchStates[i]);
             });
-            
             swGridEl.appendChild(cell);
             swCells.push(cell);
+        }
+
+        // 🌟 GENERATION DYNAMIQUE DES BLOCS DE DIP SWITCHS
+        for (let bank = 0; bank < 4; bank++) {
+            const bankEl = document.createElement('div');
+            bankEl.className = 'dip-bank';
+            for (let bit = 0; bit < 8; bit++) {
+                const dipId = (bank * 8) + bit;
+                const swWrap = document.createElement('div');
+                swWrap.className = 'dip-switch';
+                
+                const label = document.createElement('span');
+                label.textContent = `${bank+1}-${bit+1}`;
+                
+                const toggle = document.createElement('div');
+                toggle.className = 'dip-toggle';
+                toggle.addEventListener('pointerdown', (e) => {
+                    e.preventDefault();
+                    userDipStates[dipId] = !userDipStates[dipId];
+                    applyDipState(dipId, userDipStates[dipId]);
+                });
+                
+                swWrap.appendChild(label);
+                swWrap.appendChild(toggle);
+                bankEl.appendChild(swWrap);
+                dipToggles.push(toggle);
+            }
+            dipContainer.appendChild(bankEl);
         }
 
         const lampGridEl = document.getElementById('lampGrid');
@@ -236,31 +255,42 @@
             else swCells[swId].classList.remove('sw-user');
         }
 
+        // 🌟 ROUTINE D'INJECTION DES COMPOSANTS DIP IN MEMORY
+        function applyDipState(dipId, isOn) {
+            if (!pinmameInstance || !vfdMemoryPointer) return;
+            pinmameInstance.HEAPU8[vfdMemoryPointer + 400 + dipId] = isOn ? 1 : 0;
+            if (isOn) dipToggles[dipId].classList.add('dip-on');
+            else dipToggles[dipId].classList.remove('dip-on');
+        }
+
         async function startEmulation() {
             try {
                 statusEl.textContent = "🟡 Chargement du binaire WebAssembly...";
+                
                 const instance = await createPinMAME({
-                    print: function(text) { console.log(text); },
-                    printErr: function(err) { console.error(err); },
+                    print: function(text) { logToTerminal("[CORE] " + text); },
+                    printErr: function(err) { logToTerminal("[ERR] " + err); },
                     locateFile: function(path, prefix) { return path.endsWith('.wasm') ? 'pinmame_web.wasm' : prefix + path; }
                 });
 
                 const response = await fetch('roms/bonebstr.zip');
+                if (!response.ok) throw new Error("Fichier ROM introuvable.");
                 const romBuffer = await response.arrayBuffer();
+                
                 instance.FS.mkdir('/roms');
                 instance.FS.writeFile('/roms/bonebstr.zip', new Uint8Array(romBuffer));
 
                 pinmameInstance = instance;
                 vfdMemoryPointer = instance._pinmame_get_dsprom_ptr();
 
-                // 🌟 FIX UNIVERSEL V150.0 : ININITIALISATION AUTOMATIQUE AVANT LE BOOT
-                // SW 04 = Slam Tilt (Fermé pour débloquer le CPU)
-                // SW 50, 51, 52 = Ball Trough (Présence des 3 billes requise)
-                const autoSwitches = [4, 50, 51, 52];
-                autoSwitches.forEach(swId => {
-                    userSwitchStates[swId] = true;
-                    applySwitchState(swId, true);
-                });
+                // Shunt automatique du Slam Tilt au boot
+                userSwitchStates[1] = true;
+                applySwitchState(1, true);
+
+                // Écriture de l'état initial des DIP Switches (Tout à OFF par défaut)
+                for (let i = 0; i < 32; i++) {
+                    applyDipState(i, userDipStates[i]);
+                }
 
                 setupButtons();
 
@@ -315,16 +345,16 @@
                 }
 
                 requestAnimationFrame(renderFrame);
-                statusEl.textContent = "🟢 PinMAME Analyzer Gate V150.0 - Ready to Play";
+                statusEl.textContent = "🟢 PinMAME Analyzer Gate V157.0 - DIP Enabled";
                 statusEl.style.color = "#00ffcc";
+                
                 instance._pinmame_web_boot();
 
             } catch (err) {
-                statusEl.textContent = "🔴 ERREUR CRITIQUE : " + err.message;
+                statusEl.textContent = "🔴 ERREUR : " + err.message;
             }
         }
 
-        // Configuration boutons
         function setupButtons() {
             const coinBtn = document.getElementById('coinBtn');
             const startBtn = document.getElementById('startBtn');

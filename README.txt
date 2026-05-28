@@ -24,3 +24,8 @@ Pour générer un binaire d'exécution à partir de la librairie :
 
 Pour lancer l'émulateur js :
 node launcher.js
+
+
+------------------
+Depuis le navigateur :
+https://julien-arlandis.github.io/pinmame_native/

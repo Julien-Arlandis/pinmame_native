@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Full Diagnostic & DIP Reference</title>
+    <title>PinMAME WASM - Dev Workbench V159.0</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -13,6 +13,7 @@
             --neon-green: #00ff44;
             --neon-red: #ff3300;
             --neon-amber: #ff9900;
+            --neon-purple: #9d4edd;
         }
 
         body { 
@@ -56,10 +57,42 @@
             font-size: 1rem; 
             text-transform: uppercase; 
             letter-spacing: 1px; 
-            margin-bottom: 15px;
+            margin-bottom: 12px;
             text-align: center;
             font-weight: bold;
         }
+
+        /* 🌟 PANNEAU D'ADMINISTRATION ET GESTION DES ROMS */
+        .system-panel {
+            display: flex;
+            gap: 15px;
+            width: 100%;
+            max-width: 650px;
+            background: #16121e;
+            padding: 10px 15px;
+            border-radius: 8px;
+            border: 1px dashed var(--neon-purple);
+            box-sizing: border-box;
+            margin-bottom: 12px;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+        }
+        .sys-group { display: flex; gap: 10px; align-items: center; }
+        .file-label {
+            background: #221c30; border: 1px solid #4a287a; padding: 10px 14px;
+            border-radius: 6px; font-size: 0.75rem; color: #d6bbf2; cursor: pointer;
+            font-weight: bold; text-transform: uppercase; transition: all 0.1s;
+        }
+        .file-label:hover { border-color: var(--neon-cyan); background: #322247; }
+        .btn-sys {
+            padding: 10px 16px; font-size: 0.75rem; font-weight: bold; font-family: monospace;
+            text-transform: uppercase; border: none; border-radius: 6px; cursor: pointer; transition: all 0.05s;
+        }
+        .btn-reboot { background: var(--neon-purple); color: #fff; box-shadow: 0 3px #4a157d; }
+        .btn-reboot:active { transform: translateY(2px); box-shadow: 0 1px #4a157d; }
+        .btn-clear { background: #333; color: #ccc; box-shadow: 0 3px #111; }
+        .btn-clear:active { transform: translateY(2px); box-shadow: 0 1px #111; }
         
         .arcade-panel { 
             display: flex; 
@@ -105,7 +138,6 @@
         .cell.lamp-on { background: #ffff00 !important; color: #000 !important; box-shadow: 0 0 8px #ffff00; }
         .cell.sol-on { background: var(--neon-red) !important; color: #fff !important; box-shadow: 0 0 10px var(--neon-red); }
 
-        /* PIANO SWITCHES BLOCK */
         .dip-container { display: flex; gap: 10px; flex-wrap: wrap; justify-content: space-between; margin-top: 5px; }
         .dip-bank { background: #8b0000; padding: 6px; border-radius: 4px; border: 2px solid #5a0000; display: flex; gap: 5px; box-shadow: inset 0 0 8px rgba(0,0,0,0.6); }
         .dip-switch { display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 0.55rem; color: #c0c0c0; font-weight: bold; }
@@ -113,10 +145,7 @@
         .dip-toggle::after { content: '0'; position: absolute; bottom: 1px; left: 1px; right: 1px; height: 10px; background: #fff; color: #000; font-size: 0.5rem; text-align: center; line-height: 10px; border-radius: 1px; }
         .dip-toggle.dip-on::after { content: '1'; bottom: auto; top: 1px; background: var(--neon-green); color: #000; }
 
-        /* 🌟 PANNEAU DOCUMENTATION STRIP */
-        .doc-table {
-            width: 100%; border-collapse: collapse; margin-top: 5px; font-size: 0.72rem; color: #ccc; text-align: left;
-        }
+        .doc-table { width: 100%; border-collapse: collapse; margin-top: 5px; font-size: 0.72rem; color: #ccc; text-align: left; }
         .doc-table th { color: var(--neon-amber); border-bottom: 1px solid #333; padding: 5px 2px; text-transform: uppercase; font-size: 0.65rem;}
         .doc-table td { padding: 5px 2px; border-bottom: 1px solid #1a1a1a; }
         .doc-highlight { color: var(--neon-green); font-weight: bold;}
@@ -131,6 +160,18 @@
 
     <div class="canvas-container">
         <canvas id="vfdCanvas" width="1150" height="250"></canvas>
+    </div>
+
+    <div class="system-panel">
+        <div class="sys-group">
+            <label for="romUploader" class="file-label">📂 Injecter une ROM (.zip)</label>
+            <input type="file" id="romUploader" accept=".zip" style="display: none;">
+            <span id="romNameDisplay" style="font-size: 0.75rem; color: #888;">Par défaut (bonebstr.zip)</span>
+        </div>
+        <div class="sys-group">
+            <button id="clearRomBtn" class="btn-sys btn-clear" style="display: none;">Reset Default</button>
+            <button id="rebootBtn" class="btn-sys btn-reboot">🔄 Reboot CPU</button>
+        </div>
     </div>
 
     <div class="arcade-panel">
@@ -162,53 +203,14 @@
                         </tr>
                     </thead>
                     <tbody>
-                        <tr>
-                            <td><span class="doc-highlight">DIP 1 à 4</span></td>
-                            <td colspan="2">Tarification du Monnayeur Gauche (Coin Chute Left)</td>
-                        </tr>
-                        <tr>
-                            <td><span class="doc-highlight">DIP 5 à 8</span></td>
-                            <td colspan="2">Tarification du Monnayeur Droit (Coin Chute Right)</td>
-                        </tr>
-                        <tr>
-                            <td><strong>DIP 17</strong></td>
-                            <td>🏀 <span class="doc-highlight">3 Billes</span> / Partie</td>
-                            <td>🏀 5 Billes / Partie</td>
-                        </tr>
-                        <tr>
-                            <td><strong>DIP 18</strong></td>
-                            <td>✨ Loterie Active (Match)</td>
-                            <td>Loutre Désactivée</td>
-                        </tr>
-                        <tr>
-                            <td><strong>DIP 19</strong></td>
-                            <td>1 Seul Replay max / partie</td>
-                            <td>Gains illimités (No Limit)</td>
-                        </tr>
-                        <tr>
-                            <td><strong>DIP 21</strong></td>
-                            <td>🎟️ Récompense = <span class="doc-highlight">Extra Ball</span></td>
-                            <td>🎟️ Récompense = Crédit/Partie</td>
-                        </tr>
-                        <tr>
-                            <td><strong>DIP 22</strong></td>
-                            <td>Attribue Extra Ball</td>
-                            <td>Attribue Special Target</td>
-                        </tr>
-                        <tr>
-                            <td><strong>DIP 23-24</strong></td>
-                            <td colspan="2">ON/ON = 3 Crédits sur High Score | OFF/OFF = Pas d'affichage</td>
-                        </tr>
-                        <tr>
-                            <td><strong>DIP 29</strong></td>
-                            <td>💥 Bille Perdue sur Tilt</td>
-                            <td>💀 Partie Perdue sur Tilt (Sécurité)</td>
-                        </tr>
-                        <tr>
-                            <td><strong>DIP 32</strong></td>
-                            <td>🎵 Musique en Attract Mode</td>
-                            <td>Mode Démo Silencieux</td>
-                        </tr>
+                        <tr><td><span class="doc-highlight">DIP 1 à 4</span></td><td colspan="2">Tarification du Monnayeur Gauche (Coin Chute Left)</td></tr>
+                        <tr><td><span class="doc-highlight">DIP 5 à 8</span></td><td colspan="2">Tarification du Monnayeur Droit (Coin Chute Right)</td></tr>
+                        <tr><td><strong>DIP 17</strong></td><td>🏀 <span class="doc-highlight">3 Billes</span> / Partie</td><td>🏀 5 Billes / Partie</td></tr>
+                        <tr><td><strong>DIP 18</strong></td><td>✨ Loterie Active (Match)</td><td>Loterie Désactivée</td></tr>
+                        <tr><td><strong>DIP 19</strong></td><td>1 Seul Replay max / partie</td><td>Gains illimités (No Limit)</td></tr>
+                        <tr><td><strong>DIP 21</strong></td><td>🎟️ Récompense = <span class="doc-highlight">Extra Ball</span></td><td>🎟️ Récompense = Crédit/Partie</td></tr>
+                        <tr><td><strong>DIP 29</strong></td><td>💥 Bille Perdue sur Tilt</td><td>💀 Partie Perdue sur Tilt (Sécurité)</td></tr>
+                        <tr><td><strong>DIP 32</strong></td><td>🎵 Musique en Attract Mode</td><td>Mode Démo Silencieux</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -237,6 +239,10 @@
         const statusEl = document.getElementById('status');
         const termEl = document.getElementById('terminal');
         const dipContainer = document.getElementById('dipContainer');
+        const romUploader = document.getElementById('romUploader');
+        const romNameDisplay = document.getElementById('romNameDisplay');
+        const clearRomBtn = document.getElementById('clearRomBtn');
+        const rebootBtn = document.getElementById('rebootBtn');
 
         const CHAR_WIDTH = 40; const CHAR_HEIGHT = 70; const SPACING = 15;
         let pinmameInstance = null;
@@ -281,10 +287,8 @@
                 const dipId = (bank * 8) + bit;
                 const swWrap = document.createElement('div');
                 swWrap.className = 'dip-switch';
-                
                 const label = document.createElement('span');
                 label.textContent = `${bank+1}-${bit+1}`;
-                
                 const toggle = document.createElement('div');
                 toggle.className = 'dip-toggle';
                 toggle.addEventListener('pointerdown', (e) => {
@@ -292,7 +296,6 @@
                     userDipStates[dipId] = !userDipStates[dipId];
                     applyDipState(dipId, userDipStates[dipId]);
                 });
-                
                 swWrap.appendChild(label);
                 swWrap.appendChild(toggle);
                 bankEl.appendChild(swWrap);
@@ -343,11 +346,33 @@
                     locateFile: function(path, prefix) { return path.endsWith('.wasm') ? 'pinmame_web.wasm' : prefix + path; }
                 });
 
-                const response = await fetch('roms/bonebstr.zip');
-                if (!response.ok) throw new Error("Fichier ROM introuvable.");
-                const romBuffer = await response.arrayBuffer();
+                // 🌟 LOGIQUE INTERACTIVE DE MULTI-ROM SELECTION (V159.0)
+                let romBuffer;
+                const customRomData = sessionStorage.getItem('custom_rom_bytes');
+                const customRomName = sessionStorage.getItem('custom_rom_filename');
+
+                if (customRomData) {
+                    logToTerminal("[JS] Restitution de la ROM injectée : " + customRomName);
+                    romNameDisplay.textContent = customRomName;
+                    romNameDisplay.style.color = "var(--neon-green)";
+                    clearRomBtn.style.display = "inline-block";
+
+                    // Décodage base64 vers buffer binaire
+                    const binaryStr = atob(customRomData);
+                    const bytes = new Uint8Array(binaryStr.length);
+                    for (let i = 0; i < binaryStr.length; i++) {
+                        bytes[i] = binaryStr.charCodeAt(i);
+                    }
+                    romBuffer = bytes.buffer;
+                } else {
+                    logToTerminal("[JS] Téléchargement de la ROM par défaut...");
+                    const response = await fetch('roms/bonebstr.zip');
+                    if (!response.ok) throw new Error("Fichier ROM de secours introuvable.");
+                    romBuffer = await response.arrayBuffer();
+                }
                 
                 instance.FS.mkdir('/roms');
+                // Écriture forcée sous l'ID du driver actif
                 instance.FS.writeFile('/roms/bonebstr.zip', new Uint8Array(romBuffer));
 
                 pinmameInstance = instance;
@@ -357,12 +382,13 @@
                 userSwitchStates[1] = true;
                 applySwitchState(1, true);
 
-                // Applique les DIP par défaut
+                // Initialisation des DIP
                 for (let i = 0; i < 32; i++) {
                     applyDipState(i, userDipStates[i]);
                 }
 
                 setupButtons();
+                setupSystemHandlers();
 
                 function renderFrame() {
                     if (!pinmameInstance || !vfdMemoryPointer) {
@@ -415,7 +441,7 @@
                 }
 
                 requestAnimationFrame(renderFrame);
-                statusEl.textContent = "🟢 PinMAME Analyzer Gate V158.0 - Workbench Complete";
+                statusEl.textContent = "🟢 PinMAME Workbench V158.0 - Online";
                 statusEl.style.color = "#00ffcc";
                 
                 instance._pinmame_web_boot();
@@ -423,6 +449,46 @@
             } catch (err) {
                 statusEl.textContent = "🔴 ERREUR : " + err.message;
             }
+        }
+
+        // 🌟 CAPTURE DES EVENEMENTS D'INJECTION ET DE REBOOT DE LA BORNE
+        function setupSystemHandlers() {
+            rebootBtn.onclick = () => {
+                logToTerminal("[SYSTEM] Demande de redémarrage matériel... ");
+                location.reload();
+            };
+
+            clearRomBtn.onclick = () => {
+                sessionStorage.removeItem('custom_rom_bytes');
+                sessionStorage.removeItem('custom_rom_filename');
+                logToTerminal("[SYSTEM] Restauration du fichier d'usine...");
+                location.reload();
+            };
+
+            romUploader.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                logToTerminal(`[SYSTEM] Traitement de : ${file.name} (${Math.round(file.size/1024)} KB)`);
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    const bytes = new Uint8Array(evt.target.result);
+                    let binaryStr = "";
+                    // Conversion optimisée pour le stockage inter-page
+                    for (let i = 0; i < bytes.length; i++) {
+                        binaryStr += String.fromCharCode(bytes[i]);
+                    }
+                    try {
+                        sessionStorage.setItem('custom_rom_bytes', btoa(binaryStr));
+                        sessionStorage.setItem('custom_rom_filename', file.name);
+                        logToTerminal("[SYSTEM] ROM enregistrée avec succès. Flashage et redémarrage...");
+                        setTimeout(() => { location.reload(); }, 600);
+                    } catch(err) {
+                        logToTerminal("[ERR SYSTEM] Fichier trop lourd pour le stockage de session.");
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            };
         }
 
         function setupButtons() {

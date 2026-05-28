@@ -189,7 +189,7 @@
         </div>
     </div>
 
-    <div id="versionTag">LOGIC GATE V143.0</div>
+    <div id="versionTag">LOGIC GATE V144.0</div>
 
     <script src="pinmame_web.js"></script>
 
@@ -261,47 +261,60 @@
                 pinmameInstance = instance;
                 vfdMemoryPointer = instance._pinmame_get_dsprom_ptr();
 
+                // 🌟 LECTEUR SECURISÉ OCTET PAR OCTET DE LA VERSION C++ (ANTI-CRASH)
                 try {
-                    if (instance.UTF8ToString && instance._pinmame_get_version) {
-                        versionTagEl.textContent = instance.UTF8ToString(instance._pinmame_get_version());
-                    } else if (instance.Pointer_stringify && instance._pinmame_get_version) {
-                        versionTagEl.textContent = instance.Pointer_stringify(instance._pinmame_get_version());
+                    if (instance._pinmame_get_version) {
+                        const ptr = instance._pinmame_get_version();
+                        let versionStr = "";
+                        let idx = 0;
+                        while (instance.HEAPU8[ptr + idx] !== 0 && idx < 100) {
+                            versionStr += String.fromCharCode(instance.HEAPU8[ptr + idx]);
+                            idx++;
+                        }
+                        if (versionStr) versionTagEl.textContent = versionStr;
                     }
                 } catch(e) {
-                    console.log("Extraction de version native non supportée, fallback standard.");
+                    console.log("Extraction string native impossible, conservation du tag de secours.");
                 }
 
                 setupButtons();
 
                 function renderFrame() {
+                    // Sécurité d'initialisation mémoire
+                    if (!pinmameInstance || !vfdMemoryPointer) {
+                        requestAnimationFrame(renderFrame);
+                        return;
+                    }
+
+                    const heap = pinmameInstance.HEAPU8;
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                    // 🌟 FIX ALIGNEMENT 1 : Lecture sécurisée par octets pour le VFD
+                    // 1. Lecture VFD sécurisée
                     for (let i = 0; i < 20; i++) {
-                        const low1 = pinmameInstance.HEAPU8[vfdMemoryPointer + (i * 2)];
-                        const high1 = pinmameInstance.HEAPU8[vfdMemoryPointer + (i * 2) + 1];
+                        const low1 = heap[vfdMemoryPointer + (i * 2)];
+                        const high1 = heap[vfdMemoryPointer + (i * 2) + 1];
                         const mask1 = low1 | (high1 << 8);
 
-                        const low2 = pinmameInstance.HEAPU8[vfdMemoryPointer + ((20 + i) * 2)];
-                        const high2 = pinmameInstance.HEAPU8[vfdMemoryPointer + ((20 + i) * 2) + 1];
+                        const low2 = heap[vfdMemoryPointer + ((20 + i) * 2)];
+                        const high2 = heap[vfdMemoryPointer + ((20 + i) * 2) + 1];
                         const mask2 = low2 | (high2 << 8);
 
                         drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 40, mask1);
                         drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, mask2);
                     }
 
-                    // Refresh Switch Matrix Feedback
+                    // 2. Feedback Switch Matrix
                     for (let sw = 0; sw < 80; sw++) {
                         const byteIdx = Math.floor(sw / 8);
                         const bitIdx = sw % 8;
-                        const isCpuActive = (pinmameInstance.HEAPU8[vfdMemoryPointer + 200 + byteIdx] & (1 << bitIdx)) !== 0;
+                        const isCpuActive = (heap[vfdMemoryPointer + 200 + byteIdx] & (1 << bitIdx)) !== 0;
                         if (isCpuActive) swCells[sw].classList.add('sw-cpu');
                         else swCells[sw].classList.remove('sw-cpu');
                     }
 
-                    // Refresh Transistors Lampes
+                    // 3. Transistors Lampes
                     for (let col = 0; col < 12; col++) {
-                        const colByte = pinmameInstance.HEAPU8[vfdMemoryPointer + 300 + col];
+                        const colByte = heap[vfdMemoryPointer + 300 + col];
                         for (let row = 0; row < 8; row++) {
                             const lampId = (col * 8) + row;
                             const isLampOn = (colByte & (1 << row)) !== 0;
@@ -310,11 +323,11 @@
                         }
                     }
 
-                    // 🌟 FIX ALIGNEMENT 2 : Reconstruction manuelle sécurisée du mot 32-bits des bobines
-                    const b0 = pinmameInstance.HEAPU8[vfdMemoryPointer + 320];
-                    const b1 = pinmameInstance.HEAPU8[vfdMemoryPointer + 321];
-                    const b2 = pinmameInstance.HEAPU8[vfdMemoryPointer + 322];
-                    const b3 = pinmameInstance.HEAPU8[vfdMemoryPointer + 323];
+                    // 4. Lecture Bobines par reconstruction sécurisée
+                    const b0 = heap[vfdMemoryPointer + 320];
+                    const b1 = heap[vfdMemoryPointer + 321];
+                    const b2 = heap[vfdMemoryPointer + 322];
+                    const b3 = heap[vfdMemoryPointer + 323];
                     const solWord = (b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)) >>> 0;
 
                     for (let s = 0; s < 32; s++) {

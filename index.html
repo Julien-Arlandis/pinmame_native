@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Dev Workbench V174.0</title>
+    <title>PinMAME WASM - Dev Workbench V174.8 (Audio Bus Fixed)</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -123,7 +123,7 @@
         .panel-box { 
             background: var(--bg-box); border: 2px solid var(--border-color); padding: 12px; border-radius: 8px; flex: 1; box-sizing: border-box;
         }
-        .box-title { color: var(--neon-cyan); text-transform: uppercase; font-size: 0.8rem; margin-bottom: 10px; letter-spacing: 1px; font-weight: bold;}
+        .box-title { color: var(--neon-cyan); text-transform: uppercase; font-size: 0.8rem; margin-bottom: 10px; letter-spacing: 1px; font-weight: bold; display: flex; justify-content: space-between; align-items: center;}
         .sub-title { color: #777; font-size: 0.7rem; margin: 8px 0 4px 0; font-weight: bold;}
         
         .grid-sw { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; touch-action: none; }
@@ -137,6 +137,19 @@
         .cell.sw-user { background: var(--neon-green) !important; color: #000 !important; box-shadow: 0 0 6px var(--neon-green); border-color: #fff; }
         .cell.lamp-on { background: #ffff00 !important; color: #000 !important; box-shadow: 0 0 8px #ffff00; }
         .cell.sol-on { background: var(--neon-red) !important; color: #fff !important; box-shadow: 0 0 10px var(--neon-red); }
+
+        .cell-cmd {
+            background: #1a0a2a; border: 1px solid #4a157d; color: #bba0e6; cursor: pointer; transition: all 0.1s;
+        }
+        .cell-cmd:hover { background: #2d1445; border-color: var(--neon-purple); color: #fff; }
+        .cell-cmd:active, .cell.cmd-active { background: var(--neon-purple) !important; color: #fff !important; box-shadow: 0 0 8px var(--neon-purple); }
+
+        .audio-led {
+            width: 12px; height: 12px; border-radius: 50%; background: #111; border: 1px solid #444; transition: all 0.05s;
+        }
+        .audio-led.active {
+            background: var(--neon-green); box-shadow: 0 0 10px var(--neon-green); border-color: #fff;
+        }
 
         .dip-container { display: flex; gap: 10px; flex-wrap: wrap; justify-content: space-between; margin-top: 5px; }
         .dip-bank { background: #8b0000; padding: 6px; border-radius: 4px; border: 2px solid #5a0000; display: flex; gap: 5px; box-shadow: inset 0 0 8px rgba(0,0,0,0.6); }
@@ -188,8 +201,14 @@
             </div>
             
             <div>
-                <div class="box-title" style="color: var(--neon-amber);">🎛️ Configuration DIP Switches (Piles Rockwell CPU)</div>
+                <div class="box-title" style="color: var(--neon-amber);">🎛️ Configuration DIP Switches</div>
                 <div id="dipContainer" class="dip-container"></div>
+            </div>
+
+            <div style="border-top: 1px solid #222; padding-top: 10px;">
+                <div class="box-title" style="color: var(--neon-purple);">🎵 Commandes Audio (Test)</div>
+                <div class="sub-title">Injection directe de codes (00-63) vers la carte son</div>
+                <div id="cmd-grid" class="grid-sw" style="margin-top: 5px;"></div>
             </div>
 
             <div style="border-top: 1px solid #222; padding-top: 10px;">
@@ -223,6 +242,12 @@
             
             <div class="sub-title">⚡ Transistors Puissance Solénoïdes :</div>
             <div id="solGrid" class="grid-sol"></div>
+
+            <div class="box-title" style="margin-top:20px; color:var(--neon-green)">
+                🎵 Sortie Audio (DAC & Synth)
+                <div id="audio-led" class="audio-led" title="Témoin de flux audio"></div>
+            </div>
+            <div class="sub-title">Monitoring direct du buffer (MAME -> Web Audio API)</div>
         </div>
     </div>
 
@@ -243,6 +268,7 @@
         const romNameDisplay = document.getElementById('romNameDisplay');
         const clearRomBtn = document.getElementById('clearRomBtn');
         const rebootBtn = document.getElementById('rebootBtn');
+        const audioLed = document.getElementById('audio-led');
 
         const CHAR_WIDTH = 40; const CHAR_HEIGHT = 70; const SPACING = 15;
         let pinmameInstance = null;
@@ -259,32 +285,37 @@
         const START_ID = 6;  
         const TEST_ID = 7;   
 
-        // 🌟 VARIABLES MOTEUR WEB AUDIO API
+        // VARIABLES WEB AUDIO API
         let audioCtx = null;
         let nextAudioTime = 0;
 
-        function initAudioEngine() {
+        // DÉVERROUILLAGE AUDIO SÉCURISÉ
+        function unlockAudio() {
             if (!audioCtx) {
                 const AudioContext = window.AudioContext || window.webkitAudioContext;
                 audioCtx = new AudioContext({ sampleRate: 44100 });
-                nextAudioTime = audioCtx.currentTime + 0.1; // Latence de sécurité (100ms) pour éviter les craquements
+                nextAudioTime = audioCtx.currentTime;
                 logToTerminal("🔊 Moteur Web Audio initialisé (44.1 kHz).");
             }
             if (audioCtx.state === 'suspended') {
-                audioCtx.resume();
+                audioCtx.resume().then(() => {
+                    logToTerminal("🔊 AudioContext déverrouillé et actif.");
+                });
             }
+            window.removeEventListener('keydown', unlockAudio);
+            window.removeEventListener('click', unlockAudio);
+            window.removeEventListener('touchstart', unlockAudio);
         }
 
-        // Débloquer le son dès que l'utilisateur interagit avec la page
-        window.addEventListener('keydown', () => initAudioEngine(), {once: true});
-        document.body.addEventListener('pointerdown', () => initAudioEngine(), {once: true});
+        window.addEventListener('keydown', unlockAudio);
+        window.addEventListener('click', unlockAudio);
+        window.addEventListener('touchstart', unlockAudio);
 
         function logToTerminal(msg) {
             termEl.textContent += "\n" + msg;
             termEl.scrollTop = termEl.scrollHeight;
         }
 
-        // Init Switchs
         const swGridEl = document.getElementById('swGrid');
         for (let i = 0; i < 80; i++) {
             const cell = document.createElement('div');
@@ -299,7 +330,30 @@
             swCells.push(cell);
         }
 
-        // Génération DIP Blocks
+        // 🌟 INIT GRILLE DE COMMANDES AUDIO AVEC FIX DU RELÂCHEMENT (IDLE BUS)
+        const cmdGridEl = document.getElementById('cmd-grid');
+        for (let i = 0; i < 64; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'cell cell-cmd';
+            cell.textContent = String(i).padStart(2, '0');
+            cell.addEventListener('pointerdown', (e) => {
+                e.preventDefault();
+                if (pinmameInstance) {
+                    // 1. On envoie la commande sonore souhaitée
+                    pinmameInstance._pinmame_trigger_sound(i);
+                    logToTerminal(`[AUDIO] Injection de la commande : 0x${i.toString(16).padStart(2, '0').toUpperCase()} (${i})`);
+                    cell.classList.add('cmd-active');
+                    
+                    // 2. On "relâche" le fil 100ms plus tard pour réarmer la carte son (Idle = 255)
+                    setTimeout(() => {
+                        pinmameInstance._pinmame_trigger_sound(255); 
+                        cell.classList.remove('cmd-active');
+                    }, 100);
+                }
+            });
+            cmdGridEl.appendChild(cell);
+        }
+
         for (let bank = 0; bank < 4; bank++) {
             const bankEl = document.createElement('div');
             bankEl.className = 'dip-bank';
@@ -363,11 +417,12 @@
                 const instance = await createPinMAME({
                     print: function(text) { logToTerminal("[CORE] " + text); },
                     printErr: function(err) { logToTerminal("[ERR] " + err); },
-                    locateFile: function(path, prefix) { return path.endsWith('.wasm') ? 'pinmame_web.wasm' : prefix + path; }
+                    locateFile: function(path, prefix) { return path.endsWith('.wasm') ? 'pinmame_web.wasm' : prefix + path; },
+                    exportedFunctions: ['_pinmame_get_audio_buffer', '_pinmame_get_audio_samples', '_pinmame_clear_audio_buffer', '_pinmame_trigger_sound']
                 });
 
                 let romBuffer;
-                let finalRomName = "bonebstr"; // Identité par défaut
+                let finalRomName = "bonebstr"; 
 
                 const customRomData = sessionStorage.getItem('custom_rom_bytes');
                 const customRomName = sessionStorage.getItem('custom_rom_filename');
@@ -393,13 +448,11 @@
                 }
                 
                 instance.FS.mkdir('/roms');
-                // Écriture du fichier sous son nom réel pour passer les contrôles
                 instance.FS.writeFile(`/roms/${finalRomName}.zip`, new Uint8Array(romBuffer));
 
                 pinmameInstance = instance;
                 vfdMemoryPointer = instance._pinmame_get_dsprom_ptr();
 
-                // Alignement de l'identité C++
                 const strOffset = 1000;
                 const stringAddress = vfdMemoryPointer + strOffset;
                 for (let i = 0; i < finalRomName.length; i++) {
@@ -412,11 +465,9 @@
                     throw new Error(`Le driver matériel pour "${finalRomName}" n'existe pas dans la lib.`);
                 }
 
-                // Shunt automatique du Slam Tilt au boot
                 userSwitchStates[1] = true;
                 applySwitchState(1, true);
 
-                // Initialisation des DIP
                 for (let i = 0; i < 32; i++) {
                     applyDipState(i, userDipStates[i]);
                 }
@@ -433,7 +484,6 @@
                     const heap = pinmameInstance.HEAPU8;
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-                    // Refresh VFD
                     for (let i = 0; i < 20; i++) {
                         const low1 = heap[vfdMemoryPointer + (i * 2)];
                         const high1 = heap[vfdMemoryPointer + (i * 2) + 1];
@@ -447,7 +497,6 @@
                         drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, mask2);
                     }
 
-                    // Refresh Transistors Lampes
                     for (let col = 0; col < 12; col++) {
                         const colByte = heap[vfdMemoryPointer + 300 + col];
                         for (let row = 0; row < 8; row++) {
@@ -460,7 +509,6 @@
                         }
                     }
 
-                    // Refresh Solénoïdes
                     const b0 = heap[vfdMemoryPointer + 320];
                     const b1 = heap[vfdMemoryPointer + 321];
                     const b2 = heap[vfdMemoryPointer + 322];
@@ -475,32 +523,40 @@
                         }
                     }
 
-                    // 🌟 EXTRACTION ET LECTURE DU FLUX AUDIO (Live)
-                    if (audioCtx && audioCtx.state === 'running') {
+                    if (audioCtx && audioCtx.state === 'running' && pinmameInstance._pinmame_get_audio_samples) {
                         const samplesCount = pinmameInstance._pinmame_get_audio_samples();
                         if (samplesCount > 0) {
                             const bufferPtr = pinmameInstance._pinmame_get_audio_buffer();
-                            // Lecture de la RAM comme tableau Int16
                             const audioData = new Int16Array(heap.buffer, bufferPtr, samplesCount);
                             
-                            const frames = samplesCount / 2; // Stéréo
-                            const webAudioBuffer = audioCtx.createBuffer(2, frames, 44100);
+                            pinmameInstance._pinmame_clear_audio_buffer();
+
+                            const channels = 1;
+                            const frames = samplesCount;
                             
-                            const leftChannel = webAudioBuffer.getChannelData(0);
-                            const rightChannel = webAudioBuffer.getChannelData(1);
-                            
-                            // Conversion de Int16 (-32768 à 32767) vers Float32 (-1.0 à 1.0)
+                            const webAudioBuffer = audioCtx.createBuffer(channels, frames, 44100);
+                            let audioEnergy = 0;
+
+                            const channel0 = webAudioBuffer.getChannelData(0);
                             for (let i = 0; i < frames; i++) {
-                                leftChannel[i] = audioData[i * 2] / 32768.0;
-                                rightChannel[i] = audioData[i * 2 + 1] / 32768.0;
+                                let sample = audioData[i] / 32768.0;
+                                channel0[i] = sample;
+                                audioEnergy += Math.abs(sample);
                             }
                             
+                            if (audioEnergy > 2.0) {
+                                audioLed.classList.add('active');
+                            } else {
+                                audioLed.classList.remove('active');
+                            }
+
                             const source = audioCtx.createBufferSource();
                             source.buffer = webAudioBuffer;
                             source.connect(audioCtx.destination);
                             
-                            if (nextAudioTime < audioCtx.currentTime) {
-                                nextAudioTime = audioCtx.currentTime + 0.05; // Ajustement si on est en retard
+                            let currentTime = audioCtx.currentTime;
+                            if (nextAudioTime < currentTime) {
+                                nextAudioTime = currentTime + 0.02;
                             }
                             source.start(nextAudioTime);
                             nextAudioTime += webAudioBuffer.duration;
@@ -511,7 +567,7 @@
                 }
 
                 requestAnimationFrame(renderFrame);
-                statusEl.textContent = "🟢 PinMAME Workbench V174.0 - Live Audio";
+                statusEl.textContent = "🟢 PinMAME Workbench V174.8 - Audio Bus Fixed";
                 statusEl.style.color = "#00ffcc";
                 
                 instance._pinmame_web_boot();
@@ -543,7 +599,6 @@
                 reader.onload = (evt) => {
                     const bytes = new Uint8Array(evt.target.result);
                     let binaryStr = "";
-                    // Conversion optimisée pour le stockage inter-page
                     for (let i = 0; i < bytes.length; i++) {
                         binaryStr += String.fromCharCode(bytes[i]);
                     }

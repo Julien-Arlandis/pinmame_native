@@ -28,10 +28,12 @@
 #define BUILD_AY8910 1
 #define HAS_SP0250 1
 #define BUILD_SP0250 1
-#define HAS_OKIM6295 1
-#define BUILD_OKIM6295 1
+#define HAS_OKIM6295 1   // 🌟 REACTIVÉ POUR SATISFAIRE GTS80S.C
+#define BUILD_OKIM6295 1 
 #define HAS_YM2151 1
 #define BUILD_YM2151 1
+#define HAS_YM2203 1     // 🌟 REACTIVÉ POUR SATISFAIRE AY8910.C
+#define BUILD_YM2203 1
 
 void OPMUpdateOne(int num, int16_t **buffer, int length);
 

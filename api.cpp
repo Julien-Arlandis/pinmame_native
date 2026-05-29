@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V173.1 (SOUND REGISTERS STUBBED)
+// 🏷️ VERSION : API-CORE-GATEWAY-V174.0 (REAL-TIME AUDIO STREAMING)
 // =========================================================================
 
 #include <iostream>
@@ -29,6 +29,11 @@ static uint32_t g_font_security_anchor[100] = {0};
 
 static int g_selected_game_index = 0;
 
+// 🌟 LE RÉSERVOIR AUDIO (BUFFER) POUR LE JAVASCRIPT
+static int16_t g_audio_buffer[8192];
+static int g_audio_samples_count = 0;
+static int g_audio_is_stereo = 0;
+
 extern "C" void emscripten_sleep(unsigned int ms);
 
 extern "C" void libpinmame_log_error(const char* format, ...) {
@@ -46,7 +51,7 @@ extern "C" {
     extern int bailing;
     extern struct osd_bitmap *scrbitmap;
 
-    char build_version[] = "PinMAME-WASM-V173.1";
+    char build_version[] = "PinMAME-WASM-V174.0";
     int alpha_active = 0;
     int spriteram_size = 0;
     int spriteram_2_size = 0;
@@ -90,8 +95,21 @@ extern "C" {
     void osd_free_colors(void) {}
     int osd_display_loading_rom_message(const char *name, struct rom_load_data *romdata) { return 0; }
     void osd_update_video_and_audio(struct mame_display *display) {}
-    int osd_start_audio_stream(int stereo) { return 1000; }
-    int osd_update_audio_stream(INT16 *buffer) { return 1000; }
+
+    // 🌟 ACTIVATION DU STREAMING AUDIO VERS LE BUFFER GLOBAL
+    int osd_start_audio_stream(int stereo) { 
+        g_audio_is_stereo = stereo;
+        return 735; // 44100 Hz / 60 FPS = 735 samples par frame
+    }
+    
+    int osd_update_audio_stream(INT16 *buffer) { 
+        int channels = g_audio_is_stereo ? 2 : 1;
+        g_audio_samples_count = 735 * channels;
+        // Copie des ondes générées par l'émulateur vers notre réservoir
+        memcpy(g_audio_buffer, buffer, g_audio_samples_count * sizeof(int16_t));
+        return 735; 
+    }
+    
     void osd_stop_audio_stream(void) {}
     void osd_sound_enable(int enable) {}
 
@@ -180,7 +198,7 @@ extern "C" {
     int votraxsc01_status_r(int p1) { return 0; }
     int sem_timedwait(void* sem, const void* abs_timeout) { return 0; }
 
-    // 🌟 RE-INJECTION DES POINTEURS DE CONTROLE AUDIO RECLAMÉS PAR GTS80S.O
+    // Stubs matériels pour GTS80s
     void AY8910_control_port_0_w(int offset, int data) {}
     void AY8910_write_port_0_w(int offset, int data) {}
     void AY8910_control_port_1_w(int offset, int data) {}
@@ -225,11 +243,15 @@ extern "C" {
     uint8_t* pinmame_get_gprom_ptr() { return g_dummy_buffer; }
     uint8_t* pinmame_get_dsprom_ptr() { return g_dummy_buffer; } 
     const char* pinmame_get_display() { return g_display_text; }
-    const char* pinmame_get_version() { return "PinMAME Analyzer Gate V173.1"; }
+    const char* pinmame_get_version() { return "PinMAME Analyzer Gate V174.0"; }
     void pinmame_web_entry(int gprom_size, int dsprom_size) {}
     void pinmame_web_tick(int cycles) {}
 
-    // Déclarations fortes des drivers validés présents dans libpinmame_wasm.a
+    // 🌟 NOUVELLES FONCTIONS D'EXPORT AUDIO POUR LE JAVASCRIPT
+    EMSCRIPTEN_KEEPALIVE int16_t* pinmame_get_audio_buffer() { return g_audio_buffer; }
+    EMSCRIPTEN_KEEPALIVE int pinmame_get_audio_samples() { return g_audio_samples_count; }
+
+    // Déclarations fortes des drivers
     extern struct GameDriver driver_bonebstr;
     extern struct GameDriver driver_badgirls;
     extern struct GameDriver driver_genesis;
@@ -244,7 +266,6 @@ extern "C" {
     extern struct GameDriver driver_excalibr;
     extern struct GameDriver driver_diamond;
 
-    // Tableau officiel épuré des deux éléments absents
     struct GameDriver *drivers[] = {
         &driver_bonebstr, &driver_badgirls, &driver_genesis, &driver_txsector,
         &driver_victory,  &driver_arena,    &driver_raven,    &driver_rock,

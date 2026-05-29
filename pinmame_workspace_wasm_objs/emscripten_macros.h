@@ -31,13 +31,6 @@
 #define HAS_OKIM6295 1   
 #define BUILD_OKIM6295 1 
 
-#define HAS_YM2151 1
-#define BUILD_YM2151 1
-#define BUILD_OPM 1      
-#define HAS_YM2203 1     
-#define BUILD_YM2203 1
-#define BUILD_OPN 1      
-
 #define PINMAME_NO_WPC 1
 #define PINMAME_NO_WILLIAMS 1
 #define PINMAME_NO_STERN 1
@@ -45,24 +38,15 @@
 #define PINMAME_NO_SEGA 1
 #define PINMAME_NO_DATAEAST 1
 
+// 🌟 ALIGNEMENT SUR LE SLOT 0 POUR SÉCURISER L'INDX D'APPEL INDIRECT DU COEUR
+#define SOUND_YM2151 0
+#define SOUND_YM2203 0
+
 #ifndef __rolq
 #define __rolq(x,c) (((uint64_t)(x) << (c)) | ((uint64_t)(x) >> (64 - (c))))
 #endif
 #ifndef __rorq
 #define __rorq(x,c) (((uint64_t)(x) >> (c)) | ((uint64_t)(x) << (64 - (c))))
-#endif
-
-// 🌟 INJECTION DOUBLE-BLINDÉE DES PROTOTYPES NATIFS DE LA PUCE YM2151
-// Utilisation de la syntaxe C-parentheses vides () pour accepter n'importe quel pointeur de fonction
-#ifdef __cplusplus
-extern "C" {
-#endif
-int OPMInit(int num, int clock, int rate, void (*timer_handler)(), void (*irq_handler)());
-void OPMShutdown(void);
-void OPMResetChip(int num);
-void OPMUpdateOne(int num, short **buffer, int length);
-#ifdef __cplusplus
-}
 #endif
 
 #endif

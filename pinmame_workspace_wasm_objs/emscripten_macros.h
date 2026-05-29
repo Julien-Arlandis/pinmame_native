@@ -28,14 +28,15 @@
 #define BUILD_AY8910 1
 #define HAS_SP0250 1
 #define BUILD_SP0250 1
-#define HAS_OKIM6295 1   // 🌟 REACTIVÉ POUR SATISFAIRE GTS80S.C
+#define HAS_OKIM6295 1   
 #define BUILD_OKIM6295 1 
+
 #define HAS_YM2151 1
 #define BUILD_YM2151 1
-#define HAS_YM2203 1     // 🌟 REACTIVÉ POUR SATISFAIRE AY8910.C
+#define BUILD_OPM 1      
+#define HAS_YM2203 1     
 #define BUILD_YM2203 1
-
-void OPMUpdateOne(int num, int16_t **buffer, int length);
+#define BUILD_OPN 1      
 
 #define PINMAME_NO_WPC 1
 #define PINMAME_NO_WILLIAMS 1
@@ -49,6 +50,19 @@ void OPMUpdateOne(int num, int16_t **buffer, int length);
 #endif
 #ifndef __rorq
 #define __rorq(x,c) (((uint64_t)(x) >> (c)) | ((uint64_t)(x) << (64 - (c))))
+#endif
+
+// 🌟 INJECTION DOUBLE-BLINDÉE DES PROTOTYPES NATIFS DE LA PUCE YM2151
+// Utilisation de la syntaxe C-parentheses vides () pour accepter n'importe quel pointeur de fonction
+#ifdef __cplusplus
+extern "C" {
+#endif
+int OPMInit(int num, int clock, int rate, void (*timer_handler)(), void (*irq_handler)());
+void OPMShutdown(void);
+void OPMResetChip(int num);
+void OPMUpdateOne(int num, short **buffer, int length);
+#ifdef __cplusplus
+}
 #endif
 
 #endif

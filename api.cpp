@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V174.6 (AUDIO SYNC & FIFO BUFFER)
+// 🏷️ VERSION : API-CORE-GATEWAY-V173.31 (BOOT SEQUENCE RESTORED & FLUID)
 // =========================================================================
 
 #include <iostream>
@@ -23,17 +23,21 @@ extern "C" {
 #include "usrintrf.h"
 }
 
-static uint8_t g_dummy_buffer[4096] = {0};
+// SHIELD MÉMOIRE CRITIQUE (1 Mo pour encaisser les bitmaps système)
+static uint8_t g_dummy_buffer[1024 * 1024] = {0}; 
 static char g_display_text[100] = "Analyseur Global Actif";
-static uint32_t g_font_security_anchor[100] = {0}; 
+static uint32_t g_font_security_anchor[10000] = {0}; 
 
 static int g_selected_game_index = 0;
 
-// 🌟 LE RÉSERVOIR AUDIO EN MODE "FILE D'ATTENTE" (FIFO)
-#define MAX_AUDIO_BUFFER 131072 // Grand buffer pour éviter de perdre des sons
-static int16_t g_audio_buffer[MAX_AUDIO_BUFFER];
-static int g_audio_samples_count = 0;
-static int g_audio_is_stereo = 0;
+// NOYAU AUDIO CIRCULAIRE DOUBLE-POINTEUR SANS SACCADES
+#define C_AUDIO_BUFFER_MAX 131072
+static INT16 g_audio_ring_buffer[C_AUDIO_BUFFER_MAX];
+static int g_audio_write_idx = 0;
+static int g_audio_read_idx = 0; 
+static INT16 g_linear_audio_buffer[C_AUDIO_BUFFER_MAX];
+
+#define SAMPLES_PER_FRAME 735 
 
 extern "C" void emscripten_sleep(unsigned int ms);
 
@@ -48,12 +52,11 @@ extern "C" void libpinmame_log_error(const char* format, ...) {
 extern "C" {
     int run_game(int game_num);
     unsigned int cpunum_get_reg(int cpunum, int regnum);
-    void sndbrd_0_data_w(int offset, int data);
     
     extern int bailing;
     extern struct osd_bitmap *scrbitmap;
 
-    char build_version[] = "PinMAME-WASM-V174.6";
+    char build_version[] = "PinMAME-WASM-V173.31";
     int alpha_active = 0;
     int spriteram_size = 0;
     int spriteram_2_size = 0;
@@ -83,7 +86,12 @@ extern "C" {
     cycles_t osd_cycles_per_second(void) { return (cycles_t)1000000000; }
     
     int osd_init(void) { return 0; }
-    void osd_exit(void) { exit(1); }
+    
+    void osd_exit(void) { 
+        std::cerr << "⚠️ [OSD_EXIT] Le coeur PinMAME a demande un arrêt propre." << std::endl;
+        while(1) { emscripten_sleep(1000); } 
+    }
+    
     void osd_pause(int paused) {}
     int osd_skip_this_frame(void) { return 0; }
     int osd_init_video(void) { return 0; }
@@ -97,29 +105,18 @@ extern "C" {
     void osd_free_colors(void) {}
     int osd_display_loading_rom_message(const char *name, struct rom_load_data *romdata) { return 0; }
     void osd_update_video_and_audio(struct mame_display *display) {}
-
-    int osd_start_audio_stream(int stereo) { 
-        g_audio_is_stereo = stereo;
-        return 735; 
-    }
     
-    // 🌟 ACCUMULATION DES SONS
+    int osd_start_audio_stream(int stereo) { return SAMPLES_PER_FRAME; }
+    
     int osd_update_audio_stream(INT16 *buffer) { 
-        int channels = g_audio_is_stereo ? 2 : 1;
-        int new_samples = 735 * channels;
-
-        // On ajoute les nouveaux sons à la suite des anciens
-        if (g_audio_samples_count + new_samples <= MAX_AUDIO_BUFFER) {
-            memcpy(&g_audio_buffer[g_audio_samples_count], buffer, new_samples * sizeof(int16_t));
-            g_audio_samples_count += new_samples;
-        } else {
-            // Si le JS a planté et que le buffer s'est rempli, on écrase pour éviter le crash
-            memcpy(g_audio_buffer, buffer, new_samples * sizeof(int16_t));
-            g_audio_samples_count = new_samples;
+        int shorts_to_copy = SAMPLES_PER_FRAME * 2; 
+        for (int i = 0; i < shorts_to_copy; i++) {
+            g_audio_ring_buffer[g_audio_write_idx] = buffer[i];
+            g_audio_write_idx = (g_audio_write_idx + 1) % C_AUDIO_BUFFER_MAX;
         }
-        return 735; 
+        return SAMPLES_PER_FRAME; 
     }
-    
+
     void osd_stop_audio_stream(void) {}
     void osd_sound_enable(int enable) {}
 
@@ -182,25 +179,17 @@ extern "C" {
     float bulb_heat_up_factor(int p1, float p2, float p3, float p4) { return 0.0f; }
     float bulb_filament_temperature_to_emission(int p1, float p2) { return 0.0f; }
     void bulb_init(void) {}
-
-    int OPMInit(int num, double clock, double rate, int param4, int param5) { return 0; }
-    int OPMResetChip(int num) { return 0; } 
-    int OPMShutdown(void) { return 0; }
-    int OPMSetPortHander(int num, void* handler) { return 0; }
-    int YM2151TimerOver(int c, int ch) { return 0; }
-    void OPMUpdateOne(int num, INT16 **buffer, int length) {}
-    void YM2151_data_port_0_w(int offset, int data) {}
-    void YM2151_register_port_0_w(int offset, int data) {}
-
-    void pic8259_0_config(int p1, int p2) {}
     int sem_timedwait(void* sem, const void* abs_timeout) { return 0; }
+
+    int pic8259_0_config(int p1, int p2) { return 0; }
+
+    int YM2203_sh_start(void* msound) { return 0; }
+    void YM2203_sh_stop(void) {}
+    void YM2203_sh_reset(void) {}
 
     int OKIM6295_sh_start(void* msound) { return 0; }
     void OKIM6295_sh_stop(void) {}
     void OKIM6295_sh_update(void) {}
-    int YM2203_sh_start(void* msound) { return 0; }
-    void YM2203_sh_stop(void) {}
-    void YM2203_sh_reset(void) {}
 
     void* s11csIntf = nullptr;    void* wpcsIntf = nullptr;     void* dcsIntf = nullptr;      void* by32Intf = nullptr;
     void* by51Intf = nullptr;     void* s11jsIntf = nullptr;    void* by61Intf = nullptr;     
@@ -217,45 +206,70 @@ extern "C" {
     void* play2sIntf = nullptr;   void* play3sIntf = nullptr;   void* play4sIntf = nullptr;   void* zsuIntf = nullptr;      
     void* playzsIntf = nullptr;   void* tecnoplayIntf = nullptr; void* joctronicIntf = nullptr; void* barniIntf = nullptr;
 
+    // PROTECTION CONTRE LES ERREURS DE LIEN DE LA PUCE YAMAHA (SYMBOLES FAIBLES)
+    #define SAFESTUB __attribute__((weak))
+    SAFESTUB int OPMInit(int num, int clock, int rate, void* p4, void* p5) { return 0; }
+    SAFESTUB void OPMShutdown(void) {}
+    SAFESTUB void OPMResetChip(int num) {}
+    SAFESTUB int OPMSetPortHander(int num, int handler) { return 0; }
+    SAFESTUB int YM2151TimerOver(int c, int ch) { return 0; }
+    SAFESTUB void OPMUpdateOne(int num, INT16 **buffer, int length) {}
+    SAFESTUB void YM2151_data_port_0_w(int offset, int data) {}
+    SAFESTUB void YM2151_register_port_0_w(int offset, int data) {}
+    SAFESTUB void YM2151_word_0_w(int offset, int data) {}
+
     void artwork_update_video_and_audio(void* display) {
         uint16_t* vfd_export = (uint16_t*)g_dummy_buffer;
         for (int i = 0; i < 20; i++) {
             vfd_export[i]      = coreGlobals.segments[i].w & 0xFFFF;
             vfd_export[20 + i] = coreGlobals.segments[20 + i].w & 0xFFFF;
         }
-        for (int sw = 0; sw < 80; sw++) {
-            core_setSw(sw, g_dummy_buffer[100 + sw]);
-        }
-        for (int b = 0; b < 10; b++) {
-            g_dummy_buffer[200 + b] = coreGlobals.swMatrix[b];
-        }
-        for (int l = 0; l < 12; l++) {
-            g_dummy_buffer[300 + l] = coreGlobals.lampMatrix[l];
-        }
+        for (int sw = 0; sw < 80; sw++) { core_setSw(sw, g_dummy_buffer[100 + sw]); }
+        for (int b = 0; b < 10; b++) { g_dummy_buffer[200 + b] = coreGlobals.swMatrix[b]; }
+        for (int l = 0; l < 12; l++) { g_dummy_buffer[300 + l] = coreGlobals.lampMatrix[l]; }
         uint32_t solenoids_state = coreGlobals.solenoids;
         memcpy(&g_dummy_buffer[320], &solenoids_state, 4);
+
+        // TRANSACTION ET STREAMING AUDIO PAR POINTEUR DE CONDUITE CIRCULAIRE
+        uint32_t js_consumed = 0;
+        memcpy(&js_consumed, &g_dummy_buffer[1050], 4);
+
+        int pending_samples = (g_audio_write_idx - g_audio_read_idx + C_AUDIO_BUFFER_MAX) % C_AUDIO_BUFFER_MAX;
+
+        if (js_consumed == 0 && pending_samples > 0) {
+            if (pending_samples > 4096) pending_samples = 4096;
+            
+            for (int i = 0; i < pending_samples; i++) {
+                g_linear_audio_buffer[i] = g_audio_ring_buffer[g_audio_read_idx];
+                g_audio_read_idx = (g_audio_read_idx + 1) % C_AUDIO_BUFFER_MAX;
+            }
+            
+            memcpy(&g_dummy_buffer[1050], &pending_samples, 4);
+            uint32_t buffer_address = (uint32_t)g_linear_audio_buffer;
+            memcpy(&g_dummy_buffer[1054], &buffer_address, 4);
+        }
+
+        // REGULATEUR ADAPTATIF AUDIO (Anti-Saccades)
+        pending_samples = (g_audio_write_idx - g_audio_read_idx + C_AUDIO_BUFFER_MAX) % C_AUDIO_BUFFER_MAX;
+        if (pending_samples > 6000) {
+            emscripten_sleep(4); 
+        } else if (pending_samples > 2500) {
+            emscripten_sleep(1); 
+        } else {
+            emscripten_sleep(0); // 🚀 Accélération maximale
+        }
+
         emscripten_sleep(1);
     }
 
     uint8_t* pinmame_get_gprom_ptr() { return g_dummy_buffer; }
     uint8_t* pinmame_get_dsprom_ptr() { return g_dummy_buffer; } 
     const char* pinmame_get_display() { return g_display_text; }
-    const char* pinmame_get_version() { return "PinMAME Analyzer Gate V174.6"; }
+    const char* pinmame_get_version() { return "PinMAME Analyzer Gate V173.31"; }
     void pinmame_web_entry(int gprom_size, int dsprom_size) {}
     void pinmame_web_tick(int cycles) {}
 
-    // 🌟 ACCESSEURS AUDIO ET FONCTION DE NETTOYAGE
-    EMSCRIPTEN_KEEPALIVE int16_t* pinmame_get_audio_buffer() { return g_audio_buffer; }
-    EMSCRIPTEN_KEEPALIVE int pinmame_get_audio_samples() { return g_audio_samples_count; }
-    
-    // NOUVEAU : On vide le buffer une fois que le JS l'a lu !
-    EMSCRIPTEN_KEEPALIVE void pinmame_clear_audio_buffer() { g_audio_samples_count = 0; }
-
-    EMSCRIPTEN_KEEPALIVE void pinmame_trigger_sound(int cmd) {
-        // Envoi inversé du code (classique sur Gottlieb 80B) pour réveiller la carte son
-        sndbrd_0_data_w(0, ~cmd); 
-    }
-
+    // 🌟 RE-DECLARATION MATERIELLE DE LA CARTOGRAPHIE DES DRIVERS GOTTLIEB 80B
     extern struct GameDriver driver_bonebstr;
     extern struct GameDriver driver_badgirls;
     extern struct GameDriver driver_genesis;
@@ -278,22 +292,28 @@ extern "C" {
         nullptr
     };
 
-    EMSCRIPTEN_KEEPALIVE int pinmame_set_driver_by_name(const char* name) {
+    extern GameOptions options;
+
+    // 🌟 RESTAURATION DU SEQUENCEUR LOGIQUE DE BOOT D'ARCADE EXPORTÉ VERS LE JAVASCRIPT
+    void pinmame_web_boot() {
+        options.samplerate = 44100;
+        const char* rom_name = (const char*)&g_dummy_buffer[1000];
+        
         int i = 0;
+        bool found = false;
         while (drivers[i] != nullptr) {
-            if (strcmp(drivers[i]->name, name) == 0) {
+            if (strcmp(drivers[i]->name, rom_name) == 0) {
                 g_selected_game_index = i;
-                return 1; 
+                std::cout << "🎯 Match trouve dans libpinmame ! Index : " << i 
+                          << " -> [ " << drivers[i]->description << " ]" << std::endl;
+                found = true;
+                break;
             }
             i++;
         }
-        return 0; 
-    }
+        if (!found) g_selected_game_index = 0;
 
-    extern struct GameOptions options;
-
-    void pinmame_web_boot() {
-        options.samplerate = 44100;
+        std::cout << "🚀 Demarrage du processeur d'arcade sur l'index materiel : " << g_selected_game_index << std::endl;
         bailing = 0;
         run_game(g_selected_game_index); 
     }

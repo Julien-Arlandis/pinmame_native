@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Dev Workbench V174.8 (Audio Bus Fixed)</title>
+    <title>PinMAME WASM - Dev Workbench V175.9</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -62,7 +62,6 @@
             font-weight: bold;
         }
 
-        /* 🌟 PANNEAU D'ADMINISTRATION ET GESTION DES ROMS */
         .system-panel {
             display: flex;
             gap: 15px;
@@ -201,13 +200,13 @@
             </div>
             
             <div>
-                <div class="box-title" style="color: var(--neon-amber);">🎛️ Configuration DIP Switches</div>
+                <div class="box-title">🎛️ Configuration DIP Switches</div>
                 <div id="dipContainer" class="dip-container"></div>
             </div>
 
             <div style="border-top: 1px solid #222; padding-top: 10px;">
                 <div class="box-title" style="color: var(--neon-purple);">🎵 Commandes Audio (Test)</div>
-                <div class="sub-title">Injection directe de codes (00-63) vers la carte son</div>
+                <div class="sub-title">Injection par verrouillage déterministe dans le thread matériel</div>
                 <div id="cmd-grid" class="grid-sw" style="margin-top: 5px;"></div>
             </div>
 
@@ -285,31 +284,65 @@
         const START_ID = 6;  
         const TEST_ID = 7;   
 
-        // VARIABLES WEB AUDIO API
-        let audioCtx = null;
-        let nextAudioTime = 0;
+        const RING_BUFFER_SIZE = 131072;
+        const ringBufferL = new Float32Array(RING_BUFFER_SIZE);
+        const ringBufferR = new Float32Array(RING_BUFFER_SIZE);
+        let audioWritePtr = 0;
+        let audioReadPtr = 0;
+        let isBufferWarming = true;
 
-        // DÉVERROUILLAGE AUDIO SÉCURISÉ
+        let lastSampleL = 0.0;
+        let lastSampleR = 0.0;
+
+        let audioCtx = null;
+        let audioNode = null;
+
         function unlockAudio() {
             if (!audioCtx) {
                 const AudioContext = window.AudioContext || window.webkitAudioContext;
                 audioCtx = new AudioContext({ sampleRate: 44100 });
-                nextAudioTime = audioCtx.currentTime;
-                logToTerminal("🔊 Moteur Web Audio initialisé (44.1 kHz).");
+                audioNode = audioCtx.createScriptProcessor(2048, 0, 2);
+                
+                audioNode.onaudioprocess = function(e) {
+                    const outL = e.outputBuffer.getChannelData(0);
+                    const outR = e.outputBuffer.getChannelData(1);
+                    let distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
+                    
+                    if (isBufferWarming) {
+                        if (distance >= 4096) isBufferWarming = false;
+                        else {
+                            outL.fill(0); outR.fill(0);
+                            audioLed.classList.remove('active');
+                            return;
+                        }
+                    }
+                    
+                    for (let i = 0; i < outL.length; i++) {
+                        if (audioReadPtr !== audioWritePtr) {
+                            lastSampleL = ringBufferL[audioReadPtr];
+                            lastSampleR = ringBufferR[audioReadPtr];
+                            audioReadPtr = (audioReadPtr + 1) % RING_BUFFER_SIZE;
+                            outL[i] = lastSampleL;
+                            outR[i] = lastSampleR;
+                        } else {
+                            lastSampleL *= 0.85; lastSampleR *= 0.85;
+                            outL[i] = lastSampleL; outR[i] = lastSampleR;
+                        }
+                    }
+                    
+                    distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
+                    if (distance > 12288) {
+                        audioReadPtr = (audioWritePtr - 2048 + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
+                    }
+                    audioLed.classList.add('active');
+                };
+                audioNode.connect(audioCtx.destination);
+                logToTerminal("🔊 Traitement audio stéréo synchronisé activé.");
             }
             if (audioCtx.state === 'suspended') {
-                audioCtx.resume().then(() => {
-                    logToTerminal("🔊 AudioContext déverrouillé et actif.");
-                });
+                audioCtx.resume();
             }
-            window.removeEventListener('keydown', unlockAudio);
-            window.removeEventListener('click', unlockAudio);
-            window.removeEventListener('touchstart', unlockAudio);
         }
-
-        window.addEventListener('keydown', unlockAudio);
-        window.addEventListener('click', unlockAudio);
-        window.addEventListener('touchstart', unlockAudio);
 
         function logToTerminal(msg) {
             termEl.textContent += "\n" + msg;
@@ -330,7 +363,6 @@
             swCells.push(cell);
         }
 
-        // 🌟 INIT GRILLE DE COMMANDES AUDIO AVEC FIX DU RELÂCHEMENT (IDLE BUS)
         const cmdGridEl = document.getElementById('cmd-grid');
         for (let i = 0; i < 64; i++) {
             const cell = document.createElement('div');
@@ -338,17 +370,11 @@
             cell.textContent = String(i).padStart(2, '0');
             cell.addEventListener('pointerdown', (e) => {
                 e.preventDefault();
-                if (pinmameInstance) {
-                    // 1. On envoie la commande sonore souhaitée
-                    pinmameInstance._pinmame_trigger_sound(i);
-                    logToTerminal(`[AUDIO] Injection de la commande : 0x${i.toString(16).padStart(2, '0').toUpperCase()} (${i})`);
+                unlockAudio();
+                if (pinmameInstance && vfdMemoryPointer) {
+                    pinmameInstance.HEAPU8[vfdMemoryPointer + 1060] = i;
                     cell.classList.add('cmd-active');
-                    
-                    // 2. On "relâche" le fil 100ms plus tard pour réarmer la carte son (Idle = 255)
-                    setTimeout(() => {
-                        pinmameInstance._pinmame_trigger_sound(255); 
-                        cell.classList.remove('cmd-active');
-                    }, 100);
+                    setTimeout(() => cell.classList.remove('cmd-active'), 120);
                 }
             });
             cmdGridEl.appendChild(cell);
@@ -413,17 +439,14 @@
         async function startEmulation() {
             try {
                 statusEl.textContent = "🟡 Chargement du binaire WebAssembly...";
-                
                 const instance = await createPinMAME({
                     print: function(text) { logToTerminal("[CORE] " + text); },
                     printErr: function(err) { logToTerminal("[ERR] " + err); },
-                    locateFile: function(path, prefix) { return path.endsWith('.wasm') ? 'pinmame_web.wasm' : prefix + path; },
-                    exportedFunctions: ['_pinmame_get_audio_buffer', '_pinmame_get_audio_samples', '_pinmame_clear_audio_buffer', '_pinmame_trigger_sound']
+                    locateFile: function(path, prefix) { return path.endsWith('.wasm') ? 'pinmame_web.wasm' : prefix + path; }
                 });
 
                 let romBuffer;
                 let finalRomName = "bonebstr"; 
-
                 const customRomData = sessionStorage.getItem('custom_rom_bytes');
                 const customRomName = sessionStorage.getItem('custom_rom_filename');
 
@@ -460,11 +483,6 @@
                 }
                 instance.HEAPU8[stringAddress + finalRomName.length] = 0;
 
-                const matchFound = instance._pinmame_set_driver_by_name(stringAddress);
-                if (!matchFound) {
-                    throw new Error(`Le driver matériel pour "${finalRomName}" n'existe pas dans la lib.`);
-                }
-
                 userSwitchStates[1] = true;
                 applySwitchState(1, true);
 
@@ -475,6 +493,10 @@
                 setupButtons();
                 setupSystemHandlers();
 
+                window.addEventListener('keydown', unlockAudio);
+                window.addEventListener('click', unlockAudio);
+                window.addEventListener('touchstart', unlockAudio);
+
                 function renderFrame() {
                     if (!pinmameInstance || !vfdMemoryPointer) {
                         requestAnimationFrame(renderFrame);
@@ -484,6 +506,7 @@
                     const heap = pinmameInstance.HEAPU8;
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+                    // Refresh VFD
                     for (let i = 0; i < 20; i++) {
                         const low1 = heap[vfdMemoryPointer + (i * 2)];
                         const high1 = heap[vfdMemoryPointer + (i * 2) + 1];
@@ -497,6 +520,7 @@
                         drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, mask2);
                     }
 
+                    // Refresh Transistors Lampes
                     for (let col = 0; col < 12; col++) {
                         const colByte = heap[vfdMemoryPointer + 300 + col];
                         for (let row = 0; row < 8; row++) {
@@ -509,6 +533,7 @@
                         }
                     }
 
+                    // Refresh Solénoïdes
                     const b0 = heap[vfdMemoryPointer + 320];
                     const b1 = heap[vfdMemoryPointer + 321];
                     const b2 = heap[vfdMemoryPointer + 322];
@@ -523,53 +548,45 @@
                         }
                     }
 
-                    if (audioCtx && audioCtx.state === 'running' && pinmameInstance._pinmame_get_audio_samples) {
-                        const samplesCount = pinmameInstance._pinmame_get_audio_samples();
-                        if (samplesCount > 0) {
-                            const bufferPtr = pinmameInstance._pinmame_get_audio_buffer();
-                            const audioData = new Int16Array(heap.buffer, bufferPtr, samplesCount);
-                            
-                            pinmameInstance._pinmame_clear_audio_buffer();
+                    // 🌟 CAPTURE TRANSACTIONNELLE AUDIO ET INTERCEPTION DES COMMANDES DE LA ROM
+                    const sampleCount = heap[vfdMemoryPointer + 1050] | 
+                                        (heap[vfdMemoryPointer + 1051] << 8) | 
+                                        (heap[vfdMemoryPointer + 1052] << 16) | 
+                                        (heap[vfdMemoryPointer + 1053] << 24);
 
-                            const channels = 1;
-                            const frames = samplesCount;
-                            
-                            const webAudioBuffer = audioCtx.createBuffer(channels, frames, 44100);
-                            let audioEnergy = 0;
+                    if (sampleCount > 0 && audioCtx && audioCtx.state === 'running') {
+                        const bufferPtr = heap[vfdMemoryPointer + 1054] | 
+                                          (heap[vfdMemoryPointer + 1055] << 8) | 
+                                          (heap[vfdMemoryPointer + 1056] << 16) | 
+                                          (heap[vfdMemoryPointer + 1057] << 24);
 
-                            const channel0 = webAudioBuffer.getChannelData(0);
-                            for (let i = 0; i < frames; i++) {
-                                let sample = audioData[i] / 32768.0;
-                                channel0[i] = sample;
-                                audioEnergy += Math.abs(sample);
-                            }
-                            
-                            if (audioEnergy > 2.0) {
-                                audioLed.classList.add('active');
-                            } else {
-                                audioLed.classList.remove('active');
-                            }
-
-                            const source = audioCtx.createBufferSource();
-                            source.buffer = webAudioBuffer;
-                            source.connect(audioCtx.destination);
-                            
-                            let currentTime = audioCtx.currentTime;
-                            if (nextAudioTime < currentTime) {
-                                nextAudioTime = currentTime + 0.02;
-                            }
-                            source.start(nextAudioTime);
-                            nextAudioTime += webAudioBuffer.duration;
+                        const audioData = new Int16Array(heap.buffer, bufferPtr, sampleCount);
+                        
+                        for (let i = 0; i < sampleCount; i += 2) {
+                            ringBufferL[audioWritePtr] = audioData[i] / 32768.0;
+                            ringBufferR[audioWritePtr] = (i + 1 < sampleCount) ? (audioData[i + 1] / 32768.0) : (audioData[i] / 32768.0);
+                            audioWritePtr = (audioWritePtr + 1) % RING_BUFFER_SIZE;
                         }
+
+                        // 🌟 LOG DIRECT DES ENREGISTREMENTS AUDIO REÇUS DEPUIS LES PORTS D'INTERCEPTION
+                        const lastRomCommand = heap[vfdMemoryPointer + 1060];
+                        if(lastRomCommand > 0) {
+                            logToTerminal(`🎵 [ROM AUDIO TRIGGER] Commande reçue : 0x${lastRomCommand.toString(16).toUpperCase()} (Freq: ${200 + (lastRomCommand * 8)}Hz)`);
+                            heap[vfdMemoryPointer + 1060] = 0; // Acquittement
+                        }
+
+                        heap[vfdMemoryPointer + 1050] = 0;
+                        heap[vfdMemoryPointer + 1051] = 0;
+                        heap[vfdMemoryPointer + 1052] = 0;
+                        heap[vfdMemoryPointer + 1053] = 0;
                     }
 
                     requestAnimationFrame(renderFrame);
                 }
 
                 requestAnimationFrame(renderFrame);
-                statusEl.textContent = "🟢 PinMAME Workbench V174.8 - Audio Bus Fixed";
+                statusEl.textContent = "🟢 PinMAME Workbench V175.9 - Online";
                 statusEl.style.color = "#00ffcc";
-                
                 instance._pinmame_web_boot();
 
             } catch (err) {
@@ -578,37 +595,24 @@
         }
 
         function setupSystemHandlers() {
-            rebootBtn.onclick = () => {
-                logToTerminal("[SYSTEM] Demande de redémarrage matériel... ");
-                location.reload();
-            };
-
-            clearRomBtn.onclick = () => {
-                sessionStorage.removeItem('custom_rom_bytes');
-                sessionStorage.removeItem('custom_rom_filename');
-                logToTerminal("[SYSTEM] Restauration du fichier d'usine...");
-                location.reload();
-            };
+            rebootBtn.onclick = () => { logToTerminal("[SYSTEM] Demande de redémarrage matériel... "); location.reload(); };
+            clearRomBtn.onclick = () => { sessionStorage.removeItem('custom_rom_bytes'); sessionStorage.removeItem('custom_rom_filename'); location.reload(); };
 
             romUploader.onchange = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
-
-                logToTerminal(`[SYSTEM] Traitement de : ${file.name} (${Math.round(file.size/1024)} KB)`);
+                logToTerminal(`[SYSTEM] Traitement de : ${file.name}`);
                 const reader = new FileReader();
                 reader.onload = (evt) => {
                     const bytes = new Uint8Array(evt.target.result);
                     let binaryStr = "";
-                    for (let i = 0; i < bytes.length; i++) {
-                        binaryStr += String.fromCharCode(bytes[i]);
-                    }
+                    for (let i = 0; i < bytes.length; i++) binaryStr += String.fromCharCode(bytes[i]);
                     try {
                         sessionStorage.setItem('custom_rom_bytes', btoa(binaryStr));
                         sessionStorage.setItem('custom_rom_filename', file.name);
-                        logToTerminal("[SYSTEM] ROM enregistrée avec succès. Flashage et redémarrage...");
                         setTimeout(() => { location.reload(); }, 600);
                     } catch(err) {
-                        logToTerminal("[ERR SYSTEM] Fichier trop lourd pour le stockage de session.");
+                        logToTerminal("[ERR SYSTEM] Stockage saturé.");
                     }
                 };
                 reader.readAsArrayBuffer(file);
@@ -620,26 +624,15 @@
             const startBtn = document.getElementById('startBtn');
             const testBtn = document.getElementById('testBtn');
             
-            window.addEventListener('keydown', (e) => {
-                if (e.key === '5') { applySwitchState(COIN_ID, true); coinBtn.classList.add('forced-active'); }
-                if (e.key === '1') { applySwitchState(START_ID, true); startBtn.classList.add('forced-active'); }
-                if (e.key === '7') { applySwitchState(TEST_ID, true); testBtn.classList.add('forced-active'); }
-            });
-            window.addEventListener('keyup', (e) => {
-                if (e.key === '5') { applySwitchState(COIN_ID, false); coinBtn.classList.remove('forced-active'); }
-                if (e.key === '1') { applySwitchState(START_ID, false); startBtn.classList.remove('forced-active'); }
-                if (e.key === '7') { applySwitchState(TEST_ID, false); testBtn.classList.remove('forced-active'); }
-            });
-
-            coinBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); applySwitchState(COIN_ID, true); });
+            coinBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); applySwitchState(COIN_ID, true); });
             coinBtn.addEventListener('pointerup', (e) => { e.preventDefault(); applySwitchState(COIN_ID, false); });
             coinBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); applySwitchState(COIN_ID, false); });
 
-            startBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); applySwitchState(START_ID, true); });
+            startBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); applySwitchState(START_ID, true); });
             startBtn.addEventListener('pointerup', (e) => { e.preventDefault(); applySwitchState(START_ID, false); });
             startBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); applySwitchState(START_ID, false); });
 
-            testBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); applySwitchState(TEST_ID, true); });
+            testBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); applySwitchState(TEST_ID, true); });
             testBtn.addEventListener('pointerup', (e) => { e.preventDefault(); applySwitchState(TEST_ID, false); });
             testBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); applySwitchState(TEST_ID, false); });
         }

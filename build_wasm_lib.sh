@@ -3,11 +3,11 @@ set -e
 
 # =========================================================================
 # ⚙️ INFRASTRUCTURE PINMAME WASM - SCRIPT COMPILATION LIB STATIQUE
-# 🏷️ VERSION : WASM-GTS80B-STRICT-SEQUENTIAL-V112.4 (GHOST CHIPS REMOVED)
+# 🏷️ VERSION : WASM-GTS80B-STRICT-SEQUENTIAL-V112.14 (COMMAND-LINE FLAGS DRIVEN)
 # =========================================================================
 
 echo "=================================================="
-echo "⚙️ COMPILATION PURIFIÉE PINMAME WASM - VERSION V112.4"
+echo "⚙️ COMPILATION PURIFIÉE PINMAME WASM - VERSION V112.14"
 echo "=================================================="
 
 EMSDK_DIR="/home/julien/emsdk"
@@ -19,7 +19,7 @@ elif [ -f "/etc/profile.d/emscripten.sh" ]; then
 fi
 
 if ! command -v emcc &> /dev/null; then
-    echo "❌ [V112.4] Erreur : emcc est introuvable."
+    echo "❌ [V112.14] Erreur : emcc est introuvable."
     exit 1
 fi
 
@@ -64,7 +64,7 @@ typedef union {
 #endif
 EOF
 
-# GÉNÉRATION DES MACROS MATÉRIELLES
+# GÉNÉRATION DES MACROS MATÉRIELLES (Épurée de tout prototype manuel conflictuel)
 cat << 'EOF' > "$WASM_TEMP_OBJ_DIR/emscripten_macros.h"
 #ifndef EMSCRIPTEN_MACROS_H_V112
 #define EMSCRIPTEN_MACROS_H_V112
@@ -96,14 +96,8 @@ cat << 'EOF' > "$WASM_TEMP_OBJ_DIR/emscripten_macros.h"
 #define BUILD_AY8910 1
 #define HAS_SP0250 1
 #define BUILD_SP0250 1
-#define HAS_OKIM6295 1   // 🌟 REACTIVÉ POUR SATISFAIRE GTS80S.C
+#define HAS_OKIM6295 1   
 #define BUILD_OKIM6295 1 
-#define HAS_YM2151 1
-#define BUILD_YM2151 1
-#define HAS_YM2203 1     // 🌟 REACTIVÉ POUR SATISFAIRE AY8910.C
-#define BUILD_YM2203 1
-
-void OPMUpdateOne(int num, int16_t **buffer, int length);
 
 #define PINMAME_NO_WPC 1
 #define PINMAME_NO_WILLIAMS 1
@@ -122,9 +116,15 @@ void OPMUpdateOne(int num, int16_t **buffer, int length);
 #endif
 EOF
 
+# 🌟 FORCE INJECTION LIGNE DE COMMANDE : Soude définitivement les puces FM dans le silicium WASM
 EMCC_FLAGS=(
     "-O3"
     "-include" "$WASM_TEMP_OBJ_DIR/emscripten_macros.h"
+    "-DHAS_YM2151=1"
+    "-DBUILD_YM2151=1"
+    "-DBUILD_OPM=1"
+    "-DHAS_YM2203=1"
+    "-DBUILD_OPN=1"
     "-I$WASM_TEMP_OBJ_DIR/include"
     "-I$NATIVE_WORKSPACE/src"
     "-I$NATIVE_WORKSPACE/src/wpc"
@@ -147,34 +147,33 @@ COEUR_PILES=(
     "src/wpc/gts80.c" "src/wpc/gts80s.c" "src/wpc/gts80games.c" "src/wpc/core.c"
     "src/wpc/sim.c" "src/wpc/sndbrd.c" "src/wpc/snd_cmd.c" "src/wpc/mech.c"
     "src/machine/6532riot.c" "src/machine/6530riot.c"
-    "src/sound/dac.c" "src/sound/ym2151.c" "src/sound/2151intf.c"
+    "src/sound/dac.c" "src/sound/ym2151.c" "src/sound/2151intf.c" "src/sound/fm.c"
     "src/sound/streams.c" "src/sound/mixer.c" "src/sound/filter.c"
-    # 🌟 SEULES LES VRAIES PUCES PRÉSENTES SONT COMPILÉES (ni okim6295.c ni ym2203.c)
     "src/sound/ay8910.c" "src/sound/sp0250.c" "src/sound/samples.c"
     "src/sound/votrax.c"
 )
 
 if [ -f "$NATIVE_WORKSPACE/src/mame.c" ]; then
-    echo "[*] [V112.4] Application du court-circuit de sécurité sur video_init()..."
+    echo "[*] [V112.14] Application du court-circuit de sécurité sur video_init()..."
     sed -i 's/int old_video_init_disabled(void)/int video_init(void)/' "$NATIVE_WORKSPACE/src/mame.c"
     sed -i 's/int video_init[[:space:]]*(void)/int video_init(void) { return 0; } int old_video_init_disabled(void)/' "$NATIVE_WORKSPACE/src/mame.c"
 fi
 
-echo "[*] [V112.4] Compilation STRICTE du cœur de l'émulateur..."
+echo "[*] [V112.14] Compilation STRICTE du cœur de l'émulateur..."
 for f in "${COEUR_PILES[@]}"; do
     if [ -f "$NATIVE_WORKSPACE/$f" ]; then
         dir_obj="$WASM_TEMP_OBJ_DIR/$(dirname "$f")"
         mkdir -p "$dir_obj"
         b=$(basename "$f" .c)
-        echo "   -> [V112.4] Compilation de $f..."
+        echo "   -> [V112.14] Compilation de $f..."
         emcc "${EMCC_FLAGS[@]}" -c "$NATIVE_WORKSPACE/$f" -o "$dir_obj/$b.o"
     else
-        echo "❌ [V112.4] Erreur fatale : Le fichier $NATIVE_WORKSPACE/$f est introuvable !"
+        echo "❌ [V112.14] Erreur fatale : Le fichier $NATIVE_WORKSPACE/$f est introuvable !"
         exit 1
     fi
 done
 
-echo "[*] [V112.4] Compilation de la Zlib interne..."
+echo "[*] [V112.14] Compilation de la Zlib interne..."
 if [ -d "$NATIVE_WORKSPACE/src/zlib" ]; then
     mkdir -p "$WASM_TEMP_OBJ_DIR/zlib"
     for f in "$NATIVE_WORKSPACE/src/zlib"/*.c; do
@@ -185,16 +184,16 @@ if [ -d "$NATIVE_WORKSPACE/src/zlib" ]; then
     done
 fi
 
-echo "[*] [V112.4] Compilation du module d'E/S fileio..."
+echo "[*] [V112.14] Compilation du module d'E/S fileio..."
 if [ -f "$NATIVE_WORKSPACE/src/unix/fileio.c" ]; then
     mkdir -p "$WASM_TEMP_OBJ_DIR/src/unix"
     emcc "${EMCC_FLAGS[@]}" -Dosd_display_loading_rom_message=native_broken_osd_msg -c "$NATIVE_WORKSPACE/src/unix/fileio.c" -o "$WASM_TEMP_OBJ_DIR/src/unix/fileio.o"
 fi
 
-echo "[*] [V112.4] Assemblage final de l'archive statique..."
+echo "[*] [V112.14] Assemblage final de l'archive statique..."
 find "$WASM_TEMP_OBJ_DIR" -name "*.o" | xargs emar rcs "libpinmame_wasm.a"
 
 FILE_SIZE=$(du -sh "libpinmame_wasm.a" | cut -f1)
 echo "=================================================="
-echo "🟢 [V112.4] libpinmame_wasm.a généré avec succès ! ($FILE_SIZE)"
+echo "🟢 [V112.14] libpinmame_wasm.a généré avec succès ! ($FILE_SIZE)"
 echo "=================================================="

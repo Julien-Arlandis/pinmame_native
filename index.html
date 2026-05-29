@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Dev Workbench V175.9</title>
+    <title>PinMAME WASM - Dev Workbench V175.10</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -28,9 +28,6 @@
             margin: 0; 
             padding: 15px;
             overflow-x: hidden;
-            -webkit-user-select: none;
-            -moz-user-select: none;
-            -ms-user-select: none;
             user-select: none;
         }
 
@@ -86,7 +83,7 @@
         .file-label:hover { border-color: var(--neon-cyan); background: #322247; }
         .btn-sys {
             padding: 10px 16px; font-size: 0.75rem; font-weight: bold; font-family: monospace;
-            text-transform: uppercase; border: none; border-radius: 6px; cursor: pointer; transition: all 0.05s;
+            text-transform: uppercase; border: none; border-radius: 6px; cursor: pointer;
         }
         .btn-reboot { background: var(--neon-purple); color: #fff; box-shadow: 0 3px #4a157d; }
         .btn-reboot:active { transform: translateY(2px); box-shadow: 0 1px #4a157d; }
@@ -111,7 +108,7 @@
             text-transform: uppercase; border: none; border-radius: 8px; box-shadow: 0 4px #000; 
             transition: all 0.05s ease; touch-action: none; cursor: pointer;
         }
-        .btn:active, .btn.forced-active { transform: translateY(3px); box-shadow: 0 1px #000; }
+        .btn:active { transform: translateY(3px); box-shadow: 0 1px #000; }
         .btn-coin { background-color: #ffcc00; color: #000; }
         .btn-start { background-color: #ff0044; color: #fff; }
         .btn-test { background-color: #0099ff; color: #fff; box-shadow: 0 4px #0044aa; }
@@ -157,13 +154,8 @@
         .dip-toggle::after { content: '0'; position: absolute; bottom: 1px; left: 1px; right: 1px; height: 10px; background: #fff; color: #000; font-size: 0.5rem; text-align: center; line-height: 10px; border-radius: 1px; }
         .dip-toggle.dip-on::after { content: '1'; bottom: auto; top: 1px; background: var(--neon-green); color: #000; }
 
-        .doc-table { width: 100%; border-collapse: collapse; margin-top: 5px; font-size: 0.72rem; color: #ccc; text-align: left; }
-        .doc-table th { color: var(--neon-amber); border-bottom: 1px solid #333; padding: 5px 2px; text-transform: uppercase; font-size: 0.65rem;}
-        .doc-table td { padding: 5px 2px; border-bottom: 1px solid #1a1a1a; }
-        .doc-highlight { color: var(--neon-green); font-weight: bold;}
-
         .terminal-box { width: 100%; max-width: 1150px; background: #030a0a; border: 2px solid #142828; border-radius: 6px; padding: 10px; box-sizing: border-box; margin-top: 10px;}
-        .terminal-content { height: 90px; overflow-y: auto; color: #00ff66; font-size: 0.8rem; line-height: 1.3rem; white-space: pre-wrap; text-align: left; }
+        .terminal-content { height: 110px; overflow-y: auto; color: #00ff66; font-size: 0.8rem; line-height: 1.3rem; white-space: pre-wrap; text-align: left; }
     </style>
 </head>
 <body>
@@ -205,32 +197,9 @@
             </div>
 
             <div style="border-top: 1px solid #222; padding-top: 10px;">
-                <div class="box-title" style="color: var(--neon-purple);">🎵 Commandes Audio (Test)</div>
-                <div class="sub-title">Injection par verrouillage déterministe dans le thread matériel</div>
+                <div class="box-title" style="color: var(--neon-purple);">🎵 Commandes Audio (Test Instantané)</div>
+                <div class="sub-title">Canal d'injection direct asynchrone non bloquant</div>
                 <div id="cmd-grid" class="grid-sw" style="margin-top: 5px;"></div>
-            </div>
-
-            <div style="border-top: 1px solid #222; padding-top: 10px;">
-                <div class="box-title" style="color: #ff3300;">📋 Guide de Référence Technique (ROM Gottlieb 80B)</div>
-                <table class="doc-table">
-                    <thead>
-                        <tr>
-                            <th style="width: 25%;">DIP Switch</th>
-                            <th style="width: 35%;">État = ON (1)</th>
-                            <th style="width: 40%;">État = OFF (0)</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr><td><span class="doc-highlight">DIP 1 à 4</span></td><td colspan="2">Tarification du Monnayeur Gauche (Coin Chute Left)</td></tr>
-                        <tr><td><span class="doc-highlight">DIP 5 à 8</span></td><td colspan="2">Tarification du Monnayeur Droit (Coin Chute Right)</td></tr>
-                        <tr><td><strong>DIP 17</strong></td><td>🏀 <span class="doc-highlight">3 Billes</span> / Partie</td><td>🏀 5 Billes / Partie</td></tr>
-                        <tr><td><strong>DIP 18</strong></td><td>✨ Loterie Active (Match)</td><td>Loterie Désactivée</td></tr>
-                        <tr><td><strong>DIP 19</strong></td><td>1 Seul Replay max / partie</td><td>Gains illimités (No Limit)</td></tr>
-                        <tr><td><strong>DIP 21</strong></td><td>🎟️ Récompense = <span class="doc-highlight">Extra Ball</span></td><td>🎟️ Récompense = Crédit/Partie</td></tr>
-                        <tr><td><strong>DIP 29</strong></td><td>💥 Bille Perdue sur Tilt</td><td>💀 Partie Perdue sur Tilt (Sécurité)</td></tr>
-                        <tr><td><strong>DIP 32</strong></td><td>🎵 Musique en Attract Mode</td><td>Mode Démo Silencieux</td></tr>
-                    </tbody>
-                </table>
             </div>
         </div>
 
@@ -243,10 +212,10 @@
             <div id="solGrid" class="grid-sol"></div>
 
             <div class="box-title" style="margin-top:20px; color:var(--neon-green)">
-                🎵 Sortie Audio (DAC & Synth)
+                🎵 Sortie Audio Streaming (Natif & PLL)
                 <div id="audio-led" class="audio-led" title="Témoin de flux audio"></div>
             </div>
-            <div class="sub-title">Monitoring direct du buffer (MAME -> Web Audio API)</div>
+            <div class="sub-title">Moniteur d'état asservi par régulation de phase</div>
         </div>
     </div>
 
@@ -331,7 +300,7 @@
                     }
                     
                     distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
-                    if (distance > 12288) {
+                    if (distance > 16384) {
                         audioReadPtr = (audioWritePtr - 2048 + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
                     }
                     audioLed.classList.add('active');
@@ -364,7 +333,7 @@
         }
 
         const cmdGridEl = document.getElementById('cmd-grid');
-        for (let i = 0; i < 64; i++) {
+        for (let i = 1; i <= 64; i++) {
             const cell = document.createElement('div');
             cell.className = 'cell cell-cmd';
             cell.textContent = String(i).padStart(2, '0');
@@ -372,6 +341,7 @@
                 e.preventDefault();
                 unlockAudio();
                 if (pinmameInstance && vfdMemoryPointer) {
+                    // 🌟 CANAL ISOLE : Écriture pure sans remise à zéro JS immédiate
                     pinmameInstance.HEAPU8[vfdMemoryPointer + 1060] = i;
                     cell.classList.add('cmd-active');
                     setTimeout(() => cell.classList.remove('cmd-active'), 120);
@@ -466,7 +436,7 @@
                 } else {
                     logToTerminal(`[JS] Téléchargement de la ROM par défaut (${finalRomName}.zip)...`);
                     const response = await fetch(`roms/${finalRomName}.zip`);
-                    if (!response.ok) throw new Error("Fichier ROM de secours introuvable.");
+                    if (!response.ok) throw new Error("Fichier ROM introuvable.");
                     romBuffer = await response.arrayBuffer();
                 }
                 
@@ -493,9 +463,7 @@
                 setupButtons();
                 setupSystemHandlers();
 
-                window.addEventListener('keydown', unlockAudio);
-                window.addEventListener('click', unlockAudio);
-                window.addEventListener('touchstart', unlockAudio);
+                window.addEventListener('pointerdown', unlockAudio);
 
                 function renderFrame() {
                     if (!pinmameInstance || !vfdMemoryPointer) {
@@ -506,60 +474,50 @@
                     const heap = pinmameInstance.HEAPU8;
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+                    // 🌟 BOUCLIER ET RETOUR D'ETAT TEMPOREL (PLL SYNCHRONIZATION VIA OFFSET 1070)
+                    let distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
+                    heap[vfdMemoryPointer + 1070] = distance & 0xFF;
+                    heap[vfdMemoryPointer + 1071] = (distance >> 8) & 0xFF;
+                    heap[vfdMemoryPointer + 1072] = (distance >> 16) & 0xFF;
+                    heap[vfdMemoryPointer + 1073] = (distance >> 24) & 0xFF;
+
                     // Refresh VFD
                     for (let i = 0; i < 20; i++) {
                         const low1 = heap[vfdMemoryPointer + (i * 2)];
                         const high1 = heap[vfdMemoryPointer + (i * 2) + 1];
-                        const mask1 = low1 | (high1 << 8);
+                        drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 40, low1 | (high1 << 8));
 
                         const low2 = heap[vfdMemoryPointer + ((20 + i) * 2)];
                         const high2 = heap[vfdMemoryPointer + ((20 + i) * 2) + 1];
-                        const mask2 = low2 | (high2 << 8);
-
-                        drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 40, mask1);
-                        drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, mask2);
+                        drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, low2 | (high2 << 8));
                     }
 
-                    // Refresh Transistors Lampes
+                    // Refresh Lampes
                     for (let col = 0; col < 12; col++) {
                         const colByte = heap[vfdMemoryPointer + 300 + col];
                         for (let row = 0; row < 8; row++) {
                             const lampId = (col * 8) + row;
-                            const isLampOn = (colByte & (1 << row)) !== 0;
                             if (lampCells[lampId]) {
-                                if (isLampOn) lampCells[lampId].classList.add('lamp-on');
+                                if ((colByte & (1 << row)) !== 0) lampCells[lampId].classList.add('lamp-on');
                                 else lampCells[lampId].classList.remove('lamp-on');
                             }
                         }
                     }
 
                     // Refresh Solénoïdes
-                    const b0 = heap[vfdMemoryPointer + 320];
-                    const b1 = heap[vfdMemoryPointer + 321];
-                    const b2 = heap[vfdMemoryPointer + 322];
-                    const b3 = heap[vfdMemoryPointer + 323];
-                    const solWord = (b0 | (b1 << 8) | (b2 << 16) | (b3 << 24)) >>> 0;
-
+                    const solWord = (heap[vfdMemoryPointer + 320] | (heap[vfdMemoryPointer + 321] << 8) | (heap[vfdMemoryPointer + 322] << 16) | (heap[vfdMemoryPointer + 323] << 24)) >>> 0;
                     for (let s = 0; s < 32; s++) {
-                        const isSolOn = (solWord & (1 << s)) !== 0;
                         if (solCells[s]) {
-                            if (isSolOn) solCells[s].classList.add('sol-on');
+                            if ((solWord & (1 << s)) !== 0) solCells[s].classList.add('sol-on');
                             else solCells[s].classList.remove('sol-on');
                         }
                     }
 
-                    // 🌟 CAPTURE TRANSACTIONNELLE AUDIO ET INTERCEPTION DES COMMANDES DE LA ROM
-                    const sampleCount = heap[vfdMemoryPointer + 1050] | 
-                                        (heap[vfdMemoryPointer + 1051] << 8) | 
-                                        (heap[vfdMemoryPointer + 1052] << 16) | 
-                                        (heap[vfdMemoryPointer + 1053] << 24);
+                    // Lecture Transactionnelle Audio
+                    const sampleCount = heap[vfdMemoryPointer + 1050] | (heap[vfdMemoryPointer + 1051] << 8) | (heap[vfdMemoryPointer + 1052] << 16) | (heap[vfdMemoryPointer + 1053] << 24);
 
                     if (sampleCount > 0 && audioCtx && audioCtx.state === 'running') {
-                        const bufferPtr = heap[vfdMemoryPointer + 1054] | 
-                                          (heap[vfdMemoryPointer + 1055] << 8) | 
-                                          (heap[vfdMemoryPointer + 1056] << 16) | 
-                                          (heap[vfdMemoryPointer + 1057] << 24);
-
+                        const bufferPtr = heap[vfdMemoryPointer + 1054] | (heap[vfdMemoryPointer + 1055] << 8) | (heap[vfdMemoryPointer + 1056] << 16) | (heap[vfdMemoryPointer + 1057] << 24);
                         const audioData = new Int16Array(heap.buffer, bufferPtr, sampleCount);
                         
                         for (let i = 0; i < sampleCount; i += 2) {
@@ -568,24 +526,24 @@
                             audioWritePtr = (audioWritePtr + 1) % RING_BUFFER_SIZE;
                         }
 
-                        // 🌟 LOG DIRECT DES ENREGISTREMENTS AUDIO REÇUS DEPUIS LES PORTS D'INTERCEPTION
-                        const lastRomCommand = heap[vfdMemoryPointer + 1060];
-                        if(lastRomCommand > 0) {
-                            logToTerminal(`🎵 [ROM AUDIO TRIGGER] Commande reçue : 0x${lastRomCommand.toString(16).toUpperCase()} (Freq: ${200 + (lastRomCommand * 8)}Hz)`);
-                            heap[vfdMemoryPointer + 1060] = 0; // Acquittement
-                        }
-
                         heap[vfdMemoryPointer + 1050] = 0;
                         heap[vfdMemoryPointer + 1051] = 0;
                         heap[vfdMemoryPointer + 1052] = 0;
                         heap[vfdMemoryPointer + 1053] = 0;
                     }
 
+                    // 🌟 CANAL DE LOGS ISOLE (Offset 1064) : Lecture et acquittement par le JS
+                    const romLogCommand = heap[vfdMemoryPointer + 1064];
+                    if (romLogCommand > 0) {
+                        logToTerminal(`🎵 [AUDIO MONITOR] Commande reçue : 0x${romLogCommand.toString(16).toUpperCase()} -> Synthétiseur FM actif`);
+                        heap[vfdMemoryPointer + 1064] = 0; 
+                    }
+
                     requestAnimationFrame(renderFrame);
                 }
 
                 requestAnimationFrame(renderFrame);
-                statusEl.textContent = "🟢 PinMAME Workbench V175.9 - Online";
+                statusEl.textContent = "🟢 PinMAME Workbench V175.10 - Online";
                 statusEl.style.color = "#00ffcc";
                 instance._pinmame_web_boot();
 
@@ -595,25 +553,19 @@
         }
 
         function setupSystemHandlers() {
-            rebootBtn.onclick = () => { logToTerminal("[SYSTEM] Demande de redémarrage matériel... "); location.reload(); };
+            rebootBtn.onclick = () => { location.reload(); };
             clearRomBtn.onclick = () => { sessionStorage.removeItem('custom_rom_bytes'); sessionStorage.removeItem('custom_rom_filename'); location.reload(); };
-
             romUploader.onchange = (e) => {
                 const file = e.target.files[0];
                 if (!file) return;
-                logToTerminal(`[SYSTEM] Traitement de : ${file.name}`);
                 const reader = new FileReader();
                 reader.onload = (evt) => {
                     const bytes = new Uint8Array(evt.target.result);
                     let binaryStr = "";
                     for (let i = 0; i < bytes.length; i++) binaryStr += String.fromCharCode(bytes[i]);
-                    try {
-                        sessionStorage.setItem('custom_rom_bytes', btoa(binaryStr));
-                        sessionStorage.setItem('custom_rom_filename', file.name);
-                        setTimeout(() => { location.reload(); }, 600);
-                    } catch(err) {
-                        logToTerminal("[ERR SYSTEM] Stockage saturé.");
-                    }
+                    sessionStorage.setItem('custom_rom_bytes', btoa(binaryStr));
+                    sessionStorage.setItem('custom_rom_filename', file.name);
+                    location.reload();
                 };
                 reader.readAsArrayBuffer(file);
             };
@@ -626,15 +578,10 @@
             
             coinBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); applySwitchState(COIN_ID, true); });
             coinBtn.addEventListener('pointerup', (e) => { e.preventDefault(); applySwitchState(COIN_ID, false); });
-            coinBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); applySwitchState(COIN_ID, false); });
-
             startBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); applySwitchState(START_ID, true); });
             startBtn.addEventListener('pointerup', (e) => { e.preventDefault(); applySwitchState(START_ID, false); });
-            startBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); applySwitchState(START_ID, false); });
-
             testBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); applySwitchState(TEST_ID, true); });
             testBtn.addEventListener('pointerup', (e) => { e.preventDefault(); applySwitchState(TEST_ID, false); });
-            testBtn.addEventListener('pointerleave', (e) => { e.preventDefault(); applySwitchState(TEST_ID, false); });
         }
 
         function drawGottlieb14Segment(ctx, x, y, mask) {

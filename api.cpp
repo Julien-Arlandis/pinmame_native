@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V173.31 (BOOT SEQUENCE RESTORED & FLUID)
+// 🏷️ VERSION : API-CORE-GATEWAY-V173.32 (DOUBLE-SLEEP REMOVED & TEST CODES LIVE)
 // =========================================================================
 
 #include <iostream>
@@ -23,7 +23,7 @@ extern "C" {
 #include "usrintrf.h"
 }
 
-// SHIELD MÉMOIRE CRITIQUE (1 Mo pour encaisser les bitmaps système)
+// SHIELD MÉMOIRE DE SÉCURITÉ (1 Mo pour encaisser les bitmaps graphiques)
 static uint8_t g_dummy_buffer[1024 * 1024] = {0}; 
 static char g_display_text[100] = "Analyseur Global Actif";
 static uint32_t g_font_security_anchor[10000] = {0}; 
@@ -56,7 +56,7 @@ extern "C" {
     extern int bailing;
     extern struct osd_bitmap *scrbitmap;
 
-    char build_version[] = "PinMAME-WASM-V173.31";
+    char build_version[] = "PinMAME-WASM-V173.32";
     int alpha_active = 0;
     int spriteram_size = 0;
     int spriteram_2_size = 0;
@@ -108,6 +108,7 @@ extern "C" {
     
     int osd_start_audio_stream(int stereo) { return SAMPLES_PER_FRAME; }
     
+    // PRODUCTION : Alimentation automatique par la carte FM de MAME
     int osd_update_audio_stream(INT16 *buffer) { 
         int shorts_to_copy = SAMPLES_PER_FRAME * 2; 
         for (int i = 0; i < shorts_to_copy; i++) {
@@ -206,7 +207,6 @@ extern "C" {
     void* play2sIntf = nullptr;   void* play3sIntf = nullptr;   void* play4sIntf = nullptr;   void* zsuIntf = nullptr;      
     void* playzsIntf = nullptr;   void* tecnoplayIntf = nullptr; void* joctronicIntf = nullptr; void* barniIntf = nullptr;
 
-    // PROTECTION CONTRE LES ERREURS DE LIEN DE LA PUCE YAMAHA (SYMBOLES FAIBLES)
     #define SAFESTUB __attribute__((weak))
     SAFESTUB int OPMInit(int num, int clock, int rate, void* p4, void* p5) { return 0; }
     SAFESTUB void OPMShutdown(void) {}
@@ -230,7 +230,27 @@ extern "C" {
         uint32_t solenoids_state = coreGlobals.solenoids;
         memcpy(&g_dummy_buffer[320], &solenoids_state, 4);
 
-        // TRANSACTION ET STREAMING AUDIO PAR POINTEUR DE CONDUITE CIRCULAIRE
+        // 🌟 RESTAURATION DU BRUITEUR DÉTERMINISTE POUR LES CODES AUDIO DE TEST (0-63)
+        uint8_t sound_user_cmd = g_dummy_buffer[1060];
+        if (sound_user_cmd > 0) {
+            g_dummy_buffer[1060] = 0; 
+            float test_freq = 200.0f + (sound_user_cmd * 12.0f);
+            int note_len = 44100 * 0.18; // Durée calibrée à 180ms
+            for (int k = 0; k < note_len; k++) {
+                float env = 1.0f - ((float)k / (float)note_len);
+                int period = (int)(44100.0f / test_freq);
+                if (period <= 0) period = 1;
+                INT16 s = ((k % period) < (period / 2)) ? 5500 : -5500;
+                s = (INT16)(s * env);
+                
+                g_audio_ring_buffer[g_audio_write_idx] = s;
+                g_audio_write_idx = (g_audio_write_idx + 1) % C_AUDIO_BUFFER_MAX;
+                g_audio_ring_buffer[g_audio_write_idx] = s;
+                g_audio_write_idx = (g_audio_write_idx + 1) % C_AUDIO_BUFFER_MAX;
+            }
+        }
+
+        // CONSUMMATION ET STREAMING PAR BOÎTE AUX LETTRES AUDIO
         uint32_t js_consumed = 0;
         memcpy(&js_consumed, &g_dummy_buffer[1050], 4);
 
@@ -249,27 +269,24 @@ extern "C" {
             memcpy(&g_dummy_buffer[1054], &buffer_address, 4);
         }
 
-        // REGULATEUR ADAPTATIF AUDIO (Anti-Saccades)
+        // 🌟 RÉGULATEUR ADAPTATIF ANTI-SACCADES PURIFIÉ (CORRECTION DU DOUBLE SLEEP)
         pending_samples = (g_audio_write_idx - g_audio_read_idx + C_AUDIO_BUFFER_MAX) % C_AUDIO_BUFFER_MAX;
         if (pending_samples > 6000) {
-            emscripten_sleep(4); 
-        } else if (pending_samples > 2500) {
-            emscripten_sleep(1); 
+            emscripten_sleep(4); // L'émulateur prend de l'avance, on temporise
+        } else if (pending_samples > 2000) {
+            emscripten_sleep(1); // Cadence parfaite
         } else {
-            emscripten_sleep(0); // 🚀 Accélération maximale
+            emscripten_sleep(0); // 🚀 Plus de saccades : Boost immédiat sans injecter de latence
         }
-
-        emscripten_sleep(1);
     }
 
     uint8_t* pinmame_get_gprom_ptr() { return g_dummy_buffer; }
     uint8_t* pinmame_get_dsprom_ptr() { return g_dummy_buffer; } 
     const char* pinmame_get_display() { return g_display_text; }
-    const char* pinmame_get_version() { return "PinMAME Analyzer Gate V173.31"; }
+    const char* pinmame_get_version() { return "PinMAME Analyzer Gate V173.32"; }
     void pinmame_web_entry(int gprom_size, int dsprom_size) {}
     void pinmame_web_tick(int cycles) {}
 
-    // 🌟 RE-DECLARATION MATERIELLE DE LA CARTOGRAPHIE DES DRIVERS GOTTLIEB 80B
     extern struct GameDriver driver_bonebstr;
     extern struct GameDriver driver_badgirls;
     extern struct GameDriver driver_genesis;
@@ -294,7 +311,6 @@ extern "C" {
 
     extern GameOptions options;
 
-    // 🌟 RESTAURATION DU SEQUENCEUR LOGIQUE DE BOOT D'ARCADE EXPORTÉ VERS LE JAVASCRIPT
     void pinmame_web_boot() {
         options.samplerate = 44100;
         const char* rom_name = (const char*)&g_dummy_buffer[1000];

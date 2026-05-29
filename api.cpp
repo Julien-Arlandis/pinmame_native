@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V143.0 (DRIVER BOARD TRANSISTOR MATRIX)
+// 🏷️ VERSION : API-CORE-GATEWAY-V173.1 (SOUND REGISTERS STUBBED)
 // =========================================================================
 
 #include <iostream>
@@ -9,6 +9,8 @@
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
+#include <cstdarg> 
+#include <emscripten.h> 
 
 #define __rolq(x,c) (((unsigned long long)(x) << (c)) | ((unsigned long long)(x) >> (64 - (c))))
 #define __rorq(x,c) (((unsigned long long)(x) >> (c)) | ((unsigned long long)(x) << (64 - (c))))
@@ -21,32 +23,30 @@ extern "C" {
 #include "usrintrf.h"
 }
 
-// Tampon binaire d'export (Shared Memory)
-// Octets 0-79   : Données VFD 2x20
-// Octets 100-179: Switchs forcés par JS (Inputs)
-// Octets 200-209: Feedback Switch Matrix (C++ -> JS)
-// Octets 300-311: Matrice des Transistors Lampes (12 cols x 8 bits)
-// Octets 320-323: Registre des Transistors Bobines (32 bits)
 static uint8_t g_dummy_buffer[4096] = {0};
 static char g_display_text[100] = "Analyseur Global Actif";
 static uint32_t g_font_security_anchor[100] = {0}; 
 
+static int g_selected_game_index = 0;
+
 extern "C" void emscripten_sleep(unsigned int ms);
 
-extern "C" {
-    extern const struct GameDriver driver_bonebstr;
-    struct GameDriver *drivers[] = {
-        (struct GameDriver *)&driver_bonebstr,
-        nullptr
-    };
+extern "C" void libpinmame_log_error(const char* format, ...) {
+    va_list args;
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+    std::cerr << std::endl;
+}
 
+extern "C" {
     int run_game(int game_num);
     unsigned int cpunum_get_reg(int cpunum, int regnum);
     
     extern int bailing;
     extern struct osd_bitmap *scrbitmap;
 
-    char build_version[] = "PinMAME-WASM-V143.0";
+    char build_version[] = "PinMAME-WASM-V173.1";
     int alpha_active = 0;
     int spriteram_size = 0;
     int spriteram_2_size = 0;
@@ -109,6 +109,7 @@ extern "C" {
     int osd_is_joy_pressed(int joycode) { return 0; }
     int osd_is_joystick_axis_code(int p1) { return 0; }
     int rc_check_and_create_dir(const char *p1) { return 0; }
+    int osd_readkey(void) { return 0; }
 
     void usrintf_showmessage(const char *text, ...) {}
     void alpha_init(void) {}
@@ -179,6 +180,13 @@ extern "C" {
     int votraxsc01_status_r(int p1) { return 0; }
     int sem_timedwait(void* sem, const void* abs_timeout) { return 0; }
 
+    // 🌟 RE-INJECTION DES POINTEURS DE CONTROLE AUDIO RECLAMÉS PAR GTS80S.O
+    void AY8910_control_port_0_w(int offset, int data) {}
+    void AY8910_write_port_0_w(int offset, int data) {}
+    void AY8910_control_port_1_w(int offset, int data) {}
+    void AY8910_write_port_1_w(int offset, int data) {}
+    void sp0250_w(int offset, int data) {}
+
     void* s11csIntf = nullptr;    void* wpcsIntf = nullptr;     void* dcsIntf = nullptr;      void* by32Intf = nullptr;
     void* by51Intf = nullptr;     void* s11jsIntf = nullptr;    void* by61Intf = nullptr;     
     void* by45Intf = nullptr;     void* byTCSIntf = nullptr;    void* bySDIntf = nullptr;     void* s67sIntf = nullptr;     
@@ -194,49 +202,75 @@ extern "C" {
     void* play2sIntf = nullptr;   void* play3sIntf = nullptr;   void* play4sIntf = nullptr;   void* zsuIntf = nullptr;      
     void* playzsIntf = nullptr;   void* tecnoplayIntf = nullptr; void* joctronicIntf = nullptr; void* barniIntf = nullptr;
 
-    // =========================================================================
-    // 💎 INTERCEPTIONS DES ENTRÉES/SORTIES ET ENVOI VIDÉO MULTIPLEXÉ
-    // =========================================================================
     void artwork_update_video_and_audio(void* display) {
-        // 1. Vidéo VFD 2x20
         uint16_t* vfd_export = (uint16_t*)g_dummy_buffer;
         for (int i = 0; i < 20; i++) {
             vfd_export[i]      = coreGlobals.segments[i].w & 0xFFFF;
             vfd_export[20 + i] = coreGlobals.segments[20 + i].w & 0xFFFF;
         }
-
-        // 2. Injection Matrix Switchs (JS -> C++)
         for (int sw = 0; sw < 80; sw++) {
             core_setSw(sw, g_dummy_buffer[100 + sw]);
         }
-
-        // 3. Feedback Matrix Switchs (C++ -> JS)
         for (int b = 0; b < 10; b++) {
             g_dummy_buffer[200 + b] = coreGlobals.swMatrix[b];
         }
-
-        // 4. 🌟 EXPORT MATRICE TRANSISTORS LAMPES (C++ -> JS) [Offset 300]
         for (int l = 0; l < 12; l++) {
             g_dummy_buffer[300 + l] = coreGlobals.lampMatrix[l];
         }
-
-        // 5. 🌟 EXPORT TRANSISTORS BOBINES SOLENOIDES (C++ -> JS) [Offset 320]
         uint32_t solenoids_state = coreGlobals.solenoids;
         memcpy(&g_dummy_buffer[320], &solenoids_state, 4);
-
         emscripten_sleep(1);
     }
 
     uint8_t* pinmame_get_gprom_ptr() { return g_dummy_buffer; }
     uint8_t* pinmame_get_dsprom_ptr() { return g_dummy_buffer; } 
     const char* pinmame_get_display() { return g_display_text; }
-    const char* pinmame_get_version() { return "PinMAME Analyzer Gate V143.0"; }
+    const char* pinmame_get_version() { return "PinMAME Analyzer Gate V173.1"; }
     void pinmame_web_entry(int gprom_size, int dsprom_size) {}
     void pinmame_web_tick(int cycles) {}
 
+    // Déclarations fortes des drivers validés présents dans libpinmame_wasm.a
+    extern struct GameDriver driver_bonebstr;
+    extern struct GameDriver driver_badgirls;
+    extern struct GameDriver driver_genesis;
+    extern struct GameDriver driver_txsector;
+    extern struct GameDriver driver_victory;
+    extern struct GameDriver driver_arena;
+    extern struct GameDriver driver_raven;
+    extern struct GameDriver driver_rock;
+    extern struct GameDriver driver_bighouse;
+    extern struct GameDriver driver_bountyh;
+    extern struct GameDriver driver_tagteam;
+    extern struct GameDriver driver_excalibr;
+    extern struct GameDriver driver_diamond;
+
+    // Tableau officiel épuré des deux éléments absents
+    struct GameDriver *drivers[] = {
+        &driver_bonebstr, &driver_badgirls, &driver_genesis, &driver_txsector,
+        &driver_victory,  &driver_arena,    &driver_raven,    &driver_rock,
+        &driver_bighouse, &driver_bountyh,  &driver_tagteam,   &driver_excalibr,
+        &driver_diamond,
+        nullptr
+    };
+
+    EMSCRIPTEN_KEEPALIVE int pinmame_set_driver_by_name(const char* name) {
+        int i = 0;
+        while (drivers[i] != nullptr) {
+            if (strcmp(drivers[i]->name, name) == 0) {
+                g_selected_game_index = i;
+                std::cout << "🎯 Match trouve dans libpinmame ! Index : " << i 
+                          << " -> [ " << drivers[i]->description << " ]" << std::endl;
+                return 1; 
+            }
+            i++;
+        }
+        std::cerr << "🔴 Erreur critique : Le driver \"" << name << "\" n'est pas disponible dans api.cpp !" << std::endl;
+        return 0; 
+    }
+
     void pinmame_web_boot() {
-        std::cout << "🎰 [⚡ V143.0 C++] Export de la carte Driver (Transistors Matrix) operationnel." << std::endl;
+        std::cout << "🚀 Demarrage du processeur d'arcade sur l'index materiel : " << g_selected_game_index << std::endl;
         bailing = 0;
-        run_game(0); 
+        run_game(g_selected_game_index); 
     }
 }

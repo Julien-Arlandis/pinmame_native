@@ -346,13 +346,18 @@
                     locateFile: function(path, prefix) { return path.endsWith('.wasm') ? 'pinmame_web.wasm' : prefix + path; }
                 });
 
-                // 🌟 LOGIQUE INTERACTIVE DE MULTI-ROM SELECTION (V159.0)
+                // 🌟 LOGIQUE INTERACTIVE DE MULTI-ROM SELECTION (CORRIGÉE)
                 let romBuffer;
+                let finalRomName = "bonebstr"; // Identité par défaut si aucun fichier utilisateur
+
                 const customRomData = sessionStorage.getItem('custom_rom_bytes');
                 const customRomName = sessionStorage.getItem('custom_rom_filename');
 
-                if (customRomData) {
-                    logToTerminal("[JS] Restitution de la ROM injectée : " + customRomName);
+                if (customRomData && customRomName) {
+                    // Extraction du vrai nom pour le dictionnaire C++ (ex: "badgirls.zip" -> "badgirls")
+                    finalRomName = customRomName.replace('.zip', '').toLowerCase();
+                    
+                    logToTerminal("[JS] Restitution de la ROM injectée : " + finalRomName);
                     romNameDisplay.textContent = customRomName;
                     romNameDisplay.style.color = "var(--neon-green)";
                     clearRomBtn.style.display = "inline-block";
@@ -365,18 +370,32 @@
                     }
                     romBuffer = bytes.buffer;
                 } else {
-                    logToTerminal("[JS] Téléchargement de la ROM par défaut...");
-                    const response = await fetch('roms/bonebstr.zip');
+                    logToTerminal(`[JS] Téléchargement de la ROM par défaut (${finalRomName})...`);
+                    const response = await fetch(`roms/${finalRomName}.zip`);
                     if (!response.ok) throw new Error("Fichier ROM de secours introuvable.");
                     romBuffer = await response.arrayBuffer();
                 }
                 
                 instance.FS.mkdir('/roms');
-                // Écriture forcée sous l'ID du driver actif
-                instance.FS.writeFile('/roms/bonebstr.zip', new Uint8Array(romBuffer));
+                // 🌟 FIN DU MENSONGE : On écrit le fichier sous son vrai nom
+                instance.FS.writeFile(`/roms/${finalRomName}.zip`, new Uint8Array(romBuffer));
 
                 pinmameInstance = instance;
                 vfdMemoryPointer = instance._pinmame_get_dsprom_ptr();
+
+                // 🌟 ALIGNEMENT DU DICTIONNAIRE C++ (SANS MALLOC)
+                const strOffset = 1000;
+                const stringAddress = vfdMemoryPointer + strOffset;
+                for (let i = 0; i < finalRomName.length; i++) {
+                    instance.HEAPU8[stringAddress + i] = finalRomName.charCodeAt(i);
+                }
+                instance.HEAPU8[stringAddress + finalRomName.length] = 0; // Terminaison C
+
+                // On force le C++ à charger le bon driver pour ce zip spécifique
+                const matchFound = instance._pinmame_set_driver_by_name(stringAddress);
+                if (!matchFound) {
+                    throw new Error(`Le driver matériel pour "${finalRomName}" n'existe pas dans la lib.`);
+                }
 
                 // Shunt automatique du Slam Tilt au boot
                 userSwitchStates[1] = true;
@@ -441,9 +460,10 @@
                 }
 
                 requestAnimationFrame(renderFrame);
-                statusEl.textContent = "🟢 PinMAME Workbench V158.0 - Online";
+                statusEl.textContent = "🟢 PinMAME Workbench V159.0 - Online";
                 statusEl.style.color = "#00ffcc";
                 
+                // Boot final avec la bonne identité
                 instance._pinmame_web_boot();
 
             } catch (err) {

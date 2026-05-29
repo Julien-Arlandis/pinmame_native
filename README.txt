@@ -23,7 +23,7 @@ Pour générer un binaire d'exécution à partir de la librairie :
 ./build_exec_with_lib.sh
 
 Pour lancer l'émulateur js :
-node launcher.js
+node launcher.js bonebstr
 
 
 ------------------

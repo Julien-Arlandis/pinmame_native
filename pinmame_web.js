@@ -5184,6 +5184,7 @@ var _pinmame_get_display = Module['_pinmame_get_display'] = makeInvalidEarlyAcce
 var _pinmame_get_version = Module['_pinmame_get_version'] = makeInvalidEarlyAccess('_pinmame_get_version');
 var _pinmame_web_entry = Module['_pinmame_web_entry'] = makeInvalidEarlyAccess('_pinmame_web_entry');
 var _pinmame_web_tick = Module['_pinmame_web_tick'] = makeInvalidEarlyAccess('_pinmame_web_tick');
+var _pinmame_set_driver_by_name = Module['_pinmame_set_driver_by_name'] = makeInvalidEarlyAccess('_pinmame_set_driver_by_name');
 var _pinmame_web_boot = Module['_pinmame_web_boot'] = makeInvalidEarlyAccess('_pinmame_web_boot');
 var _free = makeInvalidEarlyAccess('_free');
 var _malloc = makeInvalidEarlyAccess('_malloc');
@@ -5239,6 +5240,7 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['pinmame_get_version'] != 'undefined', 'missing Wasm export: pinmame_get_version');
   assert(typeof wasmExports['pinmame_web_entry'] != 'undefined', 'missing Wasm export: pinmame_web_entry');
   assert(typeof wasmExports['pinmame_web_tick'] != 'undefined', 'missing Wasm export: pinmame_web_tick');
+  assert(typeof wasmExports['pinmame_set_driver_by_name'] != 'undefined', 'missing Wasm export: pinmame_set_driver_by_name');
   assert(typeof wasmExports['pinmame_web_boot'] != 'undefined', 'missing Wasm export: pinmame_web_boot');
   assert(typeof wasmExports['free'] != 'undefined', 'missing Wasm export: free');
   assert(typeof wasmExports['malloc'] != 'undefined', 'missing Wasm export: malloc');
@@ -5291,6 +5293,7 @@ function assignWasmExports(wasmExports) {
   _pinmame_get_version = Module['_pinmame_get_version'] = createExportWrapper('pinmame_get_version', 0);
   _pinmame_web_entry = Module['_pinmame_web_entry'] = createExportWrapper('pinmame_web_entry', 2);
   _pinmame_web_tick = Module['_pinmame_web_tick'] = createExportWrapper('pinmame_web_tick', 1);
+  _pinmame_set_driver_by_name = Module['_pinmame_set_driver_by_name'] = createExportWrapper('pinmame_set_driver_by_name', 1);
   _pinmame_web_boot = Module['_pinmame_web_boot'] = createExportWrapper('pinmame_web_boot', 0);
   _free = createExportWrapper('free', 1);
   _malloc = createExportWrapper('malloc', 1);

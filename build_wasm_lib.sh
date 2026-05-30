@@ -3,11 +3,11 @@ set -e
 
 # =========================================================================
 # ⚙️ INFRASTRUCTURE PINMAME WASM - SCRIPT COMPILATION LIB STATIQUE
-# 🏷️ VERSION : WASM-GTS80B-STRICT-SEQUENTIAL-V112.17 (SAFE INDEX FIXED)
+# 🏷️ VERSION : WASM-GTS80B-STRICT-SEQUENTIAL-V112.21 (PRODUCTION CORES)
 # =========================================================================
 
 echo "=================================================="
-echo "⚙️ COMPILATION PURIFIÉE PINMAME WASM - VERSION V112.17"
+echo "⚙️ COMPILATION PURIFIÉE PINMAME WASM - VERSION V112.21"
 echo "=================================================="
 
 EMSDK_DIR="/home/julien/emsdk"
@@ -19,7 +19,7 @@ elif [ -f "/etc/profile.d/emscripten.sh" ]; then
 fi
 
 if ! command -v emcc &> /dev/null; then
-    echo "❌ [V112.17] Erreur : emcc est introuvable."
+    echo "❌ [V112.21] Erreur : emcc est introuvable."
     exit 1
 fi
 
@@ -64,7 +64,7 @@ typedef union {
 #endif
 EOF
 
-# GÉNÉRATION DES MACROS MATÉRIELLES
+# GÉNÉRATION DES MACROS MATÉRIELLES (INJECTION ALIGNÉE)
 cat << 'EOF' > "$WASM_TEMP_OBJ_DIR/emscripten_macros.h"
 #ifndef EMSCRIPTEN_MACROS_H_V112
 #define EMSCRIPTEN_MACROS_H_V112
@@ -106,9 +106,7 @@ cat << 'EOF' > "$WASM_TEMP_OBJ_DIR/emscripten_macros.h"
 #define PINMAME_NO_SEGA 1
 #define PINMAME_NO_DATAEAST 1
 
-// 🌟 ALIGNEMENT SUR LE SLOT 0 POUR SÉCURISER L'INDX D'APPEL INDIRECT DU COEUR
-#define SOUND_YM2151 0
-#define SOUND_YM2203 0
+#define SOUND_YM2203 999
 
 #ifndef __rolq
 #define __rolq(x,c) (((uint64_t)(x) << (c)) | ((uint64_t)(x) >> (64 - (c))))
@@ -117,12 +115,26 @@ cat << 'EOF' > "$WASM_TEMP_OBJ_DIR/emscripten_macros.h"
 #define __rorq(x,c) (((uint64_t)(x) >> (c)) | ((uint64_t)(x) << (64 - (c))))
 #endif
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+void OPMUpdateOne(int num, int16_t **buffer, int length);
+int OPMInit(int num, int clock, int rate, void (*timer_handler)(int, int, int, double), void (*irq_handler)(int, int));
+void OPMShutdown(void);
+void OPMResetChip(int num);
+#ifdef __cplusplus
+}
+#endif
+
 #endif
 EOF
 
 EMCC_FLAGS=(
     "-O3"
     "-include" "$WASM_TEMP_OBJ_DIR/emscripten_macros.h"
+    "-DHAS_YM2151=1"
+    "-DBUILD_YM2151=1"
+    "-DBUILD_OPM=1"
     "-I$WASM_TEMP_OBJ_DIR/include"
     "-I$NATIVE_WORKSPACE/src"
     "-I$NATIVE_WORKSPACE/src/wpc"
@@ -145,32 +157,33 @@ COEUR_PILES=(
     "src/wpc/gts80.c" "src/wpc/gts80s.c" "src/wpc/gts80games.c" "src/wpc/core.c"
     "src/wpc/sim.c" "src/wpc/sndbrd.c" "src/wpc/snd_cmd.c" "src/wpc/mech.c"
     "src/machine/6532riot.c" "src/machine/6530riot.c"
-    "src/sound/dac.c" "src/sound/streams.c" "src/sound/mixer.c" "src/sound/filter.c"
+    "src/sound/dac.c" "src/sound/ym2151.c" "src/sound/2151intf.c" "src/sound/fm.c"
+    "src/sound/streams.c" "src/sound/mixer.c" "src/sound/filter.c"
     "src/sound/ay8910.c" "src/sound/sp0250.c" "src/sound/samples.c"
     "src/sound/votrax.c"
 )
 
 if [ -f "$NATIVE_WORKSPACE/src/mame.c" ]; then
-    echo "[*] [V112.17] Application du court-circuit de sécurité sur video_init()..."
+    echo "[*] [V112.21] Application du court-circuit de sécurité sur video_init()..."
     sed -i 's/int old_video_init_disabled(void)/int video_init(void)/' "$NATIVE_WORKSPACE/src/mame.c"
     sed -i 's/int video_init[[:space:]]*(void)/int video_init(void) { return 0; } int old_video_init_disabled(void)/' "$NATIVE_WORKSPACE/src/mame.c"
 fi
 
-echo "[*] [V112.17] Compilation STRICTE du cœur de l'émulateur..."
+echo "[*] [V112.21] Compilation STRICTE du cœur de l'émulateur..."
 for f in "${COEUR_PILES[@]}"; do
     if [ -f "$NATIVE_WORKSPACE/$f" ]; then
         dir_obj="$WASM_TEMP_OBJ_DIR/$(dirname "$f")"
         mkdir -p "$dir_obj"
         b=$(basename "$f" .c)
-        echo "   -> [V112.17] Compilation de $f..."
+        echo "   -> [V112.21] Compilation de $f..."
         emcc "${EMCC_FLAGS[@]}" -c "$NATIVE_WORKSPACE/$f" -o "$dir_obj/$b.o"
     else
-        echo "❌ [V112.17] Erreur fatale : Le fichier $NATIVE_WORKSPACE/$f est introuvable !"
+        echo "❌ [V112.21] Erreur fatale : Le fichier $NATIVE_WORKSPACE/$f est introuvable !"
         exit 1
     fi
 done
 
-echo "[*] [V112.17] Compilation de la Zlib interne..."
+echo "[*] [V112.21] Compilation de la Zlib interne..."
 if [ -d "$NATIVE_WORKSPACE/src/zlib" ]; then
     mkdir -p "$WASM_TEMP_OBJ_DIR/zlib"
     for f in "$NATIVE_WORKSPACE/src/zlib"/*.c; do
@@ -181,16 +194,16 @@ if [ -d "$NATIVE_WORKSPACE/src/zlib" ]; then
     done
 fi
 
-echo "[*] [V112.17] Compilation du module d'E/S fileio..."
+echo "[*] [V112.21] Compilation du module d'E/S fileio..."
 if [ -f "$NATIVE_WORKSPACE/src/unix/fileio.c" ]; then
     mkdir -p "$WASM_TEMP_OBJ_DIR/src/unix"
     emcc "${EMCC_FLAGS[@]}" -Dosd_display_loading_rom_message=native_broken_osd_msg -c "$NATIVE_WORKSPACE/src/unix/fileio.c" -o "$WASM_TEMP_OBJ_DIR/src/unix/fileio.o"
 fi
 
-echo "[*] [V112.17] Assemblage final de l'archive statique..."
+echo "[*] [V112.21] Assemblage final de l'archive statique..."
 find "$WASM_TEMP_OBJ_DIR" -name "*.o" | xargs emar rcs "libpinmame_wasm.a"
 
 FILE_SIZE=$(du -sh "libpinmame_wasm.a" | cut -f1)
 echo "=================================================="
-echo "🟢 [V112.17] libpinmame_wasm.a généré avec succès ! ($FILE_SIZE)"
+echo "🟢 [V112.21] libpinmame_wasm.a généré avec succès ! ($FILE_SIZE)"
 echo "=================================================="

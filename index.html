@@ -155,7 +155,21 @@
         .dip-toggle.dip-on::after { content: '1'; bottom: auto; top: 1px; background: var(--neon-green); color: #000; }
 
         .terminal-box { width: 100%; max-width: 1150px; background: #030a0a; border: 2px solid #142828; border-radius: 6px; padding: 10px; box-sizing: border-box; margin-top: 10px;}
-        .terminal-content { height: 110px; overflow-y: auto; color: #00ff66; font-size: 0.8rem; line-height: 1.3rem; white-space: pre-wrap; text-align: left; }
+        
+        /* 🌟 LIBÉRATION DE SÉLECTION DU LOGS MONITOR */
+        .terminal-content { 
+            height: 110px; 
+            overflow-y: auto; 
+            color: #00ff66; 
+            font-size: 0.8rem; 
+            line-height: 1.3rem; 
+            white-space: pre-wrap; 
+            text-align: left; 
+            user-select: text !important; 
+            -webkit-user-select: text !important;
+            -moz-user-select: text !important;
+            pointer-events: auto !important;
+        }
     </style>
 </head>
 <body>
@@ -182,6 +196,7 @@
         <button id="coinBtn" class="btn btn-coin">Coin 1 [5]</button>
         <button id="startBtn" class="btn btn-start">Start [1]</button>
         <button id="testBtn" class="btn btn-test">Test [7]</button>
+        <button id="proofOfLifeBtn" class="btn" style="background-color: var(--neon-amber); color: #000; box-shadow: 0 4px #b36b00;">🔥 PREUVE DE VIE NATIVE</button>
     </div>
 
     <div class="dashboard">
@@ -224,8 +239,6 @@
         <div id="terminal" class="terminal-content">Démarrage du flux de log...</div>
     </div>
 
-    <script src="pinmame_web.js"></script>
-
     <script>
         const canvas = document.getElementById('vfdCanvas');
         const ctx = canvas.getContext('2d');
@@ -239,8 +252,9 @@
         const audioLed = document.getElementById('audio-led');
 
         const CHAR_WIDTH = 40; const CHAR_HEIGHT = 70; const SPACING = 15;
-        let pinmameInstance = null;
-        let vfdMemoryPointer = 0;
+        
+        let pinmameWorker = null;
+        let pendingAudioCmd = 0;
 
         const swCells = [];
         const lampCells = [];
@@ -303,10 +317,12 @@
                     if (distance > 16384) {
                         audioReadPtr = (audioWritePtr - 2048 + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
                     }
-                    audioLed.classList.add('active');
+                    
+                    if (distance > 512) audioLed.classList.add('active');
+                    else audioLed.classList.remove('active');
                 };
                 audioNode.connect(audioCtx.destination);
-                logToTerminal("🔊 Traitement audio stéréo synchronisé activé.");
+                logToTerminal("🔊 Traitement audio stéréo découplé activé.");
             }
             if (audioCtx.state === 'suspended') {
                 audioCtx.resume();
@@ -326,7 +342,8 @@
             cell.addEventListener('pointerdown', (e) => { 
                 e.preventDefault(); 
                 userSwitchStates[i] = !userSwitchStates[i];
-                applySwitchState(i, userSwitchStates[i]);
+                if (userSwitchStates[i]) cell.classList.add('sw-user');
+                else cell.classList.remove('sw-user');
             });
             swGridEl.appendChild(cell);
             swCells.push(cell);
@@ -340,12 +357,9 @@
             cell.addEventListener('pointerdown', (e) => {
                 e.preventDefault();
                 unlockAudio();
-                if (pinmameInstance && vfdMemoryPointer) {
-                    // 🌟 CANAL ISOLE : Écriture pure sans remise à zéro JS immédiate
-                    pinmameInstance.HEAPU8[vfdMemoryPointer + 1060] = i;
-                    cell.classList.add('cmd-active');
-                    setTimeout(() => cell.classList.remove('cmd-active'), 120);
-                }
+                pendingAudioCmd = i;
+                cell.classList.add('cmd-active');
+                setTimeout(() => cell.classList.remove('cmd-active'), 120);
             });
             cmdGridEl.appendChild(cell);
         }
@@ -364,7 +378,8 @@
                 toggle.addEventListener('pointerdown', (e) => {
                     e.preventDefault();
                     userDipStates[dipId] = !userDipStates[dipId];
-                    applyDipState(dipId, userDipStates[dipId]);
+                    if (userDipStates[dipId]) toggle.classList.add('dip-on');
+                    else toggle.classList.remove('dip-on');
                 });
                 swWrap.appendChild(label);
                 swWrap.appendChild(toggle);
@@ -392,196 +407,108 @@
             solCells.push(cell);
         }
 
-        function applySwitchState(swId, isPressed) {
-            if (!pinmameInstance || !vfdMemoryPointer) return;
-            pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + swId] = isPressed ? 1 : 0;
-            if (isPressed) swCells[swId].classList.add('sw-user');
-            else swCells[swId].classList.remove('sw-user');
-        }
-
-        function applyDipState(dipId, isOn) {
-            if (!pinmameInstance || !vfdMemoryPointer) return;
-            pinmameInstance.HEAPU8[vfdMemoryPointer + 400 + dipId] = isOn ? 1 : 0;
-            if (isOn) dipToggles[dipId].classList.add('dip-on');
-            else dipToggles[dipId].classList.remove('dip-on');
-        }
-
         async function startEmulation() {
             try {
-                statusEl.textContent = "🟡 Chargement du binaire WebAssembly...";
-                const instance = await createPinMAME({
-                    print: function(text) { logToTerminal("[CORE] " + text); },
-                    printErr: function(err) { logToTerminal("[ERR] " + err); },
-                    locateFile: function(path, prefix) { return path.endsWith('.wasm') ? 'pinmame_web.wasm' : prefix + path; }
-                });
+                statusEl.textContent = "🟡 Démarrage du Web Worker d'arrière-plan...";
+                pinmameWorker = new Worker('pinmame_worker.js');
 
-                let romBuffer;
                 let finalRomName = "bonebstr"; 
                 const customRomData = sessionStorage.getItem('custom_rom_bytes');
                 const customRomName = sessionStorage.getItem('custom_rom_filename');
 
                 if (customRomData && customRomName) {
                     finalRomName = customRomName.replace('.zip', '').toLowerCase();
-                    logToTerminal("[JS] Restitution de la ROM injectée : " + finalRomName);
+                    logToTerminal("[JS] Préparation de l'écriture asynchrone pour : " + finalRomName);
                     romNameDisplay.textContent = customRomName;
                     romNameDisplay.style.color = "var(--neon-green)";
                     clearRomBtn.style.display = "inline-block";
 
-                    const binaryStr = atob(customRomData);
-                    const bytes = new Uint8Array(binaryStr.length);
-                    for (let i = 0; i < binaryStr.length; i++) {
-                        bytes[i] = binaryStr.charCodeAt(i);
-                    }
-                    romBuffer = bytes.buffer;
+                    pinmameWorker.postMessage({
+                        cmd: 'START',
+                        romName: finalRomName,
+                        customRomBytes: customRomData,
+                        customRomName: customRomName
+                    });
                 } else {
-                    logToTerminal(`[JS] Téléchargement de la ROM par défaut (${finalRomName}.zip)...`);
-                    const response = await fetch(`roms/${finalRomName}.zip`);
-                    if (!response.ok) throw new Error("Fichier ROM introuvable.");
-                    romBuffer = await response.arrayBuffer();
+                    logToTerminal(`[JS] Demande de téléchargement interne au Thread Worker (${finalRomName}.zip)...`);
+                    pinmameWorker.postMessage({
+                        cmd: 'START',
+                        romName: finalRomName
+                    });
                 }
-                
-                instance.FS.mkdir('/roms');
-                instance.FS.writeFile(`/roms/${finalRomName}.zip`, new Uint8Array(romBuffer));
-
-                pinmameInstance = instance;
-                vfdMemoryPointer = instance._pinmame_get_dsprom_ptr();
-
-                const strOffset = 1000;
-                const stringAddress = vfdMemoryPointer + strOffset;
-                for (let i = 0; i < finalRomName.length; i++) {
-                    instance.HEAPU8[stringAddress + i] = finalRomName.charCodeAt(i);
-                }
-                instance.HEAPU8[stringAddress + finalRomName.length] = 0;
 
                 userSwitchStates[1] = true;
-                applySwitchState(1, true);
-
-                for (let i = 0; i < 32; i++) {
-                    applyDipState(i, userDipStates[i]);
-                }
+                swCells[1].classList.add('sw-user');
 
                 setupButtons();
                 setupSystemHandlers();
-
                 window.addEventListener('pointerdown', unlockAudio);
 
-                function renderFrame() {
-                    if (!pinmameInstance || !vfdMemoryPointer) {
-                        requestAnimationFrame(renderFrame);
-                        return;
+                pinmameWorker.onmessage = function(e) {
+                    const data = e.data;
+                    
+                    if (data.type === 'LOG') logToTerminal(data.msg);
+                    if (data.type === 'ERR') logToTerminal(data.msg);
+                    
+                    if (data.type === 'READY') {
+                        statusEl.textContent = "🟢 PinMAME Workbench V175.10 - Thread Isolé Actif";
+                        statusEl.style.color = "#00ffcc";
+                        tickWorker();
                     }
 
-                    const heap = pinmameInstance.HEAPU8;
-                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    if (data.type === 'FRAME_UPDATE') {
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        
+                        // Traceur VFD
+                        for (let i = 0; i < 20; i++) {
+                            const low1 = data.vfd[i * 2]; const high1 = data.vfd[(i * 2) + 1];
+                            drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 40, low1 | (high1 << 8));
 
-                    // 🌟 BOUCLIER ET RETOUR D'ETAT TEMPOREL (PLL SYNCHRONIZATION VIA OFFSET 1070)
-                    let distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
-                    heap[vfdMemoryPointer + 1070] = distance & 0xFF;
-                    heap[vfdMemoryPointer + 1071] = (distance >> 8) & 0xFF;
-                    heap[vfdMemoryPointer + 1072] = (distance >> 16) & 0xFF;
-                    heap[vfdMemoryPointer + 1073] = (distance >> 24) & 0xFF;
+                            const low2 = data.vfd[(20 + i) * 2]; const high2 = data.vfd[((20 + i) * 2) + 1];
+                            drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, low2 | (high2 << 8));
+                        }
 
-                    // Refresh VFD
-                    for (let i = 0; i < 20; i++) {
-                        const low1 = heap[vfdMemoryPointer + (i * 2)];
-                        const high1 = heap[vfdMemoryPointer + (i * 2) + 1];
-                        drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 40, low1 | (high1 << 8));
-
-                        const low2 = heap[vfdMemoryPointer + ((20 + i) * 2)];
-                        const high2 = heap[vfdMemoryPointer + ((20 + i) * 2) + 1];
-                        drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, low2 | (high2 << 8));
-                    }
-
-                    // Refresh Lampes
-                    for (let col = 0; col < 12; col++) {
-                        const colByte = heap[vfdMemoryPointer + 300 + col];
-                        for (let row = 0; row < 8; row++) {
-                            const lampId = (col * 8) + row;
-                            if (lampCells[lampId]) {
-                                if ((colByte & (1 << row)) !== 0) lampCells[lampId].classList.add('lamp-on');
-                                else lampCells[lampId].classList.remove('lamp-on');
+                        // Traceur Lampes
+                        for (let col = 0; col < 12; col++) {
+                            const colByte = data.lamps[col];
+                            for (let row = 0; row < 8; row++) {
+                                const lampId = (col * 8) + row;
+                                if (lampCells[lampId]) {
+                                    if ((colByte & (1 << row)) !== 0) lampCells[lampId].classList.add('lamp-on');
+                                    else lampCells[lampId].classList.remove('lamp-on');
+                                }
                             }
                         }
-                    }
 
-                    // Refresh Solénoïdes
-                    const solWord = (heap[vfdMemoryPointer + 320] | (heap[vfdMemoryPointer + 321] << 8) | (heap[vfdMemoryPointer + 322] << 16) | (heap[vfdMemoryPointer + 323] << 24)) >>> 0;
-                    for (let s = 0; s < 32; s++) {
-                        if (solCells[s]) {
-                            if ((solWord & (1 << s)) !== 0) solCells[s].classList.add('sol-on');
-                            else solCells[s].classList.remove('sol-on');
-                        }
-                    }
-
-                    // Lecture Transactionnelle Audio
-                    const sampleCount = heap[vfdMemoryPointer + 1050] | (heap[vfdMemoryPointer + 1051] << 8) | (heap[vfdMemoryPointer + 1052] << 16) | (heap[vfdMemoryPointer + 1053] << 24);
-
-                    if (sampleCount > 0 && audioCtx && audioCtx.state === 'running') {
-                        const bufferPtr = heap[vfdMemoryPointer + 1054] | (heap[vfdMemoryPointer + 1055] << 8) | (heap[vfdMemoryPointer + 1056] << 16) | (heap[vfdMemoryPointer + 1057] << 24);
-                        const audioData = new Int16Array(heap.buffer, bufferPtr, sampleCount);
-                        
-                        for (let i = 0; i < sampleCount; i += 2) {
-                            ringBufferL[audioWritePtr] = audioData[i] / 32768.0;
-                            ringBufferR[audioWritePtr] = (i + 1 < sampleCount) ? (audioData[i + 1] / 32768.0) : (audioData[i] / 32768.0);
-                            audioWritePtr = (audioWritePtr + 1) % RING_BUFFER_SIZE;
+                        // Traceur Solénoïdes
+                        const solWord = (data.solenoids[0] | (data.solenoids[1] << 8) | (data.solenoids[2] << 16) | (data.solenoids[3] << 24)) >>> 0;
+                        for (let s = 0; s < 32; s++) {
+                            if (solCells[s]) {
+                                if ((solWord & (1 << s)) !== 0) solCells[s].classList.add('sol-on');
+                                else solCells[s].classList.remove('sol-on');
+                            }
                         }
 
-                        heap[vfdMemoryPointer + 1050] = 0;
-                        heap[vfdMemoryPointer + 1051] = 0;
-                        heap[vfdMemoryPointer + 1052] = 0;
-                        heap[vfdMemoryPointer + 1053] = 0;
+                        // Collecteur PCM Stéréo
+                        if (data.audioData && audioCtx && audioCtx.state === 'running') {
+                            for (let i = 0; i < data.audioData.length; i += 2) {
+                                ringBufferL[audioWritePtr] = data.audioData[i] / 32768.0;
+                                ringBufferR[audioWritePtr] = (i + 1 < data.audioData.length) ? (data.audioData[i + 1] / 32768.0) : (data.audioData[i] / 32768.0);
+                                audioWritePtr = (audioWritePtr + 1) % RING_BUFFER_SIZE;
+                            }
+                        }
+
+                        if (data.soundLogCmd > 0) {
+                            logToTerminal(`🎵 [AUDIO MONITOR] Commande reçue : 0x${data.soundLogCmd.toString(16).toUpperCase()} -> Synthétiseur FM actif`);
+                        }
+
+                        requestAnimationFrame(tickWorker);
                     }
-
-                    // 🌟 CANAL DE LOGS ISOLE (Offset 1064) : Lecture et acquittement par le JS
-                    const romLogCommand = heap[vfdMemoryPointer + 1064];
-                    if (romLogCommand > 0) {
-                        logToTerminal(`🎵 [AUDIO MONITOR] Commande reçue : 0x${romLogCommand.toString(16).toUpperCase()} -> Synthétiseur FM actif`);
-                        heap[vfdMemoryPointer + 1064] = 0; 
-                    }
-
-                    requestAnimationFrame(renderFrame);
-                }
-
-                requestAnimationFrame(renderFrame);
-                statusEl.textContent = "🟢 PinMAME Workbench V175.10 - Online";
-                statusEl.style.color = "#00ffcc";
-                instance._pinmame_web_boot();
+                };
 
             } catch (err) {
                 statusEl.textContent = "🔴 ERREUR : " + err.message;
             }
-        }
-
-        function setupSystemHandlers() {
-            rebootBtn.onclick = () => { location.reload(); };
-            clearRomBtn.onclick = () => { sessionStorage.removeItem('custom_rom_bytes'); sessionStorage.removeItem('custom_rom_filename'); location.reload(); };
-            romUploader.onchange = (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (evt) => {
-                    const bytes = new Uint8Array(evt.target.result);
-                    let binaryStr = "";
-                    for (let i = 0; i < bytes.length; i++) binaryStr += String.fromCharCode(bytes[i]);
-                    sessionStorage.setItem('custom_rom_bytes', btoa(binaryStr));
-                    sessionStorage.setItem('custom_rom_filename', file.name);
-                    location.reload();
-                };
-                reader.readAsArrayBuffer(file);
-            };
-        }
-
-        function setupButtons() {
-            const coinBtn = document.getElementById('coinBtn');
-            const startBtn = document.getElementById('startBtn');
-            const testBtn = document.getElementById('testBtn');
-            
-            coinBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); applySwitchState(COIN_ID, true); });
-            coinBtn.addEventListener('pointerup', (e) => { e.preventDefault(); applySwitchState(COIN_ID, false); });
-            startBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); applySwitchState(START_ID, true); });
-            startBtn.addEventListener('pointerup', (e) => { e.preventDefault(); applySwitchState(START_ID, false); });
-            testBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); applySwitchState(TEST_ID, true); });
-            testBtn.addEventListener('pointerup', (e) => { e.preventDefault(); applySwitchState(TEST_ID, false); });
         }
 
         function drawGottlieb14Segment(ctx, x, y, mask) {
@@ -610,6 +537,60 @@
             drawSeg(0x0080, () => { ctx.moveTo(w + 2, h); ctx.lineTo(w + 6, h + 8); });       
             drawSeg(0x8000, () => { ctx.arc(w + 4, h, 2, 0, Math.PI*2); });                   
             ctx.restore();
+        }
+
+        function tickWorker() {
+            if (!pinmameWorker) return;
+            let distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
+
+            pinmameWorker.postMessage({
+                cmd: 'SYNC_INPUTS',
+                switchBuffer: new Uint8Array(userSwitchStates.map(v => v ? 1 : 0)),
+                dipBuffer: new Uint8Array(userDipStates.map(v => v ? 1 : 0)),
+                audioCmd: pendingAudioCmd,
+                audioDist: distance
+            });
+            pendingAudioCmd = 0;
+        }
+
+        function setupSystemHandlers() {
+            rebootBtn.onclick = () => { location.reload(); };
+            clearRomBtn.onclick = () => { sessionStorage.removeItem('custom_rom_bytes'); sessionStorage.removeItem('custom_rom_filename'); location.reload(); };
+            romUploader.onchange = (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    const bytes = new Uint8Array(evt.target.result);
+                    let binaryStr = "";
+                    for (let i = 0; i < bytes.length; i++) binaryStr += String.fromCharCode(bytes[i]);
+                    sessionStorage.setItem('custom_rom_bytes', btoa(binaryStr));
+                    sessionStorage.setItem('custom_rom_filename', file.name);
+                    location.reload();
+                };
+                reader.readAsArrayBuffer(file);
+            };
+        }
+
+        function setupButtons() {
+            const coinBtn = document.getElementById('coinBtn');
+            const startBtn = document.getElementById('startBtn');
+            const testBtn = document.getElementById('testBtn');
+            const proofBtn = document.getElementById('proofOfLifeBtn');
+            
+            coinBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[COIN_ID] = true; swCells[COIN_ID].classList.add('sw-user'); });
+            coinBtn.addEventListener('pointerup', (e) => { e.preventDefault(); userSwitchStates[COIN_ID] = false; swCells[COIN_ID].classList.remove('sw-user'); });
+            startBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[START_ID] = true; swCells[START_ID].classList.add('sw-user'); });
+            startBtn.addEventListener('pointerup', (e) => { e.preventDefault(); userSwitchStates[START_ID] = false; swCells[START_ID].classList.remove('sw-user'); });
+            testBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[TEST_ID] = true; swCells[TEST_ID].classList.add('sw-user'); });
+            testBtn.addEventListener('pointerup', (e) => { e.preventDefault(); userSwitchStates[TEST_ID] = false; swCells[TEST_ID].classList.remove('sw-user'); });
+            
+            proofBtn.addEventListener('pointerdown', (e) => {
+                e.preventDefault();
+                unlockAudio();
+                pendingAudioCmd = 0x02; 
+                logToTerminal("🚀 [PREUVE DE VIE] Envoi d'interruption matérielle 0x02 à la carte son...");
+            });
         }
 
         startEmulation();

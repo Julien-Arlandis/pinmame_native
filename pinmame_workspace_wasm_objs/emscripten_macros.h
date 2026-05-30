@@ -38,15 +38,24 @@
 #define PINMAME_NO_SEGA 1
 #define PINMAME_NO_DATAEAST 1
 
-// 🌟 ALIGNEMENT SUR LE SLOT 0 POUR SÉCURISER L'INDX D'APPEL INDIRECT DU COEUR
-#define SOUND_YM2151 0
-#define SOUND_YM2203 0
+#define SOUND_YM2203 999
 
 #ifndef __rolq
 #define __rolq(x,c) (((uint64_t)(x) << (c)) | ((uint64_t)(x) >> (64 - (c))))
 #endif
 #ifndef __rorq
 #define __rorq(x,c) (((uint64_t)(x) >> (c)) | ((uint64_t)(x) << (64 - (c))))
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+void OPMUpdateOne(int num, int16_t **buffer, int length);
+int OPMInit(int num, int clock, int rate, void (*timer_handler)(int, int, int, double), void (*irq_handler)(int, int));
+void OPMShutdown(void);
+void OPMResetChip(int num);
+#ifdef __cplusplus
+}
 #endif
 
 #endif

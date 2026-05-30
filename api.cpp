@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V173.40 (MMACULATE ASCII PRODUCTION)
+// 🏷️ VERSION : API-CORE-GATEWAY-V173.50 (COMPLETE SYMBOL RESOLUTION)
 // =========================================================================
 
 #include <iostream>
@@ -32,7 +32,7 @@ static uint32_t g_font_security_anchor[10000] = {0};
 
 static int g_selected_game_index = 0;
 
-// FILE AUDIO CIRCULAIRE
+// FILE AUDIO CIRCULAIRE STÉRÉO INTERNE
 #define C_AUDIO_BUFFER_MAX 131072
 static INT16 g_audio_ring_buffer[C_AUDIO_BUFFER_MAX];
 static int g_audio_write_idx = 0;
@@ -41,19 +41,12 @@ static INT16 g_linear_audio_buffer[C_AUDIO_BUFFER_MAX];
 
 #define SAMPLES_PER_FRAME 735 
 
-// VARIABLES DU SYNTHÉTISEUR POLYPHONIQUE HLE YM2151
-static uint8_t g_ym_registers[256] = {0};
-static uint8_t g_current_register = 0;
-
-struct VirtualVoice {
-    bool active = false;
-    float frequency = 0.0f;
-    float phase = 0.0f;
-    float amplitude = 0.0f;
-};
-static VirtualVoice g_ym_voices[8];
+static bool g_audio_recursion_shield = false;
 
 extern "C" void emscripten_sleep(unsigned int ms);
+
+// CANAL DE RESTITUTION DE L'INTERFACE PUBLIQUE GLOBALE DE MAME
+extern "C" void YM2151_word_0_w(int offset, int data);
 
 extern "C" void libpinmame_log_error(const char* format, ...) {
     va_list args;
@@ -70,7 +63,7 @@ extern "C" {
     extern int bailing;
     extern struct osd_bitmap *scrbitmap;
 
-    char build_version[] = "PinMAME-WASM-V173.40";
+    char build_version[] = "PinMAME-WASM-V173.50";
     int alpha_active = 0;
     int spriteram_size = 0;
     int spriteram_2_size = 0;
@@ -115,7 +108,16 @@ extern "C" {
     int osd_display_loading_rom_message(const char *name, struct rom_load_data *romdata) { return 0; }
     void osd_update_video_and_audio(struct mame_display *display) {}
     int osd_start_audio_stream(int stereo) { return SAMPLES_PER_FRAME; }
-    int osd_update_audio_stream(INT16 *buffer) { return SAMPLES_PER_FRAME; }
+    
+    int osd_update_audio_stream(INT16 *buffer) { 
+        int shorts_to_copy = SAMPLES_PER_FRAME * 2; 
+        for (int i = 0; i < shorts_to_copy; i++) {
+            g_audio_ring_buffer[g_audio_write_idx] = buffer[i];
+            g_audio_write_idx = (g_audio_write_idx + 1) % C_AUDIO_BUFFER_MAX;
+        }
+        return SAMPLES_PER_FRAME; 
+    }
+
     void osd_stop_audio_stream(void) {}
     void osd_sound_enable(int enable) {}
 
@@ -154,8 +156,11 @@ extern "C" {
     void osd_analogjoy_read(int player, int analog_axis[MAX_ANALOG_AXES], InputCode analogjoy_input[MAX_ANALOG_AXES]) {}
     void osd_trak_read(int player, int *deltax, int *deltay) {}
     void osd_lightgun_read(int player, int *deltax, int *deltay) {}
+    
+    // 🌟 RÉSOLUTION DES REQUÊTES DU COMPOSANT INPUT.O NATIF
     const struct KeyboardInfo *osd_get_key_list(void) { return nullptr; }
     const struct JoystickInfo *osd_get_joy_list(void) { return nullptr; }
+    
     int osd_is_key_pressed(int keycode) { return 0; }
     int osd_is_joy_pressed(int joycode) { return 0; }
     int osd_is_joystick_axis_code(int p1) { return 0; }
@@ -203,6 +208,21 @@ extern "C" {
     void* play2sIntf = nullptr;   void* play3sIntf = nullptr;   void* play4sIntf = nullptr;   void* zsuIntf = nullptr;      
     void* playzsIntf = nullptr;   void* tecnoplayIntf = nullptr; void* joctronicIntf = nullptr; void* barniIntf = nullptr;
 
+    // AXES D'ÉCRITURE CADENCÉS
+    void YM2151_register_port_0_w(int offset, int data) { 
+        if (g_audio_recursion_shield) return;
+        g_audio_recursion_shield = true;
+        YM2151_word_0_w(0, data & 0xFF); 
+        g_audio_recursion_shield = false;
+    }
+
+    void YM2151_data_port_0_w(int offset, int data) { 
+        if (g_audio_recursion_shield) return;
+        g_audio_recursion_shield = true;
+        YM2151_word_0_w(1, data & 0xFF); 
+        g_audio_recursion_shield = false;
+    }
+
     #define SAFESTUB __attribute__((weak))
     SAFESTUB int OPMInit(int num, int clock, int rate, void* p4, void* p5) { return 0; }
     SAFESTUB void OPMShutdown(void) {}
@@ -211,55 +231,13 @@ extern "C" {
     SAFESTUB int YM2151TimerOver(int c, int ch) { return 0; }
     SAFESTUB void OPMUpdateOne(int num, INT16 **buffer, int length) {}
 
-    void YM2151_register_port_0_w(int offset, int data) { 
-        g_current_register = data & 0xFF; 
-    }
-
-    void YM2151_data_port_0_w(int offset, int data) {
-        uint8_t reg = g_current_register;
-        uint8_t val = data & 0xFF;
-        g_ym_registers[reg] = val;
-
-        if (reg == 0x08) {
-            uint8_t chan = val & 0x07;
-            uint8_t slots = (val >> 3) & 0x0F;
-            if (slots > 0) {
-                uint8_t note_val = g_ym_registers[0x28 + chan];
-                int octave = (note_val >> 4) & 0x07;
-                int note_idx = note_val & 0x0F;
-                if (note_idx > 11) note_idx = 11;
-
-                float octave_4[12] = {
-                    261.63f, 277.18f, 293.66f, 311.13f, 329.63f, 349.23f,
-                    369.99f, 392.00f, 415.30f, 440.00f, 466.16f, 493.88f
-                };
-                float freq = octave_4[note_idx];
-                if (octave < 4) freq /= (1 << (4 - octave));
-                if (octave > 4) freq *= (1 << (octave - 4));
-
-                if (freq > 30.0f && freq < 4000.0f) {
-                    g_ym_voices[chan].frequency = freq;
-                    g_ym_voices[chan].active = true;
-                    g_ym_voices[chan].amplitude = 1.0f;
-                    g_shared_corridor[1064] = note_val > 0 ? note_val : 1;
-                }
-            } else {
-                g_ym_voices[chan].active = false;
-            }
-        }
-    }
-
-    void YM2151_word_0_w(int offset, int data) {
-        if (offset & 1) YM2151_data_port_0_w(offset, data & 0xFF);
-        else YM2151_register_port_0_w(offset, data & 0xFF);
-    }
-
     void artwork_update_video_and_audio(void* display) {
         uint16_t* vfd_export = (uint16_t*)g_shared_corridor;
         for (int i = 0; i < 20; i++) {
             vfd_export[i]      = coreGlobals.segments[i].w & 0xFFFF;
             vfd_export[20 + i] = coreGlobals.segments[20 + i].w & 0xFFFF;
         }
+        // 🌟 TYPE IN LINEA C RECTIFIÉ (Élimination complète du "let")
         for (int sw = 0; sw < 80; sw++) { core_setSw(sw, g_shared_corridor[100 + sw]); }
         for (int b = 0; b < 10; b++) { g_shared_corridor[200 + b] = coreGlobals.swMatrix[b]; }
         for (int l = 0; l < 12; l++) { g_shared_corridor[300 + l] = coreGlobals.lampMatrix[l]; }
@@ -269,35 +247,8 @@ extern "C" {
         uint8_t sound_user_cmd = g_shared_corridor[1060];
         if (sound_user_cmd > 0) {
             g_shared_corridor[1060] = 0; 
-            g_shared_corridor[1064] = sound_user_cmd; 
-            g_ym_voices[7].frequency = 180.0f + (sound_user_cmd * 14.0f);
-            g_ym_voices[7].active = true;
-            g_ym_voices[7].amplitude = 1.0f;
-        }
-
-        for (int s = 0; s < SAMPLES_PER_FRAME; s++) {
-            float mixed = 0.0f;
-            int active_count = 0;
-            for (int v = 0; v < 8; v++) {
-                if (g_ym_voices[v].amplitude > 0.001f) {
-                    float wave = (g_ym_voices[v].phase < 0.5f) ? 1.0f : -1.0f;
-                    mixed += wave * 2500.0f * g_ym_voices[v].amplitude;
-                    active_count++;
-
-                    g_ym_voices[v].phase += g_ym_voices[v].frequency / 44100.0f;
-                    if (g_ym_voices[v].phase >= 1.0f) g_ym_voices[v].phase -= 1.0f;
-
-                    if (!g_ym_voices[v].active) g_ym_voices[v].amplitude *= 0.94f;
-                    else g_ym_voices[v].amplitude *= 0.9992f;
-                }
-            }
-            INT16 final_sample = (INT16)mixed;
-            if (active_count > 1) final_sample /= (active_count * 0.75f);
-
-            g_audio_ring_buffer[g_audio_write_idx] = final_sample;
-            g_audio_write_idx = (g_audio_write_idx + 1) % C_AUDIO_BUFFER_MAX;
-            g_audio_ring_buffer[g_audio_write_idx] = final_sample;
-            g_audio_write_idx = (g_audio_write_idx + 1) % C_AUDIO_BUFFER_MAX;
+            soundlatch_w(0, sound_user_cmd);
+            g_shared_corridor[1064] = sound_user_cmd; // Transmission au canal de monitoring
         }
 
         uint32_t js_consumed = 0;
@@ -326,7 +277,7 @@ extern "C" {
     uint8_t* pinmame_get_gprom_ptr() { return g_shared_corridor; }
     uint8_t* pinmame_get_dsprom_ptr() { return g_shared_corridor; } 
     const char* pinmame_get_display() { return g_display_text; }
-    const char* pinmame_get_version() { return "PinMAME HLE Polyphonic Gate V173.39"; }
+    const char* pinmame_get_version() { return "PinMAME Pure LLE Audio Core V173.50"; }
     void pinmame_web_entry(int gprom_size, int dsprom_size) {}
     void pinmame_web_tick(int cycles) {}
 

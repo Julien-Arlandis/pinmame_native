@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V173.56 (ABSOLUTE LINKER RESOLUTION - LOCKED)
+// 🏷️ VERSION : API-CORE-GATEWAY-V173.59 (FINAL SIGNATURE LOCK)
 // =========================================================================
 
 #include <iostream>
@@ -42,6 +42,7 @@ static INT16 g_linear_audio_buffer[C_AUDIO_BUFFER_MAX];
 #define SAMPLES_PER_FRAME 735 
 
 extern "C" void emscripten_sleep(unsigned int ms);
+extern "C" void sndbrd_0_data_w(int offset, int data);
 
 extern "C" void libpinmame_log_error(const char* format, ...) {
     va_list args;
@@ -58,7 +59,7 @@ extern "C" {
     extern int bailing;
     extern struct osd_bitmap *scrbitmap;
 
-    char build_version[] = "PinMAME-WASM-V173.56";
+    char build_version[] = "PinMAME-WASM-V173.59";
     int alpha_active = 0;
     int spriteram_size = 0;
     int spriteram_2_size = 0;
@@ -190,11 +191,8 @@ extern "C" {
     void YM2151_register_port_0_w(int offset, int data) {}
     void YM2151_data_port_0_w(int offset, int data) {}
 
-    // 🌟 RÉSOLUTION CHIRURGICALE DES SYMBOLES REQUIS PAR 2151INTF.O
-    // Des stubs étanches sans appels externes à risque pour bloquer le signature_mismatch
-    int OPMInit(int num, int clock, int rate, void (*timer_handler)(int, int, int, double), void (*irq_handler)(int, int)) { 
-        return 0; 
-    }
+    // STUBS OPM ÉTANCHES : Protègent le runtime WASM tout en satisfaisant le lieur
+    int OPMInit(int num, int clock, int rate, void (*timer_handler)(int, int, int, double), void (*irq_handler)(int, int)) { return 0; }
     void OPMShutdown(void) {}
     void OPMResetChip(int num) {}
     void OPMUpdateOne(int num, int16_t **buffer, int length) {
@@ -219,6 +217,7 @@ extern "C" {
     void* play2sIntf = nullptr;   void* play3sIntf = nullptr;   void* play4sIntf = nullptr;   void* zsuIntf = nullptr;      
     void* playzsIntf = nullptr;   void* tecnoplayIntf = nullptr; void* joctronicIntf = nullptr; void* barniIntf = nullptr;
 
+    // 🌟 CORRECTION CRUCIALE : Retour strict aux structures MAME d'origine
     void osd_update_video_and_audio(struct mame_display *display) {}
     
     void artwork_update_video_and_audio(struct mame_display *display) {
@@ -236,7 +235,7 @@ extern "C" {
         uint8_t sound_user_cmd = g_shared_corridor[1060];
         if (sound_user_cmd > 0) {
             g_shared_corridor[1060] = 0; 
-            soundlatch_w(0, sound_user_cmd);
+            sndbrd_0_data_w(0, sound_user_cmd);
             
             EM_ASM({
                 if (window.postWasmLog) { window.postWasmLog($0); }
@@ -267,7 +266,7 @@ extern "C" {
     uint8_t* pinmame_get_gprom_ptr() { return g_shared_corridor; }
     uint8_t* pinmame_get_dsprom_ptr() { return g_shared_corridor; } 
     const char* pinmame_get_display() { return g_display_text; }
-    const char* pinmame_get_version() { return "PinMAME Pure Native Link V173.56"; }
+    const char* pinmame_get_version() { return "PinMAME Pure Native Link V173.59"; }
     void pinmame_web_entry(int gprom_size, int dsprom_size) {}
     void pinmame_web_tick(int cycles) {}
 

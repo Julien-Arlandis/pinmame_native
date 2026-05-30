@@ -128,13 +128,17 @@ for (let i = 1; i <= 64; i++) {
     cmdGridEl.appendChild(cell);
 }
 
-// 3. Panneau des DIP Switches (Avec restauration visuelle)
+// 3. Panneau des DIP Switches (De 1 à 32)
 for (let bank = 0; bank < 4; bank++) {
     const bankEl = document.createElement('div'); bankEl.className = 'dip-bank';
     for (let bit = 0; bit < 8; bit++) {
         const dipId = (bank * 8) + bit;
         const swWrap = document.createElement('div'); swWrap.className = 'dip-switch';
-        const label = document.createElement('span'); label.textContent = `${bank+1}-${bit+1}`;
+        
+        // 🌟 NOUVELLE NUMÉROTATION : Affiche "01" à "32" pour un alignement propre
+        const label = document.createElement('span'); 
+        label.textContent = String(dipId + 1).padStart(2, '0');
+        
         const toggle = document.createElement('div'); toggle.className = 'dip-toggle';
         
         // Restauration de l'état visuel au chargement
@@ -150,7 +154,7 @@ for (let bank = 0; bank < 4; bank++) {
             if (pinmameInstance && vfdMemoryPointer) {
                 pinmameInstance.HEAPU8[vfdMemoryPointer + 400 + dipId] = userDipStates[dipId] ? 1 : 0;
             }
-            // 🌟 SAUVEGARDE IMMÉDIATE DU CHANGEMENT D'ÉTAT
+            // Sauvegarde immédiate du changement d'état
             localStorage.setItem('pinmame_dips', JSON.stringify(userDipStates));
         });
         
@@ -213,7 +217,7 @@ async function startEmulation() {
         for (let i = 0; i < finalRomName.length; i++) instance.HEAPU8[stringAddress + i] = finalRomName.charCodeAt(i);
         instance.HEAPU8[stringAddress + finalRomName.length] = 0;
 
-        // 🌟 INJECTION DE L'ÉTAT SAUVEGARDÉ DES DIP SWITCHES DANS LA MÉMOIRE MAME AVANT LE BOOT
+        // Injection de l'état sauvegardé des DIP Switches dans la mémoire MAME avant le boot
         for(let i = 0; i < 32; i++) {
             instance.HEAPU8[vfdMemoryPointer + 400 + i] = userDipStates[i] ? 1 : 0;
         }

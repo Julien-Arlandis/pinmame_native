@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Dev Workbench V175.12</title>
+    <title>PinMAME WASM - Dev Workbench V175.13</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -154,7 +154,27 @@
         .dip-toggle::after { content: '0'; position: absolute; bottom: 1px; left: 1px; right: 1px; height: 10px; background: #fff; color: #000; font-size: 0.5rem; text-align: center; line-height: 10px; border-radius: 1px; }
         .dip-toggle.dip-on::after { content: '1'; bottom: auto; top: 1px; background: var(--neon-green); color: #000; }
 
-        .terminal-box { width: 100%; max-width: 1150px; background: #030a0a; border: 2px solid #142828; border-radius: 6px; padding: 10px; box-sizing: border-box; margin-top: 10px;}
+        /* 🌟 STYLES POUR LE MANUEL TECHNIQUE DES DIP SWITCHES */
+        .doc-panel {
+            width: 100%; max-width: 1150px; background: var(--bg-box); border: 2px solid var(--border-color);
+            border-radius: 8px; padding: 15px; box-sizing: border-box; margin-bottom: 15px;
+        }
+        .doc-grid {
+            display: grid; grid-template-columns: 1fr 1fr; gap: 15px;
+        }
+        @media (max-width: 800px) { .doc-grid { grid-template-columns: 1fr; } }
+        .doc-table {
+            width: 100%; border-collapse: collapse; font-size: 0.7rem; color: #ddd;
+        }
+        .doc-table th, .doc-table td {
+            border: 1px solid #333; padding: 6px 8px; text-align: left; vertical-align: top;
+        }
+        .doc-table th { background: #1a1a1a; color: var(--neon-purple); font-weight: bold; }
+        .doc-table strong { color: var(--neon-amber); }
+        .doc-table .sw-num { color: var(--neon-cyan); font-weight: bold; white-space: nowrap;}
+        .doc-section-title { font-size: 0.8rem; color: #888; border-bottom: 1px dashed #333; padding-bottom: 4px; margin-bottom: 8px; margin-top: 5px; text-transform: uppercase; font-weight: bold;}
+
+        .terminal-box { width: 100%; max-width: 1150px; background: #030a0a; border: 2px solid #142828; border-radius: 6px; padding: 10px; box-sizing: border-box; margin-bottom: 20px;}
         .terminal-content { 
             height: 110px; overflow-y: auto; color: #00ff66; font-size: 0.8rem; line-height: 1.3rem; 
             white-space: pre-wrap; text-align: left; user-select: text !important; -webkit-user-select: text !important;
@@ -219,6 +239,53 @@
                 <div id="audio-led" class="audio-led" title="Témoin de flux audio"></div>
             </div>
             <div class="sub-title">Moniteur d'état asservi par régulation de phase</div>
+        </div>
+    </div>
+
+    <div class="doc-panel">
+        <div class="box-title">📖 MANUEL TECHNIQUE MPU : DIP SWITCHES (1-32)</div>
+        <div class="doc-grid">
+            <div>
+                <div class="doc-section-title">🪙 L'Argent et les Monnayeurs</div>
+                <table class="doc-table">
+                    <tr><th style="width: 25%;">Switches</th><th>Description</th></tr>
+                    <tr><td class="sw-num">01 à 05</td><td><strong>Monnayeur Gauche</strong> (Combinaison de prix). Ex: Tous OFF = 1 Pièce / 1 Crédit.</td></tr>
+                    <tr><td class="sw-num">09 à 13</td><td><strong>Monnayeur Droit</strong> (Idem gauche).</td></tr>
+                    <tr><td class="sw-num">17 à 21</td><td><strong>Monnayeur Central</strong> (Idem gauche).</td></tr>
+                    <tr><td class="sw-num">14</td><td><strong>Couplage</strong> : OFF = Indépendants / ON = Liés (même tarif).</td></tr>
+                    <tr><td class="sw-num">30</td><td><strong>Bonus Central</strong> : OFF = Normal / ON = 9 Crédits bonus insérés.</td></tr>
+                    <tr><td class="sw-num">15 - 16</td><td><strong>Max Crédits</strong> : OFF/OFF=8, ON/OFF=10, OFF/ON=15, ON/ON=20.</td></tr>
+                </table>
+
+                <div class="doc-section-title">🛠️ Options Système & Maintenance</div>
+                <table class="doc-table">
+                    <tr><th style="width: 25%;">Switches</th><th>Description</th></tr>
+                    <tr><td class="sw-num">06</td><td><strong>Mémoire High Score</strong> : OFF = Conservés / ON = #2 à #5 effacés au boot.</td></tr>
+                    <tr><td class="sw-num">07</td><td><strong>Option Jeu #1</strong> : Option spécifique au code ROM (Généralement OFF).</td></tr>
+                    <tr><td class="sw-num">08</td><td><strong>Menu Claquage</strong> : OFF = Accès autorisé / ON = Paramétrage bloqué.</td></tr>
+                </table>
+            </div>
+
+            <div>
+                <div class="doc-section-title">🎱 Règles Fondamentales du Jeu</div>
+                <table class="doc-table">
+                    <tr><th style="width: 25%;">Switches</th><th>Description</th></tr>
+                    <tr><td class="sw-num">25</td><td><strong>Billes par Partie</strong> : OFF = <strong>5 Billes</strong> / ON = <strong>3 Billes</strong>.</td></tr>
+                    <tr><td class="sw-num">26</td><td><strong>Loterie (Match)</strong> : OFF = Désactivée / ON = Activée.</td></tr>
+                    <tr><td class="sw-num">29</td><td><strong>Sanction Tilt</strong> : OFF = Bille perdue / ON = Game Over immédiat.</td></tr>
+                    <tr><td class="sw-num">31</td><td><strong>Musique de Fond</strong> : OFF = Silencieux / ON = <strong>Thème FM Activé</strong>.</td></tr>
+                </table>
+
+                <div class="doc-section-title">🏆 Gains, Récompenses et High Scores</div>
+                <table class="doc-table">
+                    <tr><th style="width: 25%;">Switches</th><th>Description</th></tr>
+                    <tr><td class="sw-num">22</td><td><strong>Cible Spécial</strong> : OFF = Partie Gratuite / ON = Extra Ball.</td></tr>
+                    <tr><td class="sw-num">27</td><td><strong>Limite Claquage</strong> : OFF = Infinie / ON = 1 claquage max par joueur.</td></tr>
+                    <tr><td class="sw-num">28</td><td><strong>Mode "Novelty"</strong> : OFF = Normal / ON = Pas d'extra, 500k Points à la place.</td></tr>
+                    <tr><td class="sw-num">32</td><td><strong>Ajustement Extra Ball</strong> : OFF = Difficile / ON = Généreux (Libéral).</td></tr>
+                    <tr><td class="sw-num">23 - 24</td><td><strong>Récompense High Score</strong> : OFF/OFF = Rien, ON/OFF = Affiché mais rien, OFF/ON = 2 Parties, ON/ON = 3 Parties.</td></tr>
+                </table>
+            </div>
         </div>
     </div>
 

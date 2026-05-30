@@ -2,7 +2,7 @@
 // ⚙️ LOGIQUE INTERFACE PINMAME WASM (app.js)
 // =========================================================================
 
-// 🌟 DICTIONNAIRE DES SONS (Totalement générique pour s'adapter à toutes les ROMs)
+// 🌟 DICTIONNAIRE AUDIO (Dépuration Sonore)
 const SOUND_DICTIONARY = {
     1: "STOP",
     2: "BGM 1",
@@ -11,6 +11,23 @@ const SOUND_DICTIONARY = {
     5: "BGM 4",
     61: "BANK CLEAR",
     63: "TEST TONE"
+};
+
+// 🌟 NOUVEAU : DICTIONNAIRE DES CONTACTS DU PLATEAU (00-79)
+// Modifie ce dictionnaire en testant les boutons pour nommer tes cibles !
+const SWITCH_DICTIONARY = {
+    0: "Monnayeur Gauche (Standard)",
+    1: "Monnayeur Central (Standard)",
+    2: "Monnayeur Droit (Standard)",
+    3: "Monnayeur 4 / Jeton",
+    4: "Slam Tilt (Porte)",
+    5: "Plumb Bob Tilt (Balancier)",
+    6: "Bouton Start / Credit",
+    7: "Bouton Test",
+    // --- EXEMPLES À REMPLACER ---
+    15: "Exemple: Cible Tombante 1",
+    16: "Exemple: Cible Tombante 2",
+    30: "Exemple: Bumper Droit"
 };
 
 const canvas = document.getElementById('vfdCanvas');
@@ -108,21 +125,30 @@ function logToTerminal(msg) {
 
 // 🎛️ CONSTRUCTION DE L'INTERFACE UTILISATEUR
 
+// 🌟 GRILLE DES SWITCHS PHYSIQUES (AVEC BULLES D'AIDE DYNAMIQUES)
 const swGridEl = document.getElementById('swGrid');
 for (let i = 0; i < 80; i++) {
     const cell = document.createElement('div');
-    cell.className = 'cell'; cell.textContent = String(i).padStart(2, '0');
+    cell.className = 'cell'; 
+    cell.textContent = String(i).padStart(2, '0');
+    
+    // Application du nom depuis le dictionnaire (ou nom générique)
+    const swDesc = SWITCH_DICTIONARY[i] || `Contact Plateau ${String(i).padStart(2, '0')}`;
+    cell.title = swDesc;
+
     cell.addEventListener('pointerdown', (e) => { 
         e.preventDefault(); unlockAudio();
         userSwitchStates[i] = !userSwitchStates[i];
         if (userSwitchStates[i]) cell.classList.add('sw-user');
         else cell.classList.remove('sw-user');
         if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + i] = userSwitchStates[i] ? 1 : 0;
+        
+        logToTerminal(`⚡ Switch ${String(i).padStart(2, '0')} actionné : ${swDesc}`);
     });
     swGridEl.appendChild(cell); swCells.push(cell);
 }
 
-// 🌟 GRILLE AUDIO DOCUMENTÉE
+// GRILLE AUDIO DOCUMENTÉE
 const cmdGridEl = document.getElementById('cmd-grid');
 for (let i = 1; i <= 64; i++) {
     const cell = document.createElement('div');
@@ -189,8 +215,6 @@ async function startEmulation() {
             locateFile: function(path, prefix) { return path.endsWith('.wasm') ? 'pinmame_web.wasm' : prefix + path; }
         });
 
-        // "bonebstr" reste la chaîne de secours interne si l'utilisateur ne charge rien, 
-        // mais elle n'apparaît plus dans l'interface ou les logs globaux.
         let romBuffer; let finalRomName = "bonebstr"; 
         const customRomData = sessionStorage.getItem('custom_rom_bytes');
         const customRomName = sessionStorage.getItem('custom_rom_filename');
@@ -273,7 +297,7 @@ async function startEmulation() {
         }
 
         requestAnimationFrame(renderFrame);
-        statusEl.textContent = "🟢 PinMAME Workbench V175.15 - Mode Universel Actif";
+        statusEl.textContent = "🟢 PinMAME Workbench V175.17 - Système Actif";
         statusEl.style.color = "#00ffcc";
 
         setTimeout(() => { instance._pinmame_web_boot(); }, 100);
@@ -301,11 +325,11 @@ function setupButtons() {
     const startBtn = document.getElementById('startBtn');
     const testBtn = document.getElementById('testBtn');
     
-    coinBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[COIN_ID] = true; swCells[COIN_ID].classList.add('sw-user'); if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + COIN_ID] = 1; });
+    coinBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[COIN_ID] = true; swCells[COIN_ID].classList.add('sw-user'); if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + COIN_ID] = 1; logToTerminal(`⚡ Switch ${String(COIN_ID).padStart(2, '0')} actionné : ${SWITCH_DICTIONARY[COIN_ID]}`);});
     coinBtn.addEventListener('pointerup', (e) => { e.preventDefault(); userSwitchStates[COIN_ID] = false; swCells[COIN_ID].classList.remove('sw-user'); if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + COIN_ID] = 0; });
-    startBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[START_ID] = true; swCells[START_ID].classList.add('sw-user'); if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + START_ID] = 1; });
+    startBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[START_ID] = true; swCells[START_ID].classList.add('sw-user'); if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + START_ID] = 1; logToTerminal(`⚡ Switch ${String(START_ID).padStart(2, '0')} actionné : ${SWITCH_DICTIONARY[START_ID]}`);});
     startBtn.addEventListener('pointerup', (e) => { e.preventDefault(); userSwitchStates[START_ID] = false; swCells[START_ID].classList.remove('sw-user'); if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + START_ID] = 0; });
-    testBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[TEST_ID] = true; swCells[TEST_ID].classList.add('sw-user'); if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + TEST_ID] = 1; });
+    testBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[TEST_ID] = true; swCells[TEST_ID].classList.add('sw-user'); if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + TEST_ID] = 1; logToTerminal(`⚡ Switch ${String(TEST_ID).padStart(2, '0')} actionné : ${SWITCH_DICTIONARY[TEST_ID]}`);});
     testBtn.addEventListener('pointerup', (e) => { e.preventDefault(); userSwitchStates[TEST_ID] = false; swCells[TEST_ID].classList.remove('sw-user'); if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + TEST_ID] = 0; });
 }
 

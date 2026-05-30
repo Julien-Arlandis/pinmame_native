@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Dev Workbench V175.16</title>
+    <title>PinMAME WASM - Dev Workbench V175.17</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -130,8 +130,9 @@
 
         .cell { 
             background: #141414; border: 1px solid #222; color: #444; padding: 6px 1px; 
-            font-size: 0.65rem; font-weight: bold; border-radius: 2px; text-align: center; touch-action: none; 
+            font-size: 0.65rem; font-weight: bold; border-radius: 2px; text-align: center; touch-action: none; cursor: pointer; transition: all 0.1s;
         }
+        .cell:hover { border-color: #555; color: #fff;}
         .cell.sw-user { background: var(--neon-green) !important; color: #000 !important; box-shadow: 0 0 6px var(--neon-green); border-color: #fff; }
         .cell.lamp-on { background: #ffff00 !important; color: #000 !important; box-shadow: 0 0 8px #ffff00; }
         .cell.sol-on { background: var(--neon-red) !important; color: #fff !important; box-shadow: 0 0 10px var(--neon-red); }
@@ -146,12 +147,8 @@
         .cell-cmd-desc { font-size: 0.45rem; text-transform: uppercase; text-align: center; margin-top: 2px; line-height: 1.1; color: #9d4edd; font-weight: bold;}
         .cell-cmd:hover .cell-cmd-desc, .cell.cmd-active .cell-cmd-desc { color: #fff; }
 
-        .audio-led {
-            width: 12px; height: 12px; border-radius: 50%; background: #111; border: 1px solid #444; transition: all 0.05s;
-        }
-        .audio-led.active {
-            background: var(--neon-green); box-shadow: 0 0 10px var(--neon-green); border-color: #fff;
-        }
+        .audio-led { width: 12px; height: 12px; border-radius: 50%; background: #111; border: 1px solid #444; transition: all 0.05s; }
+        .audio-led.active { background: var(--neon-green); box-shadow: 0 0 10px var(--neon-green); border-color: #fff; }
 
         .dip-container { display: flex; gap: 10px; flex-wrap: wrap; justify-content: space-between; margin-top: 5px; }
         .dip-bank { background: #8b0000; padding: 6px; border-radius: 4px; border: 2px solid #5a0000; display: flex; gap: 5px; box-shadow: inset 0 0 8px rgba(0,0,0,0.6); }
@@ -174,10 +171,7 @@
         .doc-section-title { font-size: 0.8rem; color: #888; border-bottom: 1px dashed #333; padding-bottom: 4px; margin-bottom: 8px; margin-top: 5px; text-transform: uppercase; font-weight: bold;}
 
         .terminal-box { width: 100%; max-width: 1150px; background: #030a0a; border: 2px solid #142828; border-radius: 6px; padding: 10px; box-sizing: border-box; margin-bottom: 20px;}
-        .terminal-content { 
-            height: 110px; overflow-y: auto; color: #00ff66; font-size: 0.8rem; line-height: 1.3rem; 
-            white-space: pre-wrap; text-align: left; user-select: text !important; -webkit-user-select: text !important;
-        }
+        .terminal-content { height: 110px; overflow-y: auto; color: #00ff66; font-size: 0.8rem; line-height: 1.3rem; white-space: pre-wrap; text-align: left; user-select: text !important; -webkit-user-select: text !important; }
     </style>
 </head>
 <body>
@@ -210,6 +204,7 @@
         <div class="panel-box" style="display: flex; flex-direction: column; gap: 15px;">
             <div>
                 <div class="box-title">🔌 Panneau des Switchs Physiques (00-79)</div>
+                <div class="sub-title">Survole un bouton pour voir sa fonction. Éditable dans app.js</div>
                 <div id="swGrid" class="grid-sw"></div>
             </div>
             
@@ -242,15 +237,42 @@
     </div>
 
     <div class="doc-panel">
+        <div class="box-title">📖 MANUEL TECHNIQUE MPU : MATRICE DES CONTACTS (00-79)</div>
+        <div class="doc-grid">
+            <div>
+                <div class="doc-section-title">🚪 Caisse & Monnayeurs (00-07)</div>
+                <table class="doc-table">
+                    <tr><th style="width: 15%;">SW</th><th>Description (Standard System 80B)</th></tr>
+                    <tr><td class="sw-num">00</td><td>Monnayeur Gauche (Left Coin)</td></tr>
+                    <tr><td class="sw-num">01</td><td>Monnayeur Central (Center Coin)</td></tr>
+                    <tr><td class="sw-num">02</td><td>Monnayeur Droit (Right Coin)</td></tr>
+                    <tr><td class="sw-num">03</td><td>Monnayeur 4 / Jeton</td></tr>
+                    <tr><td class="sw-num">04</td><td>Slam Tilt (Sécurité Porte anti-vandalisme)</td></tr>
+                    <tr><td class="sw-num">05</td><td>Plumb Bob Tilt (Balancier de la caisse)</td></tr>
+                    <tr><td class="sw-num">06</td><td>Bouton Start / Credit</td></tr>
+                    <tr><td class="sw-num">07</td><td>Bouton Test (Menus de diagnostic)</td></tr>
+                </table>
+            </div>
+            <div>
+                <div class="doc-section-title">🎱 Éléments du Plateau (08-79)</div>
+                <table class="doc-table">
+                    <tr><th style="width: 25%;">Plage</th><th>Description (Dictionnaire Dynamique)</th></tr>
+                    <tr><td class="sw-num">08 à 79</td><td><strong>Zone d'exploration interactive.</strong><br><br>Ces contacts correspondent aux éléments interactifs du plateau (Bumpers, Rampes, Cibles Tombantes, Trous).<br><br>👉 <em>Passe ta souris sur les boutons de la grille pour lire leur nom ! Modifie le dictionnaire <code>SWITCH_DICTIONARY</code> dans <code>app.js</code> au fur et à mesure de tes tests pour cartographier le jeu.</em></td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="doc-panel">
         <div class="box-title">📖 MANUEL TECHNIQUE MPU : DIP SWITCHES (1-32)</div>
         <div class="doc-grid">
             <div>
                 <div class="doc-section-title">🪙 L'Argent et les Monnayeurs</div>
                 <table class="doc-table">
                     <tr><th style="width: 25%;">Switches</th><th>Description</th></tr>
-                    <tr><td class="sw-num">01 à 05</td><td><strong>Monnayeur Gauche</strong> (Combinaison de prix). Ex: Tous OFF = 1 Pièce / 1 Crédit.</td></tr>
+                    <tr><td class="sw-num">01 à 05</td><td><strong>Monnayeur Gauche</strong>. Ex: Tous OFF = 1 Pièce / 1 Crédit.</td></tr>
                     <tr><td class="sw-num">09 à 13</td><td><strong>Monnayeur Droit</strong> (Idem gauche).</td></tr>
-                    <tr><td class="sw-num">14</td><td><strong>Couplage</strong> : OFF = Indépendants / ON = Liés (même tarif).</td></tr>
+                    <tr><td class="sw-num">14</td><td><strong>Couplage</strong> : OFF = Indépendants / ON = Liés.</td></tr>
                     <tr><td class="sw-num">15 - 16</td><td><strong>Max Crédits</strong> : OFF/OFF=8, ON/OFF=10, OFF/ON=15, ON/ON=20.</td></tr>
                     <tr><td class="sw-num">17 à 21</td><td><strong>Monnayeur Central</strong> (Idem gauche).</td></tr>
                     <tr><td class="sw-num">30</td><td><strong>Bonus Central</strong> : OFF = Normal / ON = 9 Crédits bonus insérés.</td></tr>
@@ -259,8 +281,8 @@
                 <div class="doc-section-title">🛠️ Options Système & Maintenance</div>
                 <table class="doc-table">
                     <tr><th style="width: 25%;">Switches</th><th>Description</th></tr>
-                    <tr><td class="sw-num">06</td><td><strong>Mémoire High Score</strong> : OFF = Conservés / ON = #2 à #5 effacés au boot.</td></tr>
-                    <tr><td class="sw-num">07</td><td><strong>Option Jeu #1</strong> : Option spécifique au code ROM (Généralement OFF).</td></tr>
+                    <tr><td class="sw-num">06</td><td><strong>Mémoire High Score</strong> : OFF = Conservés / ON = Effacés au boot.</td></tr>
+                    <tr><td class="sw-num">07</td><td><strong>Option Jeu #1</strong> : Option spécifique ROM.</td></tr>
                     <tr><td class="sw-num">08</td><td><strong>Menu Claquage</strong> : OFF = Accès autorisé / ON = Paramétrage bloqué.</td></tr>
                 </table>
             </div>
@@ -278,10 +300,10 @@
                 <table class="doc-table">
                     <tr><th style="width: 25%;">Switches</th><th>Description</th></tr>
                     <tr><td class="sw-num">22</td><td><strong>Cible Spécial</strong> : OFF = Partie Gratuite / ON = Extra Ball.</td></tr>
-                    <tr><td class="sw-num">23 - 24</td><td><strong>Récompense High Score</strong> : OFF/OFF = Rien, ON/OFF = Affiché mais rien, OFF/ON = 2 Parties, ON/ON = 3 Parties.</td></tr>
+                    <tr><td class="sw-num">23 - 24</td><td><strong>Récompense H.S.</strong> : OFF/OFF = Rien, ON/OFF = Affiché mais rien, OFF/ON = 2 Parties, ON/ON = 3 Parties.</td></tr>
                     <tr><td class="sw-num">27</td><td><strong>Limite Claquage</strong> : OFF = Infinie / ON = 1 claquage max par joueur.</td></tr>
                     <tr><td class="sw-num">28</td><td><strong>Mode "Novelty"</strong> : OFF = Normal / ON = Pas d'extra, 500k Points à la place.</td></tr>
-                    <tr><td class="sw-num">32</td><td><strong>Ajustement Extra Ball</strong> : OFF = Difficile / ON = Généreux (Libéral).</td></tr>
+                    <tr><td class="sw-num">32</td><td><strong>Extra Ball</strong> : OFF = Difficile / ON = Généreux (Libéral).</td></tr>
                 </table>
             </div>
         </div>
@@ -294,18 +316,18 @@
                 <div class="doc-section-title">Synthèse et Bruitages (Yamaha FM)</div>
                 <table class="doc-table">
                     <tr><th style="width: 25%;">Terme</th><th>Description</th></tr>
-                    <tr><td class="sw-num">BGM</td><td><strong>Background Music</strong> : Musique de fond (synthèse FM). Tourne en boucle infinie jusqu'à réception d'un signal d'arrêt.</td></tr>
-                    <tr><td class="sw-num">SFX</td><td><strong>Sound Effects</strong> : Bruitages matériels (bumpers, cibles, rebonds). Ils sont mixés en temps réel par-dessus la BGM sans la couper.</td></tr>
-                    <tr><td class="sw-num">STOP / FADE</td><td><strong>Commandes d'arrêt</strong> : Coupe instantanément toutes les pistes (ex: Tilt) ou baisse progressivement le volume (ex: Game Over).</td></tr>
+                    <tr><td class="sw-num">BGM</td><td><strong>Background Music</strong> : Musique de fond (synthèse FM). Tourne en boucle.</td></tr>
+                    <tr><td class="sw-num">SFX</td><td><strong>Sound Effects</strong> : Bruitages matériels mixés en temps réel par-dessus la BGM.</td></tr>
+                    <tr><td class="sw-num">STOP / FADE</td><td><strong>Commandes d'arrêt</strong> : Coupe instantanément (Tilt) ou baisse progressivement.</td></tr>
                 </table>
             </div>
             <div>
                 <div class="doc-section-title">Voix et Ingénierie Système (PCM / DAC)</div>
                 <table class="doc-table">
                     <tr><th style="width: 25%;">Terme</th><th>Description</th></tr>
-                    <tr><td class="sw-num">VOIX / DAC</td><td><strong>Échantillons Numérisés</strong> : Fichiers lourds (voix humaines, explosions). Le convertisseur DAC ne peut lire qu'un seul son à la fois.</td></tr>
-                    <tr><td class="sw-num">BANK CLEAR</td><td><strong>Bascule de Mémoire (Macro)</strong> : Instruction matérielle (souvent Index 61). Vide le tampon DAC et prépare la lecture sur la puce ROM secondaire des voix.</td></tr>
-                    <tr><td class="sw-num">TEST TONE</td><td><strong>Outil Diagnostic</strong> : Bip strident continu généré par la carte son pour vérifier le fonctionnement de l'amplificateur et du haut-parleur.</td></tr>
+                    <tr><td class="sw-num">VOIX / DAC</td><td><strong>Échantillons Numérisés</strong> : Fichiers lourds. Le DAC ne lit qu'un son à la fois.</td></tr>
+                    <tr><td class="sw-num">BANK CLEAR</td><td><strong>Bascule de Mémoire</strong> : Vide le tampon DAC et prépare la lecture des voix.</td></tr>
+                    <tr><td class="sw-num">TEST TONE</td><td><strong>Outil Diagnostic</strong> : Bip strident pour vérifier l'amplificateur.</td></tr>
                 </table>
             </div>
         </div>

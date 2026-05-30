@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V173.50 (COMPLETE SYMBOL RESOLUTION)
+// 🏷️ VERSION : API-CORE-GATEWAY-V173.56 (ABSOLUTE LINKER RESOLUTION - LOCKED)
 // =========================================================================
 
 #include <iostream>
@@ -41,12 +41,7 @@ static INT16 g_linear_audio_buffer[C_AUDIO_BUFFER_MAX];
 
 #define SAMPLES_PER_FRAME 735 
 
-static bool g_audio_recursion_shield = false;
-
 extern "C" void emscripten_sleep(unsigned int ms);
-
-// CANAL DE RESTITUTION DE L'INTERFACE PUBLIQUE GLOBALE DE MAME
-extern "C" void YM2151_word_0_w(int offset, int data);
 
 extern "C" void libpinmame_log_error(const char* format, ...) {
     va_list args;
@@ -63,7 +58,7 @@ extern "C" {
     extern int bailing;
     extern struct osd_bitmap *scrbitmap;
 
-    char build_version[] = "PinMAME-WASM-V173.50";
+    char build_version[] = "PinMAME-WASM-V173.56";
     int alpha_active = 0;
     int spriteram_size = 0;
     int spriteram_2_size = 0;
@@ -106,7 +101,7 @@ extern "C" {
     void osd_modify_pen(int pen, int red, int green, int blue) {}
     void osd_free_colors(void) {}
     int osd_display_loading_rom_message(const char *name, struct rom_load_data *romdata) { return 0; }
-    void osd_update_video_and_audio(struct mame_display *display) {}
+    
     int osd_start_audio_stream(int stereo) { return SAMPLES_PER_FRAME; }
     
     int osd_update_audio_stream(INT16 *buffer) { 
@@ -157,7 +152,6 @@ extern "C" {
     void osd_trak_read(int player, int *deltax, int *deltay) {}
     void osd_lightgun_read(int player, int *deltax, int *deltay) {}
     
-    // 🌟 RÉSOLUTION DES REQUÊTES DU COMPOSANT INPUT.O NATIF
     const struct KeyboardInfo *osd_get_key_list(void) { return nullptr; }
     const struct JoystickInfo *osd_get_joy_list(void) { return nullptr; }
     
@@ -193,6 +187,23 @@ extern "C" {
     void OKIM6295_sh_stop(void) {}
     void OKIM6295_sh_update(void) {}
 
+    void YM2151_register_port_0_w(int offset, int data) {}
+    void YM2151_data_port_0_w(int offset, int data) {}
+
+    // 🌟 RÉSOLUTION CHIRURGICALE DES SYMBOLES REQUIS PAR 2151INTF.O
+    // Des stubs étanches sans appels externes à risque pour bloquer le signature_mismatch
+    int OPMInit(int num, int clock, int rate, void (*timer_handler)(int, int, int, double), void (*irq_handler)(int, int)) { 
+        return 0; 
+    }
+    void OPMShutdown(void) {}
+    void OPMResetChip(int num) {}
+    void OPMUpdateOne(int num, int16_t **buffer, int length) {
+        if (buffer && buffer[0]) memset(buffer[0], 0, length * sizeof(int16_t));
+        if (buffer && buffer[1]) memset(buffer[1], 0, length * sizeof(int16_t));
+    }
+    int OPMSetPortHander(int num, int handler) { return 0; }
+    int YM2151TimerOver(int c, int ch) { return 0; }
+
     void* s11csIntf = nullptr;    void* wpcsIntf = nullptr;     void* dcsIntf = nullptr;      void* by32Intf = nullptr;
     void* by51Intf = nullptr;     void* s11jsIntf = nullptr;    void* by61Intf = nullptr;     
     void* by45Intf = nullptr;     void* byTCSIntf = nullptr;    void* bySDIntf = nullptr;     void* s67sIntf = nullptr;     
@@ -208,36 +219,14 @@ extern "C" {
     void* play2sIntf = nullptr;   void* play3sIntf = nullptr;   void* play4sIntf = nullptr;   void* zsuIntf = nullptr;      
     void* playzsIntf = nullptr;   void* tecnoplayIntf = nullptr; void* joctronicIntf = nullptr; void* barniIntf = nullptr;
 
-    // AXES D'ÉCRITURE CADENCÉS
-    void YM2151_register_port_0_w(int offset, int data) { 
-        if (g_audio_recursion_shield) return;
-        g_audio_recursion_shield = true;
-        YM2151_word_0_w(0, data & 0xFF); 
-        g_audio_recursion_shield = false;
-    }
-
-    void YM2151_data_port_0_w(int offset, int data) { 
-        if (g_audio_recursion_shield) return;
-        g_audio_recursion_shield = true;
-        YM2151_word_0_w(1, data & 0xFF); 
-        g_audio_recursion_shield = false;
-    }
-
-    #define SAFESTUB __attribute__((weak))
-    SAFESTUB int OPMInit(int num, int clock, int rate, void* p4, void* p5) { return 0; }
-    SAFESTUB void OPMShutdown(void) {}
-    SAFESTUB void OPMResetChip(int num) {}
-    SAFESTUB int OPMSetPortHander(int num, int handler) { return 0; }
-    SAFESTUB int YM2151TimerOver(int c, int ch) { return 0; }
-    SAFESTUB void OPMUpdateOne(int num, INT16 **buffer, int length) {}
-
-    void artwork_update_video_and_audio(void* display) {
+    void osd_update_video_and_audio(struct mame_display *display) {}
+    
+    void artwork_update_video_and_audio(struct mame_display *display) {
         uint16_t* vfd_export = (uint16_t*)g_shared_corridor;
         for (int i = 0; i < 20; i++) {
             vfd_export[i]      = coreGlobals.segments[i].w & 0xFFFF;
             vfd_export[20 + i] = coreGlobals.segments[20 + i].w & 0xFFFF;
         }
-        // 🌟 TYPE IN LINEA C RECTIFIÉ (Élimination complète du "let")
         for (int sw = 0; sw < 80; sw++) { core_setSw(sw, g_shared_corridor[100 + sw]); }
         for (int b = 0; b < 10; b++) { g_shared_corridor[200 + b] = coreGlobals.swMatrix[b]; }
         for (int l = 0; l < 12; l++) { g_shared_corridor[300 + l] = coreGlobals.lampMatrix[l]; }
@@ -248,22 +237,23 @@ extern "C" {
         if (sound_user_cmd > 0) {
             g_shared_corridor[1060] = 0; 
             soundlatch_w(0, sound_user_cmd);
-            g_shared_corridor[1064] = sound_user_cmd; // Transmission au canal de monitoring
+            
+            EM_ASM({
+                if (window.postWasmLog) { window.postWasmLog($0); }
+            }, sound_user_cmd);
         }
 
-        uint32_t js_consumed = 0;
-        memcpy(&js_consumed, &g_shared_corridor[1050], 4);
         int pending_samples = (g_audio_write_idx - g_audio_read_idx + C_AUDIO_BUFFER_MAX) % C_AUDIO_BUFFER_MAX;
-
-        if (js_consumed == 0 && pending_samples > 0) {
+        if (pending_samples > 0) {
             if (pending_samples > 4096) pending_samples = 4096;
             for (int i = 0; i < pending_samples; i++) {
                 g_linear_audio_buffer[i] = g_audio_ring_buffer[g_audio_read_idx];
                 g_audio_read_idx = (g_audio_read_idx + 1) % C_AUDIO_BUFFER_MAX;
             }
-            memcpy(&g_shared_corridor[1050], &pending_samples, 4);
-            uint32_t buffer_address = (uint32_t)g_linear_audio_buffer;
-            memcpy(&g_shared_corridor[1054], &buffer_address, 4);
+            
+            EM_ASM({
+                if (window.pushWasmAudio) { window.pushWasmAudio($0, $1); }
+            }, (uint32_t)g_linear_audio_buffer, pending_samples);
         }
 
         uint32_t js_buffer_dist = 0;
@@ -277,7 +267,7 @@ extern "C" {
     uint8_t* pinmame_get_gprom_ptr() { return g_shared_corridor; }
     uint8_t* pinmame_get_dsprom_ptr() { return g_shared_corridor; } 
     const char* pinmame_get_display() { return g_display_text; }
-    const char* pinmame_get_version() { return "PinMAME Pure LLE Audio Core V173.50"; }
+    const char* pinmame_get_version() { return "PinMAME Pure Native Link V173.56"; }
     void pinmame_web_entry(int gprom_size, int dsprom_size) {}
     void pinmame_web_tick(int cycles) {}
 

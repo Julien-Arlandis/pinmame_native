@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V173.59 (FINAL SIGNATURE LOCK)
+// 🏷️ VERSION : API-CORE-GATEWAY-V173.62 (TRUE MAME_DISPLAY SIGNATURE)
 // =========================================================================
 
 #include <iostream>
@@ -59,7 +59,7 @@ extern "C" {
     extern int bailing;
     extern struct osd_bitmap *scrbitmap;
 
-    char build_version[] = "PinMAME-WASM-V173.59";
+    char build_version[] = "PinMAME-WASM-V173.62";
     int alpha_active = 0;
     int spriteram_size = 0;
     int spriteram_2_size = 0;
@@ -191,7 +191,7 @@ extern "C" {
     void YM2151_register_port_0_w(int offset, int data) {}
     void YM2151_data_port_0_w(int offset, int data) {}
 
-    // STUBS OPM ÉTANCHES : Protègent le runtime WASM tout en satisfaisant le lieur
+    // STUBS OPM ÉTANCHES
     int OPMInit(int num, int clock, int rate, void (*timer_handler)(int, int, int, double), void (*irq_handler)(int, int)) { return 0; }
     void OPMShutdown(void) {}
     void OPMResetChip(int num) {}
@@ -217,7 +217,7 @@ extern "C" {
     void* play2sIntf = nullptr;   void* play3sIntf = nullptr;   void* play4sIntf = nullptr;   void* zsuIntf = nullptr;      
     void* playzsIntf = nullptr;   void* tecnoplayIntf = nullptr; void* joctronicIntf = nullptr; void* barniIntf = nullptr;
 
-    // 🌟 CORRECTION CRUCIALE : Retour strict aux structures MAME d'origine
+    // 🌟 CORRECTION ABSOLUE : Les signatures exactes struct mame_display *display
     void osd_update_video_and_audio(struct mame_display *display) {}
     
     void artwork_update_video_and_audio(struct mame_display *display) {
@@ -266,7 +266,7 @@ extern "C" {
     uint8_t* pinmame_get_gprom_ptr() { return g_shared_corridor; }
     uint8_t* pinmame_get_dsprom_ptr() { return g_shared_corridor; } 
     const char* pinmame_get_display() { return g_display_text; }
-    const char* pinmame_get_version() { return "PinMAME Pure Native Link V173.59"; }
+    const char* pinmame_get_version() { return "PinMAME Pure Native Link V173.62"; }
     void pinmame_web_entry(int gprom_size, int dsprom_size) {}
     void pinmame_web_tick(int cycles) {}
 

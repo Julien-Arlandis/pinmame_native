@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Dev Workbench</title>
+    <title>PinMAME WASM - Dev Workbench V175.16</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -282,6 +282,30 @@
                     <tr><td class="sw-num">27</td><td><strong>Limite Claquage</strong> : OFF = Infinie / ON = 1 claquage max par joueur.</td></tr>
                     <tr><td class="sw-num">28</td><td><strong>Mode "Novelty"</strong> : OFF = Normal / ON = Pas d'extra, 500k Points à la place.</td></tr>
                     <tr><td class="sw-num">32</td><td><strong>Ajustement Extra Ball</strong> : OFF = Difficile / ON = Généreux (Libéral).</td></tr>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="doc-panel">
+        <div class="box-title">🔈 LEXIQUE DU PROCESSEUR AUDIO (CARTE MA-886)</div>
+        <div class="doc-grid">
+            <div>
+                <div class="doc-section-title">Synthèse et Bruitages (Yamaha FM)</div>
+                <table class="doc-table">
+                    <tr><th style="width: 25%;">Terme</th><th>Description</th></tr>
+                    <tr><td class="sw-num">BGM</td><td><strong>Background Music</strong> : Musique de fond (synthèse FM). Tourne en boucle infinie jusqu'à réception d'un signal d'arrêt.</td></tr>
+                    <tr><td class="sw-num">SFX</td><td><strong>Sound Effects</strong> : Bruitages matériels (bumpers, cibles, rebonds). Ils sont mixés en temps réel par-dessus la BGM sans la couper.</td></tr>
+                    <tr><td class="sw-num">STOP / FADE</td><td><strong>Commandes d'arrêt</strong> : Coupe instantanément toutes les pistes (ex: Tilt) ou baisse progressivement le volume (ex: Game Over).</td></tr>
+                </table>
+            </div>
+            <div>
+                <div class="doc-section-title">Voix et Ingénierie Système (PCM / DAC)</div>
+                <table class="doc-table">
+                    <tr><th style="width: 25%;">Terme</th><th>Description</th></tr>
+                    <tr><td class="sw-num">VOIX / DAC</td><td><strong>Échantillons Numérisés</strong> : Fichiers lourds (voix humaines, explosions). Le convertisseur DAC ne peut lire qu'un seul son à la fois.</td></tr>
+                    <tr><td class="sw-num">BANK CLEAR</td><td><strong>Bascule de Mémoire (Macro)</strong> : Instruction matérielle (souvent Index 61). Vide le tampon DAC et prépare la lecture sur la puce ROM secondaire des voix.</td></tr>
+                    <tr><td class="sw-num">TEST TONE</td><td><strong>Outil Diagnostic</strong> : Bip strident continu généré par la carte son pour vérifier le fonctionnement de l'amplificateur et du haut-parleur.</td></tr>
                 </table>
             </div>
         </div>

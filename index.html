@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Dev Workbench V175.14</title>
+    <title>PinMAME WASM - Dev Workbench</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -125,6 +125,8 @@
         .grid-sw { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; touch-action: none; }
         .grid-lamp { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; }
         .grid-sol { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; }
+        
+        .grid-cmd { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; touch-action: none; }
 
         .cell { 
             background: #141414; border: 1px solid #222; color: #444; padding: 6px 1px; 
@@ -136,9 +138,13 @@
 
         .cell-cmd {
             background: #1a0a2a; border: 1px solid #4a157d; color: #bba0e6; cursor: pointer; transition: all 0.1s;
+            display: flex; flex-direction: column; align-items: center; justify-content: center; height: 38px; padding: 2px;
         }
         .cell-cmd:hover { background: #2d1445; border-color: var(--neon-purple); color: #fff; }
         .cell-cmd:active, .cell.cmd-active { background: var(--neon-purple) !important; color: #fff !important; box-shadow: 0 0 8px var(--neon-purple); }
+        .cell-cmd-num { font-size: 0.7rem; font-weight: bold; }
+        .cell-cmd-desc { font-size: 0.45rem; text-transform: uppercase; text-align: center; margin-top: 2px; line-height: 1.1; color: #9d4edd; font-weight: bold;}
+        .cell-cmd:hover .cell-cmd-desc, .cell.cmd-active .cell-cmd-desc { color: #fff; }
 
         .audio-led {
             width: 12px; height: 12px; border-radius: 50%; background: #111; border: 1px solid #444; transition: all 0.05s;
@@ -154,21 +160,14 @@
         .dip-toggle::after { content: '0'; position: absolute; bottom: 1px; left: 1px; right: 1px; height: 10px; background: #fff; color: #000; font-size: 0.5rem; text-align: center; line-height: 10px; border-radius: 1px; }
         .dip-toggle.dip-on::after { content: '1'; bottom: auto; top: 1px; background: var(--neon-green); color: #000; }
 
-        /* 🌟 STYLES POUR LE MANUEL TECHNIQUE DES DIP SWITCHES */
         .doc-panel {
             width: 100%; max-width: 1150px; background: var(--bg-box); border: 2px solid var(--border-color);
             border-radius: 8px; padding: 15px; box-sizing: border-box; margin-bottom: 15px;
         }
-        .doc-grid {
-            display: grid; grid-template-columns: 1fr 1fr; gap: 15px;
-        }
+        .doc-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
         @media (max-width: 800px) { .doc-grid { grid-template-columns: 1fr; } }
-        .doc-table {
-            width: 100%; border-collapse: collapse; font-size: 0.7rem; color: #ddd;
-        }
-        .doc-table th, .doc-table td {
-            border: 1px solid #333; padding: 6px 8px; text-align: left; vertical-align: top;
-        }
+        .doc-table { width: 100%; border-collapse: collapse; font-size: 0.7rem; color: #ddd; }
+        .doc-table th, .doc-table td { border: 1px solid #333; padding: 6px 8px; text-align: left; vertical-align: top; }
         .doc-table th { background: #1a1a1a; color: var(--neon-purple); font-weight: bold; }
         .doc-table strong { color: var(--neon-amber); }
         .doc-table .sw-num { color: var(--neon-cyan); font-weight: bold; white-space: nowrap;}
@@ -193,7 +192,7 @@
         <div class="sys-group">
             <label for="romUploader" class="file-label">📂 Injecter une ROM (.zip)</label>
             <input type="file" id="romUploader" accept=".zip" style="display: none;">
-            <span id="romNameDisplay" style="font-size: 0.75rem; color: #888;">Par défaut (bonebstr.zip)</span>
+            <span id="romNameDisplay" style="font-size: 0.75rem; color: #888;">Système Prêt (ROM par défaut)</span>
         </div>
         <div class="sys-group">
             <button id="clearRomBtn" class="btn-sys btn-clear" style="display: none;">Reset Default</button>
@@ -220,9 +219,9 @@
             </div>
 
             <div style="border-top: 1px solid #222; padding-top: 10px;">
-                <div class="box-title" style="color: var(--neon-purple);">🎵 Commandes Audio (Test Instantané)</div>
-                <div class="sub-title">Canal d'injection direct asynchrone non bloquant</div>
-                <div id="cmd-grid" class="grid-sw" style="margin-top: 5px;"></div>
+                <div class="box-title" style="color: var(--neon-purple);">🎵 Soundboard (Dictionnaire Éditable)</div>
+                <div class="sub-title">Injecteur direct vers processeur audio MA-886</div>
+                <div id="cmd-grid" class="grid-cmd" style="margin-top: 5px;"></div>
             </div>
         </div>
 
@@ -265,7 +264,6 @@
                     <tr><td class="sw-num">08</td><td><strong>Menu Claquage</strong> : OFF = Accès autorisé / ON = Paramétrage bloqué.</td></tr>
                 </table>
             </div>
-
             <div>
                 <div class="doc-section-title">🎱 Règles Fondamentales du Jeu</div>
                 <table class="doc-table">
@@ -295,7 +293,6 @@
     </div>
 
     <script src="pinmame_web.js"></script>
-    
     <script src="app.js"></script>
 </body>
 </html>

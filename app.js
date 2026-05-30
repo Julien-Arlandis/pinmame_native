@@ -2,6 +2,17 @@
 // ⚙️ LOGIQUE INTERFACE PINMAME WASM (app.js)
 // =========================================================================
 
+// 🌟 DICTIONNAIRE DES SONS (Totalement générique pour s'adapter à toutes les ROMs)
+const SOUND_DICTIONARY = {
+    1: "STOP",
+    2: "BGM 1",
+    3: "BGM 2",
+    4: "BGM 3",
+    5: "BGM 4",
+    61: "BANK CLEAR",
+    63: "TEST TONE"
+};
+
 const canvas = document.getElementById('vfdCanvas');
 const ctx = canvas.getContext('2d');
 const statusEl = document.getElementById('status');
@@ -20,16 +31,12 @@ let vfdMemoryPointer = 0;
 const swCells = []; const lampCells = []; const solCells = []; const dipToggles = [];
 const userSwitchStates = new Array(80).fill(false);
 
-// 🌟 PERSISTANCE DES DIP SWITCHES VIA LOCALSTORAGE
+// PERSISTANCE DES DIP SWITCHES VIA LOCALSTORAGE
 let userDipStates = new Array(32).fill(false);
 try {
     const savedDips = localStorage.getItem('pinmame_dips');
-    if (savedDips) {
-        userDipStates = JSON.parse(savedDips);
-    }
-} catch (e) {
-    console.warn("Impossible de lire les DIPs sauvegardés, retour aux valeurs par défaut.");
-}
+    if (savedDips) userDipStates = JSON.parse(savedDips);
+} catch (e) { console.warn("Erreur lecture DIPs."); }
 
 const COIN_ID = 3; const START_ID = 6; const TEST_ID = 7;   
 
@@ -90,7 +97,8 @@ window.pushWasmAudio = function(ptr, count) {
 };
 
 window.postWasmLog = function(cmdId) {
-    logToTerminal(`🎵 [AUDIO MONITOR] Commande reçue : 0x${cmdId.toString(16).toUpperCase()} -> Synthétiseur FM actif`);
+    const desc = SOUND_DICTIONARY[cmdId] || "SFX";
+    logToTerminal(`🎵 Commande envoyée : 0x${cmdId.toString(16).padStart(2,'0').toUpperCase()} -> ${desc}`);
 };
 
 function logToTerminal(msg) {
@@ -100,7 +108,6 @@ function logToTerminal(msg) {
 
 // 🎛️ CONSTRUCTION DE L'INTERFACE UTILISATEUR
 
-// 1. Grille des Switchs Matériels
 const swGridEl = document.getElementById('swGrid');
 for (let i = 0; i < 80; i++) {
     const cell = document.createElement('div');
@@ -115,11 +122,21 @@ for (let i = 0; i < 80; i++) {
     swGridEl.appendChild(cell); swCells.push(cell);
 }
 
-// 2. Grille des Commandes Audio (Dépuration)
+// 🌟 GRILLE AUDIO DOCUMENTÉE
 const cmdGridEl = document.getElementById('cmd-grid');
 for (let i = 1; i <= 64; i++) {
     const cell = document.createElement('div');
-    cell.className = 'cell cell-cmd'; cell.textContent = String(i).padStart(2, '0');
+    cell.className = 'cell cell-cmd';
+    
+    const description = SOUND_DICTIONARY[i] || "SFX";
+    
+    cell.innerHTML = `
+        <div class="cell-cmd-num">${String(i).padStart(2, '0')}</div>
+        <div class="cell-cmd-desc">${description}</div>
+    `;
+    
+    cell.title = description; 
+
     cell.addEventListener('pointerdown', (e) => {
         e.preventDefault(); unlockAudio();
         cell.classList.add('cmd-active'); setTimeout(() => cell.classList.remove('cmd-active'), 120);
@@ -128,42 +145,29 @@ for (let i = 1; i <= 64; i++) {
     cmdGridEl.appendChild(cell);
 }
 
-// 3. Panneau des DIP Switches (De 1 à 32)
 for (let bank = 0; bank < 4; bank++) {
     const bankEl = document.createElement('div'); bankEl.className = 'dip-bank';
     for (let bit = 0; bit < 8; bit++) {
         const dipId = (bank * 8) + bit;
         const swWrap = document.createElement('div'); swWrap.className = 'dip-switch';
-        
-        // 🌟 NOUVELLE NUMÉROTATION : Affiche "01" à "32" pour un alignement propre
         const label = document.createElement('span'); 
         label.textContent = String(dipId + 1).padStart(2, '0');
-        
         const toggle = document.createElement('div'); toggle.className = 'dip-toggle';
-        
-        // Restauration de l'état visuel au chargement
         if (userDipStates[dipId]) toggle.classList.add('dip-on');
 
         toggle.addEventListener('pointerdown', (e) => {
             e.preventDefault();
             userDipStates[dipId] = !userDipStates[dipId];
-            
             if (userDipStates[dipId]) toggle.classList.add('dip-on');
             else toggle.classList.remove('dip-on');
-            
-            if (pinmameInstance && vfdMemoryPointer) {
-                pinmameInstance.HEAPU8[vfdMemoryPointer + 400 + dipId] = userDipStates[dipId] ? 1 : 0;
-            }
-            // Sauvegarde immédiate du changement d'état
+            if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 400 + dipId] = userDipStates[dipId] ? 1 : 0;
             localStorage.setItem('pinmame_dips', JSON.stringify(userDipStates));
         });
-        
         swWrap.appendChild(label); swWrap.appendChild(toggle); bankEl.appendChild(swWrap); dipToggles.push(toggle);
     }
     dipContainer.appendChild(bankEl);
 }
 
-// 4. Grille des Lampes et Solénoïdes
 const lampGridEl = document.getElementById('lampGrid');
 for (let i = 0; i < 96; i++) {
     const cell = document.createElement('div'); cell.className = 'cell'; cell.textContent = 'L' + String(i+1).padStart(2, '0');
@@ -176,7 +180,6 @@ for (let i = 0; i < 32; i++) {
     solGridEl.appendChild(cell); solCells.push(cell);
 }
 
-// 🚀 INITIALISATION DU MOTEUR ÉMULATEUR
 async function startEmulation() {
     try {
         statusEl.textContent = "🟡 Chargement du moteur WebAssembly...";
@@ -186,6 +189,8 @@ async function startEmulation() {
             locateFile: function(path, prefix) { return path.endsWith('.wasm') ? 'pinmame_web.wasm' : prefix + path; }
         });
 
+        // "bonebstr" reste la chaîne de secours interne si l'utilisateur ne charge rien, 
+        // mais elle n'apparaît plus dans l'interface ou les logs globaux.
         let romBuffer; let finalRomName = "bonebstr"; 
         const customRomData = sessionStorage.getItem('custom_rom_bytes');
         const customRomName = sessionStorage.getItem('custom_rom_filename');
@@ -201,7 +206,7 @@ async function startEmulation() {
             for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
             romBuffer = bytes.buffer;
         } else {
-            logToTerminal(`[JS] Téléchargement du pack de ROMs par défaut (${finalRomName}.zip)...`);
+            logToTerminal(`[JS] Téléchargement du pack système par défaut...`);
             const response = await fetch(`roms/${finalRomName}.zip`);
             if (!response.ok) throw new Error("Pack introuvable.");
             romBuffer = await response.arrayBuffer();
@@ -217,7 +222,6 @@ async function startEmulation() {
         for (let i = 0; i < finalRomName.length; i++) instance.HEAPU8[stringAddress + i] = finalRomName.charCodeAt(i);
         instance.HEAPU8[stringAddress + finalRomName.length] = 0;
 
-        // Injection de l'état sauvegardé des DIP Switches dans la mémoire MAME avant le boot
         for(let i = 0; i < 32; i++) {
             instance.HEAPU8[vfdMemoryPointer + 400 + i] = userDipStates[i] ? 1 : 0;
         }
@@ -269,7 +273,7 @@ async function startEmulation() {
         }
 
         requestAnimationFrame(renderFrame);
-        statusEl.textContent = "🟢 PinMAME Workbench V175.12 - Interface Modulaire";
+        statusEl.textContent = "🟢 PinMAME Workbench V175.15 - Mode Universel Actif";
         statusEl.style.color = "#00ffcc";
 
         setTimeout(() => { instance._pinmame_web_boot(); }, 100);

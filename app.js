@@ -16,16 +16,16 @@ const SOUND_DICTIONARY = {
 // 🌟 NOUVEAU : DICTIONNAIRE DES CONTACTS DU PLATEAU (00-79)
 const SWITCH_DICTIONARY = {
     0: "Monnayeur Gauche (Standard)",
-    1: "Monnayeur Central (Standard)",
     2: "Monnayeur Droit (Standard)",
     3: "Monnayeur 4 / Jeton",
     4: "Slam Tilt (Porte)",
     5: "Plumb Bob Tilt (Balancier)",
-    6: "Bouton Start / Credit",
     7: "Bouton Test",
     15: "Exemple: Cible Tombante 1",
     16: "Exemple: Cible Tombante 2",
-    30: "Exemple: Bumper Droit"
+    17: "Monnayeur Central (Câblé)",   // Recâblé ici
+    30: "Exemple: Bumper Droit",
+    47: "Bouton Start / Credit (Câblé)" // Recâblé ici
 };
 
 const canvas = document.getElementById('vfdCanvas');
@@ -53,7 +53,10 @@ try {
     if (savedDips) userDipStates = JSON.parse(savedDips);
 } catch (e) { console.warn("Erreur lecture DIPs."); }
 
-const COIN_ID = 3; const START_ID = 6; const TEST_ID = 7;   
+// IDs de câblage logique cible
+const CABLED_COIN_ID = 17;
+const CABLED_START_ID = 47;
+const TEST_ID = 7;   
 
 const RING_BUFFER_SIZE = 131072;
 const ringBufferL = new Float32Array(RING_BUFFER_SIZE);
@@ -65,6 +68,9 @@ let lastSampleL = 0.0; let lastSampleR = 0.0;
 let audioCtx = null; let audioNode = null;
 
 function unlockAudio() {
+    // ⚡ OPTIMISATION : Si l'audio tourne déjà, on quitte immédiatement sans re-calculer
+    if (audioCtx && audioCtx.state === 'running') return;
+
     if (!audioCtx) {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         audioCtx = new AudioContext({ sampleRate: 44100 });
@@ -157,6 +163,8 @@ for (let i = 0; i < 80; i++) {
             isPressed = true; sendSwitchState(1);
             cell.classList.remove('sw-user'); void cell.offsetWidth; cell.classList.add('sw-user'); 
             logToTerminal(`⚡ Switch ${String(i).padStart(2, '0')} actionné : ${swDesc}`);
+            
+            // Animation et verrouillage calés sur 500ms
             holdTimer = setTimeout(() => {
                 if (isPressed) { 
                     isLocked = true; cell.classList.remove('sw-user'); cell.classList.add('sw-locked'); 
@@ -330,13 +338,56 @@ function setupSystemHandlers() {
     };
 }
 
+// 🕹️ LIENS DES BOUTONS DE COMMANDE D'ARCADE (Nouveau câblage logique)
 function setupButtons() {
-    const coinBtn = document.getElementById('coinBtn'); const startBtn = document.getElementById('startBtn'); const testBtn = document.getElementById('testBtn');
-    const attachBtn = (btn, id) => {
-        btn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[id] = true; swCells[id].classList.add('sw-user'); if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + id] = 1; logToTerminal(`⚡ Switch actionné : ${SWITCH_DICTIONARY[id]}`);});
-        btn.addEventListener('pointerup', (e) => { e.preventDefault(); userSwitchStates[id] = false; swCells[id].classList.remove('sw-user'); if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + id] = 0; });
-    };
-    attachBtn(coinBtn, COIN_ID); attachBtn(startBtn, START_ID); attachBtn(testBtn, TEST_ID);
+    const coinBtn = document.getElementById('coinBtn'); 
+    const startBtn = document.getElementById('startBtn'); 
+    const testBtn = document.getElementById('testBtn');
+
+    // Câblage dynamique du bouton Coin sur le Switch 17
+    coinBtn.addEventListener('pointerdown', (e) => { 
+        e.preventDefault(); unlockAudio(); 
+        userSwitchStates[CABLED_COIN_ID] = true; 
+        swCells[CABLED_COIN_ID].classList.add('sw-user'); 
+        if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + CABLED_COIN_ID] = 1; 
+        logToTerminal(`⚡ Switch actionné : ${SWITCH_DICTIONARY[CABLED_COIN_ID] || 'Contact ' + CABLED_COIN_ID}`);
+    });
+    coinBtn.addEventListener('pointerup', (e) => { 
+        e.preventDefault(); 
+        userSwitchStates[CABLED_COIN_ID] = false; 
+        swCells[CABLED_COIN_ID].classList.remove('sw-user'); 
+        if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + CABLED_COIN_ID] = 0; 
+    });
+
+    // Câblage dynamique du bouton Start sur le Switch 47
+    startBtn.addEventListener('pointerdown', (e) => { 
+        e.preventDefault(); unlockAudio(); 
+        userSwitchStates[CABLED_START_ID] = true; 
+        swCells[CABLED_START_ID].classList.add('sw-user'); 
+        if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + CABLED_START_ID] = 1; 
+        logToTerminal(`⚡ Switch actionné : ${SWITCH_DICTIONARY[CABLED_START_ID] || 'Contact ' + CABLED_START_ID}`);
+    });
+    startBtn.addEventListener('pointerup', (e) => { 
+        e.preventDefault(); 
+        userSwitchStates[CABLED_START_ID] = false; 
+        swCells[CABLED_START_ID].classList.remove('sw-user'); 
+        if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + CABLED_START_ID] = 0; 
+    });
+
+    // Le bouton Test reste sur l'ID 07 standard
+    testBtn.addEventListener('pointerdown', (e) => { 
+        e.preventDefault(); unlockAudio(); 
+        userSwitchStates[TEST_ID] = true; 
+        swCells[TEST_ID].classList.add('sw-user'); 
+        if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + TEST_ID] = 1; 
+        logToTerminal(`⚡ Switch actionné : ${SWITCH_DICTIONARY[TEST_ID]}`);
+    });
+    testBtn.addEventListener('pointerup', (e) => { 
+        e.preventDefault(); 
+        userSwitchStates[TEST_ID] = false; 
+        swCells[TEST_ID].classList.remove('sw-user'); 
+        if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + TEST_ID] = 0; 
+    });
 }
 
 function drawGottlieb14Segment(ctx, x, y, mask) {

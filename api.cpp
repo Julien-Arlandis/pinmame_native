@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V190.00 (THE AUDIO IGNITION FIX)
+// 🏷️ VERSION : API-CORE-GATEWAY-V194.00 (PURE & STABLE - ZERO HACKS)
 // =========================================================================
 
 #include <iostream>
@@ -61,7 +61,7 @@ extern "C" void libpinmame_log_error(const char* format, ...) {
 // 🌟 1. LE PONT MATÉRIEL YAMAHA AVEC FLUSH SYNCHRONE 🌟
 // =========================================================================
 extern "C" {
-    extern void stream_update(int stream, int min_interval); // Accès au mixeur natif
+    extern void stream_update(int stream, int min_interval); 
 
     static void (*g_mame_opm_irq_handler)(int, int) = nullptr;
 
@@ -106,7 +106,7 @@ extern "C" {
     extern int bailing;
     extern struct osd_bitmap *scrbitmap;
 
-    char build_version[] = "PinMAME-WASM-V190.00";
+    char build_version[] = "PinMAME-WASM-V194.00";
     int alpha_active = 0;
     int spriteram_size = 0;
     int spriteram_2_size = 0;
@@ -260,9 +260,13 @@ extern "C" {
             vfd_export[i]      = coreGlobals.segments[i].w & 0xFFFF;
             vfd_export[20 + i] = coreGlobals.segments[20 + i].w & 0xFFFF;
         }
+        
+        // --- BOUCLE DE LECTURE DES CONTACTS DU PLATEAU UNIQUEMENT ---
         for (int sw = 0; sw < 80; sw++) { core_setSw(sw, g_shared_corridor[100 + sw]); }
+        
         for (int b = 0; b < 10; b++) { g_shared_corridor[200 + b] = coreGlobals.swMatrix[b]; }
         for (int l = 0; l < 12; l++) { g_shared_corridor[300 + l] = coreGlobals.lampMatrix[l]; }
+        
         uint32_t solenoids_state = coreGlobals.solenoids;
         memcpy(&g_shared_corridor[320], &solenoids_state, 4);
 
@@ -300,7 +304,7 @@ extern "C" {
     uint8_t* pinmame_get_gprom_ptr() { return g_shared_corridor; }
     uint8_t* pinmame_get_dsprom_ptr() { return g_shared_corridor; } 
     const char* pinmame_get_display() { return g_display_text; }
-    const char* pinmame_get_version() { return "PinMAME Pure Native Link V190.00"; }
+    const char* pinmame_get_version() { return "PinMAME Pure Native Link V194.00"; }
     void pinmame_web_entry(int gprom_size, int dsprom_size) {}
     void pinmame_web_tick(int cycles) {}
 
@@ -339,7 +343,7 @@ extern "C" {
         }
         if (!found) g_selected_game_index = 0;
         
-        // 🌟 L'ALLUMAGE DU MOTEUR SONORE 🌟
+        // Allumage du moteur sonore natif
         options.samplerate = 44100;
 
         bailing = 0;

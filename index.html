@@ -151,12 +151,13 @@
 
         .cell { 
             background: #141414; border: 1px solid #222; color: #444; padding: 6px 1px; 
-            font-size: 0.65rem; font-weight: bold; border-radius: 2px; text-align: center; touch-action: none; cursor: pointer; transition: all 0.1s;
+            font-size: 0.65rem; font-weight: bold; border-radius: 2px; text-align: center; cursor: pointer; transition: all 0.1s;
             position: relative; 
             display: flex;
             align-items: center;
             justify-content: center;
             padding-right: 22px; 
+            touch-action: none;
         }
         .cell:hover { border-color: #555; color: #fff;}
         
@@ -187,6 +188,7 @@
         .cell-cmd {
             background: #1a0a2a; border: 1px solid #4a157d; color: #bba0e6; cursor: pointer; transition: all 0.1s;
             display: flex; flex-direction: column; align-items: center; justify-content: center; height: 38px; padding: 2px;
+            touch-action: none;
         }
         .cell-cmd:hover { background: #2d1445; border-color: var(--neon-purple); color: #fff; }
         .cell-cmd:active, .cell.cmd-active { background: var(--neon-purple) !important; color: #fff !important; box-shadow: 0 0 8px var(--neon-purple); }
@@ -242,9 +244,9 @@
     </div>
 
     <div class="arcade-panel">
-        <button id="coinBtn" class="btn btn-coin">Coin 1 [5]</button>
-        <button id="startBtn" class="btn btn-start">Start [1]</button>
-        <button id="testBtn" class="btn btn-test">Test [7]</button>
+        <button id="coinBtn" class="btn btn-coin">Coin</button>
+        <button id="startBtn" class="btn btn-start">Start</button>
+        <button id="testBtn" class="btn btn-test">Test</button>
     </div>
 
     <div class="dashboard">

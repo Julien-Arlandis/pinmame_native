@@ -1,6 +1,6 @@
 // =========================================================================
 // ⚙️ LOGIQUE INTERFACE PINMAME WASM (app.js)
-// 🏷️ VERSION : V195.01 - TEST BUTTON ON 07
+// 🏷️ VERSION : V195.02 - ZERO LATENCY MOBILE TOUCH FIX
 // =========================================================================
 
 // 🌟 DICTIONNAIRE AUDIO (Dépuration Sonore)
@@ -21,7 +21,7 @@ const SWITCH_DICTIONARY = {
     4: "Left Outlane (Couloir Perte Gauche)",
     5: "Left Return (Couloir Retour Gauche)",
     6: "Right Return (Couloir Retour Droit)",
-    7: "Test Button (Bouton Diagnostic)", // CORRIGÉ SUR LE 07
+    7: "Test Button (Bouton Diagnostic)", 
 
     // --- STROBE 1 ---
     10: "10 Points", 11: "10 Points", 12: "10 Points", 13: "10 Points",
@@ -63,7 +63,7 @@ const SWITCH_DICTIONARY = {
     54: "Ball Trough 2 (Stockage Bille 2)",
     55: "Ball Trough 3 (Stockage Bille 3)",
     56: "Ball Trough 4 (Stockage Bille 4)",
-    57: "Right Coin Chute (Monnayeur Droit)", // Anciennement le Test
+    57: "Right Coin Chute (Monnayeur Droit)", 
 
     // --- STROBE 6 ---
     60: "Standup Target 'B' (Busters)",
@@ -111,8 +111,7 @@ try {
     if (savedDips) userDipStates = JSON.parse(savedDips);
 } catch (e) { console.warn("Erreur lecture DIPs."); }
 
-// 🌟 MISE À JOUR DES RACCOURCIS BOUTONS
-const COIN_ID = 27; const START_ID = 47; const TEST_ID = 7;   // <--- CORRIGÉ ICI
+const COIN_ID = 27; const START_ID = 47; const TEST_ID = 7;   
 
 const RING_BUFFER_SIZE = 131072;
 const ringBufferL = new Float32Array(RING_BUFFER_SIZE);
@@ -160,7 +159,6 @@ function unlockAudio() {
     if (audioCtx.state === 'suspended') audioCtx.resume();
 }
 
-// 🛡️ ALIMENTATION SÉCURISÉE DU BUFFER AUDIO
 window.pushWasmAudio = function(ptr, count) {
     if (!audioCtx) return; 
     
@@ -190,6 +188,7 @@ const swGridEl = document.getElementById('swGrid');
 for (let i = 0; i < 80; i++) {
     const cell = document.createElement('div');
     cell.className = 'cell'; 
+    cell.style.touchAction = 'none'; // 🚀 ANTI-LATENCE MOBILE
     const swDesc = SWITCH_DICTIONARY[i] || `Contact Plateau ${String(i).padStart(2, '0')}`;
     cell.title = swDesc;
     cell.innerHTML = `
@@ -240,6 +239,7 @@ for (let i = 0; i < 80; i++) {
 const cmdGridEl = document.getElementById('cmd-grid');
 for (let i = 1; i <= 64; i++) {
     const cell = document.createElement('div'); cell.className = 'cell cell-cmd';
+    cell.style.touchAction = 'none'; // 🚀 ANTI-LATENCE MOBILE
     const description = SOUND_DICTIONARY[i] || "SFX";
     cell.innerHTML = `<div class="cell-cmd-num">${String(i).padStart(2, '0')}</div><div class="cell-cmd-desc">${description}</div>`;
     cell.title = description; 
@@ -258,6 +258,7 @@ for (let bank = 0; bank < 4; bank++) {
         const swWrap = document.createElement('div'); swWrap.className = 'dip-switch';
         const label = document.createElement('span'); label.textContent = String(dipId + 1).padStart(2, '0');
         const toggle = document.createElement('div'); toggle.className = 'dip-toggle';
+        toggle.style.touchAction = 'none'; // 🚀 ANTI-LATENCE MOBILE
         if (userDipStates[dipId]) toggle.classList.add('dip-on');
 
         toggle.addEventListener('pointerdown', (e) => {
@@ -325,7 +326,6 @@ async function startEmulation() {
         
         setupButtons(); setupSystemHandlers();
 
-        // 🍏 FORCAGE DU DÉBLOCAGE AUDIO POUR IOS SAFARI
         window.addEventListener('pointerdown', unlockAudio);
         window.addEventListener('touchstart', unlockAudio, { passive: false });
         window.addEventListener('click', unlockAudio);
@@ -370,13 +370,15 @@ async function startEmulation() {
         }
 
         requestAnimationFrame(renderFrame);
-        statusEl.textContent = "🟢 PinMAME Workbench V195.01 - Système Actif";
+        statusEl.textContent = "🟢 PinMAME Workbench V195.02 - Système Actif";
         statusEl.style.color = "#00ffcc";
         setTimeout(() => { instance._pinmame_web_boot(); }, 100);
     } catch (err) { statusEl.textContent = "🔴 ERREUR : " + err.message; }
 }
 
 function setupSystemHandlers() {
+    rebootBtn.style.touchAction = 'none';
+    clearRomBtn.style.touchAction = 'none';
     rebootBtn.onclick = () => { location.reload(); };
     clearRomBtn.onclick = () => { sessionStorage.removeItem('custom_rom_bytes'); sessionStorage.removeItem('custom_rom_filename'); location.reload(); };
     romUploader.onchange = (e) => {
@@ -395,6 +397,7 @@ function setupSystemHandlers() {
 function setupButtons() {
     const coinBtn = document.getElementById('coinBtn'); const startBtn = document.getElementById('startBtn'); const testBtn = document.getElementById('testBtn');
     const attachBtn = (btn, id) => {
+        if(btn) btn.style.touchAction = 'none'; // 🚀 ANTI-LATENCE MOBILE
         btn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[id] = true; swCells[id].classList.add('sw-user'); if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + id] = 1; logToTerminal(`⚡ Switch actionné : ${SWITCH_DICTIONARY[id]}`);});
         btn.addEventListener('pointerup', (e) => { e.preventDefault(); userSwitchStates[id] = false; swCells[id].classList.remove('sw-user'); if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + id] = 0; });
     };

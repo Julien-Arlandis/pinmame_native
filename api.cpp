@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V194.00 (PURE & STABLE - ZERO HACKS)
+// 🏷️ VERSION : API-CORE-GATEWAY-V195.00 (DEEP MAME PORT INJECTION)
 // =========================================================================
 
 #include <iostream>
@@ -27,6 +27,8 @@ extern "C" {
 #include "usrintrf.h"
 #include "sound/ym2151.h" 
 #include "sound/samples.h" 
+// 🌟 LE SECRET : On importe la structure intime des ports de MAME 🌟
+#include "inptport.h" 
 }
 
 static uint8_t g_dummy_buffer[1024 * 1024] = {0}; 
@@ -106,7 +108,7 @@ extern "C" {
     extern int bailing;
     extern struct osd_bitmap *scrbitmap;
 
-    char build_version[] = "PinMAME-WASM-V194.00";
+    char build_version[] = "PinMAME-WASM-V195.00";
     int alpha_active = 0;
     int spriteram_size = 0;
     int spriteram_2_size = 0;
@@ -261,8 +263,30 @@ extern "C" {
             vfd_export[20 + i] = coreGlobals.segments[20 + i].w & 0xFFFF;
         }
         
-        // --- BOUCLE DE LECTURE DES CONTACTS DU PLATEAU UNIQUEMENT ---
+        // --- BOUCLE DE LECTURE DES CONTACTS DU PLATEAU ---
         for (int sw = 0; sw < 80; sw++) { core_setSw(sw, g_shared_corridor[100 + sw]); }
+
+        // =========================================================================
+        // 🌟 INJECTION DIRECTE DES DIP SWITCHES DANS LES PORTS MAME 🌟
+        // On parcoure le hardware simulé pour forcer les interrupteurs un par un.
+        // =========================================================================
+        if (Machine && Machine->input_ports) {
+            struct InputPort *port = Machine->input_ports;
+            int current_dip_index = 0;
+            
+            while (port->type != IPT_END && current_dip_index < 32) {
+                if (port->type == IPT_DIPSWITCH_NAME) {
+                    // Si l'interrupteur Web est allumé (1), on force le masque du port
+                    if (g_shared_corridor[400 + current_dip_index]) {
+                        port->default_value = port->mask; 
+                    } else {
+                        port->default_value = 0; 
+                    }
+                    current_dip_index++;
+                }
+                port++;
+            }
+        }
         
         for (int b = 0; b < 10; b++) { g_shared_corridor[200 + b] = coreGlobals.swMatrix[b]; }
         for (int l = 0; l < 12; l++) { g_shared_corridor[300 + l] = coreGlobals.lampMatrix[l]; }
@@ -304,7 +328,7 @@ extern "C" {
     uint8_t* pinmame_get_gprom_ptr() { return g_shared_corridor; }
     uint8_t* pinmame_get_dsprom_ptr() { return g_shared_corridor; } 
     const char* pinmame_get_display() { return g_display_text; }
-    const char* pinmame_get_version() { return "PinMAME Pure Native Link V194.00"; }
+    const char* pinmame_get_version() { return "PinMAME Pure Native Link V195.00"; }
     void pinmame_web_entry(int gprom_size, int dsprom_size) {}
     void pinmame_web_tick(int cycles) {}
 

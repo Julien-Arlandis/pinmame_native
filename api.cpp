@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V173.62 (TRUE MAME_DISPLAY SIGNATURE)
+// 🏷️ VERSION : API-CORE-GATEWAY-V190.00 (THE AUDIO IGNITION FIX)
 // =========================================================================
 
 #include <iostream>
@@ -12,8 +12,12 @@
 #include <cstdarg> 
 #include <emscripten.h> 
 
+#ifndef __rolq
 #define __rolq(x,c) (((unsigned long long)(x) << (c)) | ((unsigned long long)(x) >> (64 - (c))))
+#endif
+#ifndef __rorq
 #define __rorq(x,c) (((unsigned long long)(x) >> (c)) | ((unsigned long long)(x) << (64 - (c))))
+#endif
 
 typedef uint8_t BMTYPE; 
 
@@ -21,25 +25,26 @@ extern "C" {
 #include "driver.h"
 #include "core.h"
 #include "usrintrf.h"
+#include "sound/ym2151.h" 
+#include "sound/samples.h" 
 }
 
-// COULOIRS DE MÉMOIRE ISOLÉS
 static uint8_t g_dummy_buffer[1024 * 1024] = {0}; 
 static uint8_t g_shared_corridor[4096] = {0};      
-
 static char g_display_text[100] = "Analyseur Global Actif";
 static uint32_t g_font_security_anchor[10000] = {0}; 
-
 static int g_selected_game_index = 0;
 
-// FILE AUDIO CIRCULAIRE STÉRÉO INTERNE
+// =========================================================================
+// 🎵 TAMPONS AUDIO MAME -> WEBASSEMBLY
+// =========================================================================
 #define C_AUDIO_BUFFER_MAX 131072
+#define SAMPLES_PER_FRAME 735 
+
 static INT16 g_audio_ring_buffer[C_AUDIO_BUFFER_MAX];
 static int g_audio_write_idx = 0;
 static int g_audio_read_idx = 0; 
 static INT16 g_linear_audio_buffer[C_AUDIO_BUFFER_MAX];
-
-#define SAMPLES_PER_FRAME 735 
 
 extern "C" void emscripten_sleep(unsigned int ms);
 extern "C" void sndbrd_0_data_w(int offset, int data);
@@ -52,14 +57,56 @@ extern "C" void libpinmame_log_error(const char* format, ...) {
     std::cerr << std::endl;
 }
 
+// =========================================================================
+// 🌟 1. LE PONT MATÉRIEL YAMAHA AVEC FLUSH SYNCHRONE 🌟
+// =========================================================================
+extern "C" {
+    extern void stream_update(int stream, int min_interval); // Accès au mixeur natif
+
+    static void (*g_mame_opm_irq_handler)(int, int) = nullptr;
+
+    static void native_jarek_irq_bridge(int state) {
+        if (g_mame_opm_irq_handler) { g_mame_opm_irq_handler(0, state); }
+    }
+
+    int OPMInit(int num, int clock, int rate, void (*timer_handler)(int, int, int, double), void (*irq_handler)(int, int)) {
+        g_mame_opm_irq_handler = irq_handler;
+        int res = YM2151Init(num, (double)clock, (double)rate);
+        YM2151SetIrqHandler(num, native_jarek_irq_bridge);
+        return res;
+    }
+
+    void OPMShutdown(void) { YM2151Shutdown(); }
+    void OPMResetChip(int num) { YM2151ResetChip(num); }
+    
+    void OPMUpdateOne(int num, INT16 **buffer, int length) {
+        YM2151UpdateOne(num, buffer, length);
+    }
+    
+    void OPMSetPortHander(int num, void (*PortWrite)(unsigned int offset, unsigned char data)) {}
+
+    int YM2151TimerOver(int num, int c) { return 0; }
+
+    static int g_gts80b_sound_reg_latch = 0;
+    void YM2151_register_port_0_w(offs_t offset, data8_t data) {
+        g_gts80b_sound_reg_latch = data;
+    }
+    void YM2151_data_port_0_w(offs_t offset, data8_t data) {
+        for(int i = 0; i < 4; i++) { stream_update(i, 0); }
+        YM2151WriteReg(0, g_gts80b_sound_reg_latch, data);
+    }
+}
+
+// =========================================================================
+// 🌟 2. PONT SYSTÈME OSD MAME 🌟
+// =========================================================================
 extern "C" {
     int run_game(int game_num);
     unsigned int cpunum_get_reg(int cpunum, int regnum);
-    
     extern int bailing;
     extern struct osd_bitmap *scrbitmap;
 
-    char build_version[] = "PinMAME-WASM-V173.62";
+    char build_version[] = "PinMAME-WASM-V190.00";
     int alpha_active = 0;
     int spriteram_size = 0;
     int spriteram_2_size = 0;
@@ -75,7 +122,9 @@ extern "C" {
     int he_did_cheat = 0;
     int g_low_latency_throttle = 0;
     void* driver_0 = nullptr;
-    void* samples_interface = nullptr;
+    
+    struct Samplesinterface samples_interface;
+
     int pdrawgfx_shadow_lowpri = 0; 
 
     struct mame_bitmap *priority_bitmap = (struct mame_bitmap *)g_dummy_buffer; 
@@ -122,12 +171,10 @@ extern "C" {
     void init_user_interface(void) {} 
 
     void pic8259_0_config(int p1, int p2) {}
-
     int sem_timedwait(void* sem, const void* abs_timeout) { return 0; }
     void bulb_init(void) {}
     float bulb_heat_up_factor(int p1, float p2, float p3, float p4) { return 0.0f; }
     float bulb_filament_temperature_to_emission(int p1, float p2) { return 0.0f; }
-    
     int hard_disk_open(int p1, int p2, int p3) { return 0; }
     int hard_disk_get_header(int p1) { return 0; }
     int hard_disk_create(int p1, int p2) { return 0; }
@@ -167,6 +214,7 @@ extern "C" {
     int uistring_init(int lang) { return 0; }
     void uistring_shutdown(void) {}
     
+    void i8259_init(int count) {}
     void hs_init(void) {}
     void hs_open(int p1) {}
     void hs_close(void) {}
@@ -181,26 +229,15 @@ extern "C" {
     void proc_mechsounds(int p1, int p2) {} 
     void throttle_speed_part(int p1, int p2) {}
 
-    int YM2203_sh_start(void* msound) { return 0; }
+    int YM2203_sh_start(const struct MachineSound *msound) { return 0; }
     void YM2203_sh_stop(void) {}
     void YM2203_sh_reset(void) {}
-    int OKIM6295_sh_start(void* msound) { return 0; }
+    
+    int OKIM6295_sh_start(const struct MachineSound *msound) { return 0; }
     void OKIM6295_sh_stop(void) {}
     void OKIM6295_sh_update(void) {}
 
-    void YM2151_register_port_0_w(int offset, int data) {}
-    void YM2151_data_port_0_w(int offset, int data) {}
-
-    // STUBS OPM ÉTANCHES
-    int OPMInit(int num, int clock, int rate, void (*timer_handler)(int, int, int, double), void (*irq_handler)(int, int)) { return 0; }
-    void OPMShutdown(void) {}
-    void OPMResetChip(int num) {}
-    void OPMUpdateOne(int num, int16_t **buffer, int length) {
-        if (buffer && buffer[0]) memset(buffer[0], 0, length * sizeof(int16_t));
-        if (buffer && buffer[1]) memset(buffer[1], 0, length * sizeof(int16_t));
-    }
-    int OPMSetPortHander(int num, int handler) { return 0; }
-    int YM2151TimerOver(int c, int ch) { return 0; }
+    int video_init(void) { return 0; }
 
     void* s11csIntf = nullptr;    void* wpcsIntf = nullptr;     void* dcsIntf = nullptr;      void* by32Intf = nullptr;
     void* by51Intf = nullptr;     void* s11jsIntf = nullptr;    void* by61Intf = nullptr;     
@@ -217,9 +254,6 @@ extern "C" {
     void* play2sIntf = nullptr;   void* play3sIntf = nullptr;   void* play4sIntf = nullptr;   void* zsuIntf = nullptr;      
     void* playzsIntf = nullptr;   void* tecnoplayIntf = nullptr; void* joctronicIntf = nullptr; void* barniIntf = nullptr;
 
-    // 🌟 CORRECTION ABSOLUE : Les signatures exactes struct mame_display *display
-    void osd_update_video_and_audio(struct mame_display *display) {}
-    
     void artwork_update_video_and_audio(struct mame_display *display) {
         uint16_t* vfd_export = (uint16_t*)g_shared_corridor;
         for (int i = 0; i < 20; i++) {
@@ -236,10 +270,7 @@ extern "C" {
         if (sound_user_cmd > 0) {
             g_shared_corridor[1060] = 0; 
             sndbrd_0_data_w(0, sound_user_cmd);
-            
-            EM_ASM({
-                if (window.postWasmLog) { window.postWasmLog($0); }
-            }, sound_user_cmd);
+            EM_ASM({ if (window.postWasmLog) { window.postWasmLog($0); } }, sound_user_cmd);
         }
 
         int pending_samples = (g_audio_write_idx - g_audio_read_idx + C_AUDIO_BUFFER_MAX) % C_AUDIO_BUFFER_MAX;
@@ -249,7 +280,6 @@ extern "C" {
                 g_linear_audio_buffer[i] = g_audio_ring_buffer[g_audio_read_idx];
                 g_audio_read_idx = (g_audio_read_idx + 1) % C_AUDIO_BUFFER_MAX;
             }
-            
             EM_ASM({
                 if (window.pushWasmAudio) { window.pushWasmAudio($0, $1); }
             }, (uint32_t)g_linear_audio_buffer, pending_samples);
@@ -263,10 +293,14 @@ extern "C" {
         else emscripten_sleep(1);
     }
 
+    void osd_update_video_and_audio(struct mame_display *display) {
+        artwork_update_video_and_audio(display);
+    }
+
     uint8_t* pinmame_get_gprom_ptr() { return g_shared_corridor; }
     uint8_t* pinmame_get_dsprom_ptr() { return g_shared_corridor; } 
     const char* pinmame_get_display() { return g_display_text; }
-    const char* pinmame_get_version() { return "PinMAME Pure Native Link V173.62"; }
+    const char* pinmame_get_version() { return "PinMAME Pure Native Link V190.00"; }
     void pinmame_web_entry(int gprom_size, int dsprom_size) {}
     void pinmame_web_tick(int cycles) {}
 
@@ -295,7 +329,6 @@ extern "C" {
     extern GameOptions options;
 
     void pinmame_web_boot() {
-        options.samplerate = 44100;
         const char* rom_name = (const char*)&g_shared_corridor[1000];
         int i = 0; bool found = false;
         while (drivers[i] != nullptr) {
@@ -305,6 +338,10 @@ extern "C" {
             i++;
         }
         if (!found) g_selected_game_index = 0;
+        
+        // 🌟 L'ALLUMAGE DU MOTEUR SONORE 🌟
+        options.samplerate = 44100;
+
         bailing = 0;
         run_game(g_selected_game_index); 
     }

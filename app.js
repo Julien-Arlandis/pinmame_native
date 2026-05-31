@@ -14,7 +14,6 @@ const SOUND_DICTIONARY = {
 };
 
 // 🌟 NOUVEAU : DICTIONNAIRE DES CONTACTS DU PLATEAU (00-79)
-// Modifie ce dictionnaire en testant les boutons pour nommer tes cibles !
 const SWITCH_DICTIONARY = {
     0: "Monnayeur Gauche (Standard)",
     1: "Monnayeur Central (Standard)",
@@ -24,7 +23,6 @@ const SWITCH_DICTIONARY = {
     5: "Plumb Bob Tilt (Balancier)",
     6: "Bouton Start / Credit",
     7: "Bouton Test",
-    // --- EXEMPLES À REMPLACER ---
     15: "Exemple: Cible Tombante 1",
     16: "Exemple: Cible Tombante 2",
     30: "Exemple: Bumper Droit"
@@ -103,12 +101,18 @@ function unlockAudio() {
     if (audioCtx.state === 'suspended') audioCtx.resume();
 }
 
+// 🛡️ CORRECTION ABSOLUE : ALIMENTATION SÉCURISÉE DU BUFFER AUDIO
 window.pushWasmAudio = function(ptr, count) {
-    if (!audioCtx || audioCtx.state !== 'running') return;
-    const audioData = new Int16Array(pinmameInstance.HEAPU8.buffer, ptr, count);
+    if (!audioCtx) return; // Ne pas jeter l'audio si l'état est "suspended" !
+    
+    // Accès 16-bits sécurisé (Résiste à l'expansion mémoire de WebAssembly)
+    const ptr16 = ptr >> 1; 
     for (let i = 0; i < count; i += 2) {
-        ringBufferL[audioWritePtr] = audioData[i] / 32768.0;
-        ringBufferR[audioWritePtr] = (i + 1 < count) ? (audioData[i + 1] / 32768.0) : (audioData[i] / 32768.0);
+        const left = pinmameInstance.HEAP16[ptr16 + i];
+        const right = (i + 1 < count) ? pinmameInstance.HEAP16[ptr16 + i + 1] : left;
+        
+        ringBufferL[audioWritePtr] = left / 32768.0;
+        ringBufferR[audioWritePtr] = right / 32768.0;
         audioWritePtr = (audioWritePtr + 1) % RING_BUFFER_SIZE;
     }
 };
@@ -124,45 +128,63 @@ function logToTerminal(msg) {
 }
 
 // 🎛️ CONSTRUCTION DE L'INTERFACE UTILISATEUR
-
-// 🌟 GRILLE DES SWITCHS PHYSIQUES (AVEC BULLES D'AIDE DYNAMIQUES)
 const swGridEl = document.getElementById('swGrid');
 for (let i = 0; i < 80; i++) {
     const cell = document.createElement('div');
     cell.className = 'cell'; 
-    cell.textContent = String(i).padStart(2, '0');
-    
-    // Application du nom depuis le dictionnaire (ou nom générique)
     const swDesc = SWITCH_DICTIONARY[i] || `Contact Plateau ${String(i).padStart(2, '0')}`;
     cell.title = swDesc;
+    cell.innerHTML = `
+        <span class="sw-num-text">${String(i).padStart(2, '0')}</span>
+        <svg class="mini-loader-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle></svg>
+    `;
 
-    cell.addEventListener('pointerdown', (e) => { 
+    let holdTimer = null; let isLocked = false; let isPressed = false;
+    const sendSwitchState = (state) => {
+        userSwitchStates[i] = (state === 1);
+        if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + i] = state;
+    };
+
+    const pressDown = (e) => { 
         e.preventDefault(); unlockAudio();
-        userSwitchStates[i] = !userSwitchStates[i];
-        if (userSwitchStates[i]) cell.classList.add('sw-user');
-        else cell.classList.remove('sw-user');
-        if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + i] = userSwitchStates[i] ? 1 : 0;
-        
-        logToTerminal(`⚡ Switch ${String(i).padStart(2, '0')} actionné : ${swDesc}`);
-    });
+        if (isLocked) {
+            isLocked = false; cell.classList.remove('sw-locked'); sendSwitchState(0);
+            isPressed = false; if(holdTimer) clearTimeout(holdTimer);
+            logToTerminal(`⚡ Switch ${String(i).padStart(2, '0')} déverrouillé : ${swDesc}`);
+            return;
+        }
+        if (!isPressed) {
+            isPressed = true; sendSwitchState(1);
+            cell.classList.remove('sw-user'); void cell.offsetWidth; cell.classList.add('sw-user'); 
+            logToTerminal(`⚡ Switch ${String(i).padStart(2, '0')} actionné : ${swDesc}`);
+            holdTimer = setTimeout(() => {
+                if (isPressed) { 
+                    isLocked = true; cell.classList.remove('sw-user'); cell.classList.add('sw-locked'); 
+                    logToTerminal(`🔒 Switch ${String(i).padStart(2, '0')} VERROUILLÉ : ${swDesc}`);
+                }
+            }, 500); 
+        }
+    };
+
+    const releaseUp = (e, forceRelease = false) => {
+        e.preventDefault();
+        if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
+        if ((isPressed && !isLocked) || forceRelease) {
+            isPressed = false; sendSwitchState(0); cell.classList.remove('sw-user');
+        }
+    };
+
+    cell.addEventListener('pointerdown', pressDown); cell.addEventListener('pointerup', releaseUp);
+    cell.addEventListener('pointerleave', releaseUp); cell.addEventListener('pointercancel', releaseUp);
     swGridEl.appendChild(cell); swCells.push(cell);
 }
 
-// GRILLE AUDIO DOCUMENTÉE
 const cmdGridEl = document.getElementById('cmd-grid');
 for (let i = 1; i <= 64; i++) {
-    const cell = document.createElement('div');
-    cell.className = 'cell cell-cmd';
-    
+    const cell = document.createElement('div'); cell.className = 'cell cell-cmd';
     const description = SOUND_DICTIONARY[i] || "SFX";
-    
-    cell.innerHTML = `
-        <div class="cell-cmd-num">${String(i).padStart(2, '0')}</div>
-        <div class="cell-cmd-desc">${description}</div>
-    `;
-    
+    cell.innerHTML = `<div class="cell-cmd-num">${String(i).padStart(2, '0')}</div><div class="cell-cmd-desc">${description}</div>`;
     cell.title = description; 
-
     cell.addEventListener('pointerdown', (e) => {
         e.preventDefault(); unlockAudio();
         cell.classList.add('cmd-active'); setTimeout(() => cell.classList.remove('cmd-active'), 120);
@@ -176,16 +198,13 @@ for (let bank = 0; bank < 4; bank++) {
     for (let bit = 0; bit < 8; bit++) {
         const dipId = (bank * 8) + bit;
         const swWrap = document.createElement('div'); swWrap.className = 'dip-switch';
-        const label = document.createElement('span'); 
-        label.textContent = String(dipId + 1).padStart(2, '0');
+        const label = document.createElement('span'); label.textContent = String(dipId + 1).padStart(2, '0');
         const toggle = document.createElement('div'); toggle.className = 'dip-toggle';
         if (userDipStates[dipId]) toggle.classList.add('dip-on');
 
         toggle.addEventListener('pointerdown', (e) => {
-            e.preventDefault();
-            userDipStates[dipId] = !userDipStates[dipId];
-            if (userDipStates[dipId]) toggle.classList.add('dip-on');
-            else toggle.classList.remove('dip-on');
+            e.preventDefault(); userDipStates[dipId] = !userDipStates[dipId];
+            if (userDipStates[dipId]) toggle.classList.add('dip-on'); else toggle.classList.remove('dip-on');
             if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 400 + dipId] = userDipStates[dipId] ? 1 : 0;
             localStorage.setItem('pinmame_dips', JSON.stringify(userDipStates));
         });
@@ -222,11 +241,9 @@ async function startEmulation() {
         if (customRomData && customRomName) {
             finalRomName = customRomName.replace('.zip', '').toLowerCase();
             logToTerminal("[JS] Restitution de la ROM locale chargée : " + finalRomName);
-            romNameDisplay.textContent = customRomName;
-            romNameDisplay.style.color = "var(--neon-green)";
+            romNameDisplay.textContent = customRomName; romNameDisplay.style.color = "var(--neon-green)";
             clearRomBtn.style.display = "inline-block";
-            const binaryStr = atob(customRomData);
-            const bytes = new Uint8Array(binaryStr.length);
+            const binaryStr = atob(customRomData); const bytes = new Uint8Array(binaryStr.length);
             for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
             romBuffer = bytes.buffer;
         } else {
@@ -246,20 +263,14 @@ async function startEmulation() {
         for (let i = 0; i < finalRomName.length; i++) instance.HEAPU8[stringAddress + i] = finalRomName.charCodeAt(i);
         instance.HEAPU8[stringAddress + finalRomName.length] = 0;
 
-        for(let i = 0; i < 32; i++) {
-            instance.HEAPU8[vfdMemoryPointer + 400 + i] = userDipStates[i] ? 1 : 0;
-        }
-
-        userSwitchStates[1] = true; if(swCells[1]) swCells[1].classList.add('sw-user');
-
+        for(let i = 0; i < 32; i++) instance.HEAPU8[vfdMemoryPointer + 400 + i] = userDipStates[i] ? 1 : 0;
+        
         setupButtons(); setupSystemHandlers();
         window.addEventListener('pointerdown', unlockAudio);
 
         function renderFrame() {
             if (!pinmameInstance || !vfdMemoryPointer) { requestAnimationFrame(renderFrame); return; }
-            
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-
             const heap = pinmameInstance.HEAPU8;
 
             let distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
@@ -299,7 +310,6 @@ async function startEmulation() {
         requestAnimationFrame(renderFrame);
         statusEl.textContent = "🟢 PinMAME Workbench V175.17 - Système Actif";
         statusEl.style.color = "#00ffcc";
-
         setTimeout(() => { instance._pinmame_web_boot(); }, 100);
     } catch (err) { statusEl.textContent = "🔴 ERREUR : " + err.message; }
 }
@@ -321,16 +331,12 @@ function setupSystemHandlers() {
 }
 
 function setupButtons() {
-    const coinBtn = document.getElementById('coinBtn');
-    const startBtn = document.getElementById('startBtn');
-    const testBtn = document.getElementById('testBtn');
-    
-    coinBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[COIN_ID] = true; swCells[COIN_ID].classList.add('sw-user'); if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + COIN_ID] = 1; logToTerminal(`⚡ Switch ${String(COIN_ID).padStart(2, '0')} actionné : ${SWITCH_DICTIONARY[COIN_ID]}`);});
-    coinBtn.addEventListener('pointerup', (e) => { e.preventDefault(); userSwitchStates[COIN_ID] = false; swCells[COIN_ID].classList.remove('sw-user'); if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + COIN_ID] = 0; });
-    startBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[START_ID] = true; swCells[START_ID].classList.add('sw-user'); if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + START_ID] = 1; logToTerminal(`⚡ Switch ${String(START_ID).padStart(2, '0')} actionné : ${SWITCH_DICTIONARY[START_ID]}`);});
-    startBtn.addEventListener('pointerup', (e) => { e.preventDefault(); userSwitchStates[START_ID] = false; swCells[START_ID].classList.remove('sw-user'); if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + START_ID] = 0; });
-    testBtn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[TEST_ID] = true; swCells[TEST_ID].classList.add('sw-user'); if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + TEST_ID] = 1; logToTerminal(`⚡ Switch ${String(TEST_ID).padStart(2, '0')} actionné : ${SWITCH_DICTIONARY[TEST_ID]}`);});
-    testBtn.addEventListener('pointerup', (e) => { e.preventDefault(); userSwitchStates[TEST_ID] = false; swCells[TEST_ID].classList.remove('sw-user'); if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + TEST_ID] = 0; });
+    const coinBtn = document.getElementById('coinBtn'); const startBtn = document.getElementById('startBtn'); const testBtn = document.getElementById('testBtn');
+    const attachBtn = (btn, id) => {
+        btn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[id] = true; swCells[id].classList.add('sw-user'); if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + id] = 1; logToTerminal(`⚡ Switch actionné : ${SWITCH_DICTIONARY[id]}`);});
+        btn.addEventListener('pointerup', (e) => { e.preventDefault(); userSwitchStates[id] = false; swCells[id].classList.remove('sw-user'); if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + id] = 0; });
+    };
+    attachBtn(coinBtn, COIN_ID); attachBtn(startBtn, START_ID); attachBtn(testBtn, TEST_ID);
 }
 
 function drawGottlieb14Segment(ctx, x, y, mask) {

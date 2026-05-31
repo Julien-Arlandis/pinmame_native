@@ -31,6 +31,27 @@
             user-select: none;
         }
 
+        /* --- Loader de Progression Circulaire (SVG) --- */
+        .mini-loader-svg {
+            position: absolute;
+            top: calc(50% - 7px);
+            right: 4px;
+            width: 14px;
+            height: 14px;
+            transform: rotate(-90deg);
+            opacity: 0; 
+            pointer-events: none;
+        }
+
+        .mini-loader-svg circle {
+            fill: none;
+            stroke: #000; /* L'anneau se remplit en NOIR */
+            stroke-width: 4;
+            stroke-dasharray: 63; /* Circonférence du cercle r=10 */
+            stroke-dashoffset: 63; /* Vide par défaut */
+            transition: stroke-dashoffset 0s; /* Reset instantané au relâchement */
+        }
+
         .canvas-container {
             width: 100%;
             max-width: 1150px;
@@ -131,9 +152,35 @@
         .cell { 
             background: #141414; border: 1px solid #222; color: #444; padding: 6px 1px; 
             font-size: 0.65rem; font-weight: bold; border-radius: 2px; text-align: center; touch-action: none; cursor: pointer; transition: all 0.1s;
+            position: relative; 
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding-right: 22px; 
         }
         .cell:hover { border-color: #555; color: #fff;}
+        
         .cell.sw-user { background: var(--neon-green) !important; color: #000 !important; box-shadow: 0 0 6px var(--neon-green); border-color: #fff; }
+        
+        /* État verrouillé */
+        .cell.sw-locked { 
+            background: var(--neon-green) !important; color: #000 !important; 
+            box-shadow: 0 0 14px var(--neon-green); 
+            border-color: #fff; 
+            font-weight: 900;
+        }
+
+        /* Le SVG n'apparait qu'au maintien du clic (sw-user) */
+        .cell.sw-user .mini-loader-svg {
+            opacity: 1;
+        }
+
+        /* Animation de remplissage réglée sur 500ms */
+        .cell.sw-user .mini-loader-svg circle {
+            stroke-dashoffset: 0;
+            transition: stroke-dashoffset 500ms linear;
+        }
+
         .cell.lamp-on { background: #ffff00 !important; color: #000 !important; box-shadow: 0 0 8px #ffff00; }
         .cell.sol-on { background: var(--neon-red) !important; color: #fff !important; box-shadow: 0 0 10px var(--neon-red); }
 
@@ -282,7 +329,7 @@
                 <table class="doc-table">
                     <tr><th style="width: 25%;">Switches</th><th>Description</th></tr>
                     <tr><td class="sw-num">06</td><td><strong>Mémoire High Score</strong> : OFF = Conservés / ON = Effacés au boot.</td></tr>
-                    <tr><td class="sw-num">07</td><td><strong>Option Jeu #1</strong> : Option spécifique ROM.</td></tr>
+                    <tr><td class="sw-num">07</td><td><strong>Option Jeu #1</strong> : Option specific ROM.</td></tr>
                     <tr><td class="sw-num">08</td><td><strong>Menu Claquage</strong> : OFF = Accès autorisé / ON = Paramétrage bloqué.</td></tr>
                 </table>
             </div>

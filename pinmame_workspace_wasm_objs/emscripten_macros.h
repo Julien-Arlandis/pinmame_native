@@ -31,14 +31,20 @@
 #define HAS_OKIM6295 1   
 #define BUILD_OKIM6295 1 
 
+/* 🌟 LE RECENTRAGE NATIF ABSOLU 🌟 */
+/* On active YM2151 ET le moteur natif OPM de MAME */
+#define HAS_YM2151 1
+#define HAS_YM2151_ALT 0
+#define BUILD_YM2151 1
+#define BUILD_OPM 1
+
+#define SOUND_YM2203 999
+
 #define PINMAME_NO_WPC 1
-#define PINMAME_NO_WILLIAMS 1
 #define PINMAME_NO_STERN 1
 #define PINMAME_NO_BALLY 1
 #define PINMAME_NO_SEGA 1
 #define PINMAME_NO_DATAEAST 1
-
-#define SOUND_YM2203 999
 
 #ifndef __rolq
 #define __rolq(x,c) (((uint64_t)(x) << (c)) | ((uint64_t)(x) >> (64 - (c))))
@@ -47,13 +53,15 @@
 #define __rorq(x,c) (((uint64_t)(x) >> (c)) | ((uint64_t)(x) << (64 - (c))))
 #endif
 
+/* 🛡️ LE BOUCLIER POUR LA LIGNE 156 (Résout l'erreur undeclared identifier) 🛡️ */
 #ifdef __cplusplus
 extern "C" {
 #endif
-void OPMUpdateOne(int num, int16_t **buffer, int length);
+void OPMUpdateOne(int num, short **buffer, int length);
 int OPMInit(int num, int clock, int rate, void (*timer_handler)(int, int, int, double), void (*irq_handler)(int, int));
-void OPMShutdown(void);
 void OPMResetChip(int num);
+void OPMShutdown(void);
+void OPMSetPortHander(int num, void (*PortWrite)(unsigned int offset, unsigned char data));
 #ifdef __cplusplus
 }
 #endif

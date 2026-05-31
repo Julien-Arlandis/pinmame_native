@@ -1,5 +1,6 @@
 // =========================================================================
 // ⚙️ LOGIQUE INTERFACE PINMAME WASM (app.js)
+// 🏷️ VERSION : V195.01 - TEST BUTTON ON 07
 // =========================================================================
 
 // 🌟 DICTIONNAIRE AUDIO (Dépuration Sonore)
@@ -13,19 +14,76 @@ const SOUND_DICTIONARY = {
     63: "TEST TONE"
 };
 
-// 🌟 NOUVEAU : DICTIONNAIRE DES CONTACTS DU PLATEAU (00-79)
+// 🌟 DICTIONNAIRE DES CONTACTS BONE BUSTERS (Manuel Officiel)
 const SWITCH_DICTIONARY = {
-    0: "Monnayeur Gauche (Standard)",
-    2: "Monnayeur Droit (Standard)",
-    3: "Monnayeur 4 / Jeton",
-    4: "Slam Tilt (Porte)",
-    5: "Plumb Bob Tilt (Balancier)",
-    7: "Bouton Test",
-    15: "Exemple: Cible Tombante 1",
-    16: "Exemple: Cible Tombante 2",
-    17: "Monnayeur Central (Câblé)",   // Recâblé ici
-    30: "Exemple: Bumper Droit",
-    47: "Bouton Start / Credit (Câblé)" // Recâblé ici
+    // --- STROBE 0 ---
+    0: "10 Points", 1: "10 Points", 2: "10 Points", 3: "10 Points",
+    4: "Left Outlane (Couloir Perte Gauche)",
+    5: "Left Return (Couloir Retour Gauche)",
+    6: "Right Return (Couloir Retour Droit)",
+    7: "Test Button (Bouton Diagnostic)", // CORRIGÉ SUR LE 07
+
+    // --- STROBE 1 ---
+    10: "10 Points", 11: "10 Points", 12: "10 Points", 13: "10 Points",
+    14: "Right Outlane (Couloir Perte Droit)",
+    15: "Left Top Lane (Couloir Haut Gauche)",
+    16: "Right Top Lane (Couloir Haut Droit)",
+    17: "Center Coin Chute (Monnayeur Central - 8 Crédits)",
+
+    // --- STROBE 2 ---
+    20: "10 Points", 21: "10 Points", 22: "10 Points", 23: "10 Points",
+    24: "Left Drop Target - Top (Cible Tombante G. Haut)",
+    25: "Left Drop Target - Center (Cible Tombante G. Milieu)",
+    26: "Left Drop Target - Bottom (Cible Tombante G. Bas)",
+    27: "Left Coin Chute (Monnayeur Gauche - 1/2 Crédit)",
+
+    // --- STROBE 3 ---
+    30: "10 Points", 31: "10 Points", 32: "10 Points",
+    33: "Left Bumper (Bumper Gauche)",
+    34: "Right Drop Target - Top (Cible Tombante D. Haut)",
+    35: "Right Drop Target - Center (Cible Tombante D. Milieu)",
+    36: "Right Drop Target - Bottom (Cible Tombante D. Bas)",
+    37: "Coin Chute 4 / Jeton",
+
+    // --- STROBE 4 ---
+    40: "Standup Target 'B'",
+    41: "Standup Target 'O'",
+    42: "Standup Target 'N'",
+    43: "Shooter Lane (Couloir de Lancement)",
+    44: "Left Captive Hole (Trou Éjecteur Gauche)",
+    45: "Right Captive Hole (Trou Éjecteur Droit)",
+    46: "Outhole (Trou de Perte Centrale)",
+    47: "Replay Button (BOUTON START)",
+
+    // --- STROBE 5 ---
+    50: "Standup Target 'E'",
+    51: "Standup Target 'S'",
+    52: "Standup Target 'U'",
+    53: "Ball Trough 1 (Stockage Bille 1)",
+    54: "Ball Trough 2 (Stockage Bille 2)",
+    55: "Ball Trough 3 (Stockage Bille 3)",
+    56: "Ball Trough 4 (Stockage Bille 4)",
+    57: "Right Coin Chute (Monnayeur Droit)", // Anciennement le Test
+
+    // --- STROBE 6 ---
+    60: "Standup Target 'B' (Busters)",
+    61: "Standup Target 'U' (Busters)",
+    62: "Standup Target 'S' (Busters)",
+    63: "Standup Target 'T' (Busters)",
+    64: "Standup Target 'E' (Busters)",
+    65: "Standup Target 'R' (Busters)",
+    66: "Standup Target 'S' (Busters)",
+    67: "Slam Tilt (Sécurité Porte)",
+
+    // --- STROBE 7 ---
+    70: "Top Rebound (Rebond Haut)",
+    71: "Right Bumper (Bumper Droit)",
+    72: "Bottom Bumper (Bumper Bas)",
+    73: "Kicker",
+    74: "Standup Target Right",
+    75: "Standup Target Left",
+    76: "Spinner (Cible Tournante)",
+    77: "Plumb Bob Tilt (Balancier Meuble)"
 };
 
 const canvas = document.getElementById('vfdCanvas');
@@ -53,10 +111,8 @@ try {
     if (savedDips) userDipStates = JSON.parse(savedDips);
 } catch (e) { console.warn("Erreur lecture DIPs."); }
 
-// IDs de câblage logique cible
-const CABLED_COIN_ID = 17;
-const CABLED_START_ID = 47;
-const TEST_ID = 7;   
+// 🌟 MISE À JOUR DES RACCOURCIS BOUTONS
+const COIN_ID = 27; const START_ID = 47; const TEST_ID = 7;   // <--- CORRIGÉ ICI
 
 const RING_BUFFER_SIZE = 131072;
 const ringBufferL = new Float32Array(RING_BUFFER_SIZE);
@@ -68,9 +124,6 @@ let lastSampleL = 0.0; let lastSampleR = 0.0;
 let audioCtx = null; let audioNode = null;
 
 function unlockAudio() {
-    // ⚡ OPTIMISATION : Si l'audio tourne déjà, on quitte immédiatement sans re-calculer
-    if (audioCtx && audioCtx.state === 'running') return;
-
     if (!audioCtx) {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         audioCtx = new AudioContext({ sampleRate: 44100 });
@@ -107,11 +160,10 @@ function unlockAudio() {
     if (audioCtx.state === 'suspended') audioCtx.resume();
 }
 
-// 🛡️ CORRECTION ABSOLUE : ALIMENTATION SÉCURISÉE DU BUFFER AUDIO
+// 🛡️ ALIMENTATION SÉCURISÉE DU BUFFER AUDIO
 window.pushWasmAudio = function(ptr, count) {
-    if (!audioCtx) return; // Ne pas jeter l'audio si l'état est "suspended" !
+    if (!audioCtx) return; 
     
-    // Accès 16-bits sécurisé (Résiste à l'expansion mémoire de WebAssembly)
     const ptr16 = ptr >> 1; 
     for (let i = 0; i < count; i += 2) {
         const left = pinmameInstance.HEAP16[ptr16 + i];
@@ -163,8 +215,6 @@ for (let i = 0; i < 80; i++) {
             isPressed = true; sendSwitchState(1);
             cell.classList.remove('sw-user'); void cell.offsetWidth; cell.classList.add('sw-user'); 
             logToTerminal(`⚡ Switch ${String(i).padStart(2, '0')} actionné : ${swDesc}`);
-            
-            // Animation et verrouillage calés sur 500ms
             holdTimer = setTimeout(() => {
                 if (isPressed) { 
                     isLocked = true; cell.classList.remove('sw-user'); cell.classList.add('sw-locked'); 
@@ -274,7 +324,11 @@ async function startEmulation() {
         for(let i = 0; i < 32; i++) instance.HEAPU8[vfdMemoryPointer + 400 + i] = userDipStates[i] ? 1 : 0;
         
         setupButtons(); setupSystemHandlers();
+
+        // 🍏 FORCAGE DU DÉBLOCAGE AUDIO POUR IOS SAFARI
         window.addEventListener('pointerdown', unlockAudio);
+        window.addEventListener('touchstart', unlockAudio, { passive: false });
+        window.addEventListener('click', unlockAudio);
 
         function renderFrame() {
             if (!pinmameInstance || !vfdMemoryPointer) { requestAnimationFrame(renderFrame); return; }
@@ -316,7 +370,7 @@ async function startEmulation() {
         }
 
         requestAnimationFrame(renderFrame);
-        statusEl.textContent = "🟢 PinMAME Workbench V175.17 - Système Actif";
+        statusEl.textContent = "🟢 PinMAME Workbench V195.01 - Système Actif";
         statusEl.style.color = "#00ffcc";
         setTimeout(() => { instance._pinmame_web_boot(); }, 100);
     } catch (err) { statusEl.textContent = "🔴 ERREUR : " + err.message; }
@@ -338,56 +392,13 @@ function setupSystemHandlers() {
     };
 }
 
-// 🕹️ LIENS DES BOUTONS DE COMMANDE D'ARCADE (Nouveau câblage logique)
 function setupButtons() {
-    const coinBtn = document.getElementById('coinBtn'); 
-    const startBtn = document.getElementById('startBtn'); 
-    const testBtn = document.getElementById('testBtn');
-
-    // Câblage dynamique du bouton Coin sur le Switch 17
-    coinBtn.addEventListener('pointerdown', (e) => { 
-        e.preventDefault(); unlockAudio(); 
-        userSwitchStates[CABLED_COIN_ID] = true; 
-        swCells[CABLED_COIN_ID].classList.add('sw-user'); 
-        if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + CABLED_COIN_ID] = 1; 
-        logToTerminal(`⚡ Switch actionné : ${SWITCH_DICTIONARY[CABLED_COIN_ID] || 'Contact ' + CABLED_COIN_ID}`);
-    });
-    coinBtn.addEventListener('pointerup', (e) => { 
-        e.preventDefault(); 
-        userSwitchStates[CABLED_COIN_ID] = false; 
-        swCells[CABLED_COIN_ID].classList.remove('sw-user'); 
-        if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + CABLED_COIN_ID] = 0; 
-    });
-
-    // Câblage dynamique du bouton Start sur le Switch 47
-    startBtn.addEventListener('pointerdown', (e) => { 
-        e.preventDefault(); unlockAudio(); 
-        userSwitchStates[CABLED_START_ID] = true; 
-        swCells[CABLED_START_ID].classList.add('sw-user'); 
-        if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + CABLED_START_ID] = 1; 
-        logToTerminal(`⚡ Switch actionné : ${SWITCH_DICTIONARY[CABLED_START_ID] || 'Contact ' + CABLED_START_ID}`);
-    });
-    startBtn.addEventListener('pointerup', (e) => { 
-        e.preventDefault(); 
-        userSwitchStates[CABLED_START_ID] = false; 
-        swCells[CABLED_START_ID].classList.remove('sw-user'); 
-        if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + CABLED_START_ID] = 0; 
-    });
-
-    // Le bouton Test reste sur l'ID 07 standard
-    testBtn.addEventListener('pointerdown', (e) => { 
-        e.preventDefault(); unlockAudio(); 
-        userSwitchStates[TEST_ID] = true; 
-        swCells[TEST_ID].classList.add('sw-user'); 
-        if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + TEST_ID] = 1; 
-        logToTerminal(`⚡ Switch actionné : ${SWITCH_DICTIONARY[TEST_ID]}`);
-    });
-    testBtn.addEventListener('pointerup', (e) => { 
-        e.preventDefault(); 
-        userSwitchStates[TEST_ID] = false; 
-        swCells[TEST_ID].classList.remove('sw-user'); 
-        if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + TEST_ID] = 0; 
-    });
+    const coinBtn = document.getElementById('coinBtn'); const startBtn = document.getElementById('startBtn'); const testBtn = document.getElementById('testBtn');
+    const attachBtn = (btn, id) => {
+        btn.addEventListener('pointerdown', (e) => { e.preventDefault(); unlockAudio(); userSwitchStates[id] = true; swCells[id].classList.add('sw-user'); if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + id] = 1; logToTerminal(`⚡ Switch actionné : ${SWITCH_DICTIONARY[id]}`);});
+        btn.addEventListener('pointerup', (e) => { e.preventDefault(); userSwitchStates[id] = false; swCells[id].classList.remove('sw-user'); if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + id] = 0; });
+    };
+    attachBtn(coinBtn, COIN_ID); attachBtn(startBtn, START_ID); attachBtn(testBtn, TEST_ID);
 }
 
 function drawGottlieb14Segment(ctx, x, y, mask) {

@@ -1,9 +1,8 @@
 // =========================================================================
-// ⚙️ LOGIQUE INTERFACE PINMAME WASM (app.js)
-// 🏷️ VERSION : V195.03 - ULTRA LOW LATENCY ANDROID FIX
+// ⚙️ INTERFACE GRAPHIQUE & PASSERELLE USB (app.js)
+// 🏷️ VERSION : V200.04 - ÉVÉNEMENTIEL DISPLAY FIX
 // =========================================================================
 
-// 🚀 1. VERROUILLAGE GLOBAL DU ZOOM POUR TUER LE DELAI DE 300ms SUR ANDROID
 let metaViewport = document.querySelector('meta[name="viewport"]');
 if (!metaViewport) {
     metaViewport = document.createElement('meta');
@@ -12,7 +11,6 @@ if (!metaViewport) {
 }
 metaViewport.content = "width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover";
 
-// 🚀 2. INJECTION CSS POUR EMPECHER LA SÉLECTION ET LES SURBRILLANCES TACTILES
 const styleInject = document.createElement('style');
 styleInject.innerHTML = `
     * {
@@ -21,36 +19,20 @@ styleInject.innerHTML = `
         user-select: none !important;
         -webkit-user-select: none !important;
     }
-    .cell, .cell-cmd, .dip-toggle, button {
-        touch-action: none !important;
-    }
+    .cell, .cell-cmd, .dip-toggle, button { touch-action: none !important; }
 `;
 document.head.appendChild(styleInject);
 
-// 🌟 DICTIONNAIRE AUDIO
-const SOUND_DICTIONARY = {
-    1: "STOP", 2: "BGM 1", 3: "BGM 2", 4: "BGM 3", 5: "BGM 4",
-    61: "BANK CLEAR", 63: "TEST TONE"
-};
-
-// 🌟 DICTIONNAIRE DES CONTACTS BONE BUSTERS
+const SOUND_DICTIONARY = { 1: "STOP", 2: "BGM 1", 3: "BGM 2", 4: "BGM 3", 5: "BGM 4", 61: "BANK CLEAR", 63: "TEST TONE" };
 const SWITCH_DICTIONARY = {
-    0: "10 Points", 1: "10 Points", 2: "10 Points", 3: "10 Points",
-    4: "Left Outlane", 5: "Left Return", 6: "Right Return", 7: "Test Button",
-    10: "10 Points", 11: "10 Points", 12: "10 Points", 13: "10 Points",
-    14: "Right Outlane", 15: "Left Top Lane", 16: "Right Top Lane", 17: "Center Coin Chute (8 Cr)",
-    20: "10 Points", 21: "10 Points", 22: "10 Points", 23: "10 Points",
-    24: "Left Drop - Top", 25: "Left Drop - Center", 26: "Left Drop - Bottom", 27: "Left Coin Chute (1/2 Cr)",
-    30: "10 Points", 31: "10 Points", 32: "10 Points", 33: "Left Bumper",
-    34: "Right Drop - Top", 35: "Right Drop - Center", 36: "Right Drop - Bottom", 37: "Coin Chute 4",
-    40: "Target 'B'", 41: "Target 'O'", 42: "Target 'N'", 43: "Shooter Lane",
-    44: "Left Captive", 45: "Right Captive", 46: "Outhole", 47: "Replay Button (START)",
-    50: "Target 'E'", 51: "Target 'S'", 52: "Target 'U'", 53: "Trough 1",
-    54: "Trough 2", 55: "Trough 3", 56: "Trough 4", 57: "Right Coin Chute",
-    60: "Target 'B' (Bust)", 61: "Target 'U' (Bust)", 62: "Target 'S' (Bust)", 63: "Target 'T' (Bust)",
-    64: "Target 'E' (Bust)", 65: "Target 'R' (Bust)", 66: "Target 'S' (Bust)", 67: "Slam Tilt",
-    70: "Top Rebound", 71: "Right Bumper", 72: "Bottom Bumper", 73: "Kicker",
-    74: "Standup Right", 75: "Standup Left", 76: "Spinner", 77: "Plumb Bob Tilt"
+    0: "10 Points", 1: "10 Points", 2: "10 Points", 3: "10 Points", 4: "Left Outlane", 5: "Left Return", 6: "Right Return", 7: "Test Button",
+    10: "10 Points", 11: "10 Points", 12: "10 Points", 13: "10 Points", 14: "Right Outlane", 15: "Left Top Lane", 16: "Right Top Lane", 17: "Center Coin Chute (8 Cr)",
+    20: "10 Points", 21: "10 Points", 22: "10 Points", 23: "10 Points", 24: "Left Drop - Top", 25: "Left Drop - Center", 26: "Left Drop - Bottom", 27: "Left Coin Chute (1/2 Cr)",
+    30: "10 Points", 31: "10 Points", 32: "10 Points", 33: "Left Bumper", 34: "Right Drop - Top", 35: "Right Drop - Center", 36: "Right Drop - Bottom", 37: "Coin Chute 4",
+    40: "Target 'B'", 41: "Target 'O'", 42: "Target 'N'", 43: "Shooter Lane", 44: "Left Captive", 45: "Right Captive", 46: "Outhole", 47: "Replay Button (START)",
+    50: "Target 'E'", 51: "Target 'S'", 52: "Target 'U'", 53: "Trough 1", 54: "Trough 2", 55: "Trough 3", 56: "Trough 4", 57: "Right Coin Chute",
+    60: "Target 'B' (Bust)", 61: "Target 'U' (Bust)", 62: "Target 'S' (Bust)", 63: "Target 'T' (Bust)", 64: "Target 'E' (Bust)", 65: "Target 'R' (Bust)", 66: "Target 'S' (Bust)", 67: "Slam Tilt",
+    70: "Top Rebound", 71: "Right Bumper", 72: "Bottom Bumper", 73: "Kicker", 74: "Standup Right", 75: "Standup Left", 76: "Spinner", 77: "Plumb Bob Tilt"
 };
 
 const canvas = document.getElementById('vfdCanvas'); const ctx = canvas.getContext('2d');
@@ -60,7 +42,6 @@ const romNameDisplay = document.getElementById('romNameDisplay'); const clearRom
 const rebootBtn = document.getElementById('rebootBtn'); const audioLed = document.getElementById('audio-led');
 
 const CHAR_WIDTH = 40; const CHAR_HEIGHT = 70; const SPACING = 15;
-let pinmameInstance = null; let vfdMemoryPointer = 0;
 const swCells = []; const lampCells = []; const solCells = []; const dipToggles = [];
 const userSwitchStates = new Array(80).fill(false);
 
@@ -74,6 +55,13 @@ const ringBufferL = new Float32Array(RING_BUFFER_SIZE); const ringBufferR = new 
 let audioWritePtr = 0; let audioReadPtr = 0; let isBufferWarming = true;
 let lastSampleL = 0.0; let lastSampleR = 0.0; let audioCtx = null; let audioNode = null;
 
+// Mémoire locale pour le rendu graphique de l'IHM
+let masquesVFDLocaux = new Uint16Array(40);
+
+const flipperWorker = new Worker('flipper-worker.js');
+
+function logToTerminal(msg) { termEl.textContent += "\n" + msg; termEl.scrollTop = termEl.scrollHeight; }
+
 function unlockAudio() {
     if (!audioCtx) {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -83,6 +71,9 @@ function unlockAudio() {
         audioNode.onaudioprocess = function(e) {
             const outL = e.outputBuffer.getChannelData(0); const outR = e.outputBuffer.getChannelData(1);
             let distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
+            
+            flipperWorker.postMessage({ type: 'UPDATE_AUDIO_DISTANCE', payload: { distance: distance } });
+
             if (isBufferWarming) {
                 if (distance >= 8192) isBufferWarming = false;
                 else { outL.fill(0); outR.fill(0); audioLed.classList.remove('active'); return; }
@@ -104,24 +95,63 @@ function unlockAudio() {
     if (audioCtx.state === 'suspended') audioCtx.resume();
 }
 
-window.pushWasmAudio = function(ptr, count) {
-    if (!audioCtx) return; 
-    const ptr16 = ptr >> 1; 
-    for (let i = 0; i < count; i += 2) {
-        const left = pinmameInstance.HEAP16[ptr16 + i]; const right = (i + 1 < count) ? pinmameInstance.HEAP16[ptr16 + i + 1] : left;
-        ringBufferL[audioWritePtr] = left / 32768.0; ringBufferR[audioWritePtr] = right / 32768.0;
-        audioWritePtr = (audioWritePtr + 1) % RING_BUFFER_SIZE;
+flipperWorker.onmessage = function(event) {
+    const { type, payload, data } = event.data;
+
+    switch (type) {
+        case 'STATUS':
+            statusEl.textContent = data;
+            break;
+
+        case 'LOG':
+            logToTerminal(data);
+            break;
+
+        case 'AUDIO_CMD_LOG':
+            const desc = SOUND_DICTIONARY[payload.cmdId] || "SFX";
+            logToTerminal(`🎵 Commande : 0x${payload.cmdId.toString(16).padStart(2,'0').toUpperCase()} -> ${desc}`);
+            break;
+
+        case 'AUDIO_DATA':
+            if (!audioCtx) return;
+            const left = payload.left; const right = payload.right;
+            for (let i = 0; i < left.length; i++) {
+                ringBufferL[audioWritePtr] = left[i];
+                ringBufferR[audioWritePtr] = right[i];
+                audioWritePtr = (audioWritePtr + 1) % RING_BUFFER_SIZE;
+            }
+            break;
+
+        case 'VFD_UPDATE':
+            // 🎯 RÉCEPTION DU TEXTE/SEGMENTS : On stocke l'état poussé par le Worker
+            masquesVFDLocaux = payload.masques;
+            break;
+
+        case 'ENGINE_READY':
+            if (sessionStorage.getItem('custom_rom_bytes')) {
+                romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename');
+                romNameDisplay.style.color = "var(--neon-green)";
+                clearRomBtn.style.display = "inline-block";
+            }
+
+            statusEl.textContent = "🟢 PinMAME Workbench V200.04 - TEXT DRIVEN WORKER";
+            statusEl.style.color = "#00ffcc";
+
+            setupButtons(); setupSystemHandlers();
+            document.body.addEventListener('touchstart', unlockAudio, { passive: true });
+            
+            // Lancement de l'affichage graphique autonome
+            requestAnimationFrame(renderFrame);
+            break;
     }
 };
 
-window.postWasmLog = function(cmdId) {
-    const desc = SOUND_DICTIONARY[cmdId] || "SFX";
-    logToTerminal(`🎵 Commande : 0x${cmdId.toString(16).padStart(2,'0').toUpperCase()} -> ${desc}`);
-};
+function notifierChangementInput(id, state) {
+    userSwitchStates[id] = (state === 1);
+    flipperWorker.postMessage({ type: 'INJECT_INPUT', payload: { id: id, state: state } });
+}
 
-function logToTerminal(msg) { termEl.textContent += "\n" + msg; termEl.scrollTop = termEl.scrollHeight; }
-
-// 🎛️ CONSTRUCTION DES MATRICES DE BOUTONS AVEC TACTILE NATIF (TOUCHSTART)
+// 🎛️ MATRICE DES SWITCHS
 const swGridEl = document.getElementById('swGrid');
 for (let i = 0; i < 80; i++) {
     const cell = document.createElement('div'); cell.className = 'cell'; 
@@ -130,21 +160,17 @@ for (let i = 0; i < 80; i++) {
     cell.innerHTML = `<span class="sw-num-text">${String(i).padStart(2, '0')}</span><svg class="mini-loader-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle></svg>`;
 
     let holdTimer = null; let isLocked = false; let isPressed = false;
-    const sendSwitchState = (state) => {
-        userSwitchStates[i] = (state === 1);
-        if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + i] = state;
-    };
 
     const pressDown = (e) => { 
-        if(e.type.startsWith('touch')) e.preventDefault(); // COURT-CIRCUITE LE NAVIGATEUR
+        if(e.type.startsWith('touch')) e.preventDefault();
         unlockAudio();
         if (isLocked) {
-            isLocked = false; cell.classList.remove('sw-locked'); sendSwitchState(0);
+            isLocked = false; cell.classList.remove('sw-locked'); notifierChangementInput(i, 0);
             isPressed = false; if(holdTimer) clearTimeout(holdTimer);
             logToTerminal(`⚡ Déverrouillé : ${swDesc}`); return;
         }
         if (!isPressed) {
-            isPressed = true; sendSwitchState(1);
+            isPressed = true; notifierChangementInput(i, 1);
             cell.classList.remove('sw-user'); void cell.offsetWidth; cell.classList.add('sw-user'); 
             logToTerminal(`⚡ Actionné : ${swDesc}`);
             holdTimer = setTimeout(() => {
@@ -160,17 +186,17 @@ for (let i = 0; i < 80; i++) {
         if(e && e.type.startsWith('touch')) e.preventDefault();
         if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; }
         if ((isPressed && !isLocked) || forceRelease) {
-            isPressed = false; sendSwitchState(0); cell.classList.remove('sw-user');
+            isPressed = false; notifierChangementInput(i, 0); cell.classList.remove('sw-user');
         }
     };
 
-    // EVENEMENTS SOURIS + TACTILE NATIF
     cell.addEventListener('mousedown', pressDown); cell.addEventListener('touchstart', pressDown, {passive: false});
     cell.addEventListener('mouseup', releaseUp); cell.addEventListener('touchend', releaseUp, {passive: false});
     cell.addEventListener('mouseleave', releaseUp); cell.addEventListener('touchcancel', releaseUp, {passive: false});
     swGridEl.appendChild(cell); swCells.push(cell);
 }
 
+// 🎛️ COMMANDES DE DIAGNOSTIC AUDIO
 const cmdGridEl = document.getElementById('cmd-grid');
 for (let i = 1; i <= 64; i++) {
     const cell = document.createElement('div'); cell.className = 'cell cell-cmd';
@@ -181,10 +207,9 @@ for (let i = 1; i <= 64; i++) {
     const triggerAudioCmd = (e) => {
         if(e.type.startsWith('touch')) e.preventDefault(); unlockAudio();
         cell.classList.add('cmd-active'); setTimeout(() => cell.classList.remove('cmd-active'), 120);
-        if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 1060] = i;
+        flipperWorker.postMessage({ type: 'TRIGGER_SOUND_CMD', payload: { cmdId: i } });
     };
-    cell.addEventListener('mousedown', triggerAudioCmd);
-    cell.addEventListener('touchstart', triggerAudioCmd, {passive: false});
+    cell.addEventListener('mousedown', triggerAudioCmd); cell.addEventListener('touchstart', triggerAudioCmd, {passive: false});
     cmdGridEl.appendChild(cell);
 }
 
@@ -200,7 +225,7 @@ for (let bank = 0; bank < 4; bank++) {
             if(e.type.startsWith('touch')) e.preventDefault();
             userDipStates[dipId] = !userDipStates[dipId];
             if (userDipStates[dipId]) toggle.classList.add('dip-on'); else toggle.classList.remove('dip-on');
-            if (pinmameInstance && vfdMemoryPointer) pinmameInstance.HEAPU8[vfdMemoryPointer + 400 + dipId] = userDipStates[dipId] ? 1 : 0;
+            flipperWorker.postMessage({ type: 'UPDATE_DIPS', payload: { dips: userDipStates } });
             localStorage.setItem('pinmame_dips', JSON.stringify(userDipStates));
         };
         toggle.addEventListener('mousedown', toggleDip); toggle.addEventListener('touchstart', toggleDip, {passive: false});
@@ -214,72 +239,17 @@ for (let i = 0; i < 96; i++) { const cell = document.createElement('div'); cell.
 const solGridEl = document.getElementById('solGrid');
 for (let i = 0; i < 32; i++) { const cell = document.createElement('div'); cell.className = 'cell'; cell.textContent = 'S' + String(i+1).padStart(2, '0'); solGridEl.appendChild(cell); solCells.push(cell); }
 
-async function startEmulation() {
-    try {
-        statusEl.textContent = "🟡 Chargement du moteur WebAssembly...";
-        const instance = await createPinMAME({
-            print: function(text) { logToTerminal(text); }, printErr: function(err) { logToTerminal(err); },
-            locateFile: function(path, prefix) { return path.endsWith('.wasm') ? 'pinmame_web.wasm' : prefix + path; }
-        });
-
-        let romBuffer; let finalRomName = "bonebstr"; 
-        const customRomData = sessionStorage.getItem('custom_rom_bytes'); const customRomName = sessionStorage.getItem('custom_rom_filename');
-
-        if (customRomData && customRomName) {
-            finalRomName = customRomName.replace('.zip', '').toLowerCase();
-            logToTerminal("[JS] Restitution de la ROM locale : " + finalRomName);
-            romNameDisplay.textContent = customRomName; romNameDisplay.style.color = "var(--neon-green)"; clearRomBtn.style.display = "inline-block";
-            const binaryStr = atob(customRomData); const bytes = new Uint8Array(binaryStr.length);
-            for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-            romBuffer = bytes.buffer;
-        } else {
-            logToTerminal(`[JS] Téléchargement du pack système par défaut...`);
-            const response = await fetch(`roms/${finalRomName}.zip`);
-            if (!response.ok) throw new Error("Pack introuvable.");
-            romBuffer = await response.arrayBuffer();
-        }
-        
-        instance.FS.mkdir('/roms'); instance.FS.writeFile(`/roms/${finalRomName}.zip`, new Uint8Array(romBuffer));
-        pinmameInstance = instance; vfdMemoryPointer = instance._pinmame_get_dsprom_ptr();
-
-        const stringAddress = vfdMemoryPointer + 1000;
-        for (let i = 0; i < finalRomName.length; i++) instance.HEAPU8[stringAddress + i] = finalRomName.charCodeAt(i);
-        instance.HEAPU8[stringAddress + finalRomName.length] = 0;
-        for(let i = 0; i < 32; i++) instance.HEAPU8[vfdMemoryPointer + 400 + i] = userDipStates[i] ? 1 : 0;
-        
-        setupButtons(); setupSystemHandlers();
-        document.body.addEventListener('touchstart', unlockAudio, { passive: true });
-
-        function renderFrame() {
-            if (!pinmameInstance || !vfdMemoryPointer) { requestAnimationFrame(renderFrame); return; }
-            ctx.clearRect(0, 0, canvas.width, canvas.height); const heap = pinmameInstance.HEAPU8;
-            let distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
-            heap[vfdMemoryPointer + 1070] = distance & 0xFF; heap[vfdMemoryPointer + 1071] = (distance >> 8) & 0xFF;
-            heap[vfdMemoryPointer + 1072] = (distance >> 16) & 0xFF; heap[vfdMemoryPointer + 1073] = (distance >> 24) & 0xFF;
-
-            for (let i = 0; i < 20; i++) {
-                drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 40, heap[vfdMemoryPointer + (i * 2)] | (heap[vfdMemoryPointer + (i * 2) + 1] << 8));
-                drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, heap[vfdMemoryPointer + ((20 + i) * 2)] | (heap[vfdMemoryPointer + ((20 + i) * 2) + 1] << 8));
-            }
-            for (let col = 0; col < 12; col++) {
-                const colByte = heap[vfdMemoryPointer + 300 + col];
-                for (let row = 0; row < 8; row++) {
-                    const lampId = (col * 8) + row;
-                    if (lampCells[lampId]) { if ((colByte & (1 << row)) !== 0) lampCells[lampId].classList.add('lamp-on'); else lampCells[lampId].classList.remove('lamp-on'); }
-                }
-            }
-            const solWord = (heap[vfdMemoryPointer + 320] | (heap[vfdMemoryPointer + 321] << 8) | (heap[vfdMemoryPointer + 322] << 16) | (heap[vfdMemoryPointer + 323] << 24)) >>> 0;
-            for (let s = 0; s < 32; s++) {
-                if (solCells[s]) { if ((solWord & (1 << s)) !== 0) solCells[s].classList.add('sol-on'); else solCells[s].classList.remove('sol-on'); }
-            }
-            requestAnimationFrame(renderFrame);
-        }
-
-        requestAnimationFrame(renderFrame);
-        statusEl.textContent = "🟢 PinMAME Workbench V195.03 - ULTRA LOW LATENCY";
-        statusEl.style.color = "#00ffcc";
-        setTimeout(() => { instance._pinmame_web_boot(); }, 100);
-    } catch (err) { statusEl.textContent = "🔴 ERREUR : " + err.message; }
+// 🎨 LE RENDU VISUEL AUTONOME DE L'IHM
+function renderFrame() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Rendu Afficheur Gottlieb VFD à partir des masques reçus du Worker
+    for (let i = 0; i < 20; i++) {
+        drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 40, masquesVFDLocaux[i]);
+        drawGottlieb14Segment(ctx, 30 + i * (CHAR_WIDTH + SPACING), 140, masquesVFDLocaux[20 + i]);
+    }
+    
+    requestAnimationFrame(renderFrame);
 }
 
 function setupSystemHandlers() {
@@ -300,8 +270,8 @@ function setupButtons() {
     const coinBtn = document.getElementById('coinBtn'); const startBtn = document.getElementById('startBtn'); const testBtn = document.getElementById('testBtn');
     const attachBtn = (btn, id) => {
         if(!btn) return;
-        const pDown = (e) => { if(e.type.startsWith('touch')) e.preventDefault(); unlockAudio(); userSwitchStates[id] = true; swCells[id].classList.add('sw-user'); if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + id] = 1; };
-        const pUp = (e) => { if(e.type.startsWith('touch')) e.preventDefault(); userSwitchStates[id] = false; swCells[id].classList.remove('sw-user'); if (pinmameInstance) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + id] = 0; };
+        const pDown = (e) => { if(e.type.startsWith('touch')) e.preventDefault(); unlockAudio(); swCells[id].classList.add('sw-user'); notifierChangementInput(id, 1); };
+        const pUp = (e) => { if(e.type.startsWith('touch')) e.preventDefault(); swCells[id].classList.remove('sw-user'); notifierChangementInput(id, 0); };
         btn.addEventListener('mousedown', pDown); btn.addEventListener('touchstart', pDown, {passive: false});
         btn.addEventListener('mouseup', pUp); btn.addEventListener('touchend', pUp, {passive: false});
         btn.addEventListener('mouseleave', pUp); btn.addEventListener('touchcancel', pUp, {passive: false});
@@ -329,4 +299,10 @@ function drawGottlieb14Segment(ctx, x, y, mask) {
     ctx.restore();
 }
 
-startEmulation();
+flipperWorker.postMessage({
+    type: 'INIT_ENGINE',
+    payload: {
+        customRomBytes: sessionStorage.getItem('custom_rom_bytes'),
+        customRomName: sessionStorage.getItem('custom_rom_filename')
+    }
+});

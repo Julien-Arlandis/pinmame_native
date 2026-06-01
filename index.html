@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Dev Workbench V200.22 - Harmonized Layout</title>
+    <title>PinMAME WASM - Dev Workbench V200.23 - Auto Audio Unlock</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -212,7 +212,7 @@
             height: auto;
         }
 
-        /* --- Grille de Diagnostic Harmonisée --- */
+        /* --- Grille de Diagnostic --- */
         .dashboard {
             width: 100%;
             max-width: 1400px;
@@ -220,7 +220,7 @@
             flex-direction: row;
             gap: 15px;
             box-sizing: border-box;
-            align-items: stretch; /* Force l'alignement vertical égal des colonnes */
+            align-items: stretch;
         }
         .arcade-panel {
             flex: 1;
@@ -242,7 +242,7 @@
             flex-direction: column;
         }
         .panel-box.expandable {
-            flex: 1; /* Permet au terminal et aux sons de s'auto-ajuster à la hauteur du reste */
+            flex: 1;
         }
         .panel-title {
             font-size: 0.75rem;
@@ -257,13 +257,12 @@
             left: 0;
         }
 
-        /* 🎯 COUVERTURE HARMONISÉE : Remplacement des colonnes fixes par du "fr" proportionnel */
         .grid-container {
             display: grid;
             grid-template-columns: repeat(10, 1fr);
             gap: 6px;
             width: 100%;
-            min-width: 500px; /* Conserve la lisibilité sur mobile */
+            min-width: 500px;
         }
         .grid-container-sol {
             display: grid;
@@ -385,7 +384,6 @@
             transform: scale(0.95);
         }
 
-        /* 🎯 HARMONISATION DES DIP-SWITCHES POUR REMPLIR LE CONTAINER */
         .dip-container {
             display: flex;
             flex-direction: row;
@@ -401,7 +399,7 @@
             padding: 10px;
             display: flex;
             gap: 4px;
-            flex: 1; /* S'étend équitablement pour boucher les trous */
+            flex: 1; 
             min-width: 250px;
             justify-content: space-around;
             box-sizing: border-box;
@@ -454,7 +452,7 @@
             min-width: 0;
         }
 
-        /* --- Fenêtre Terminal (Hauteur dynamique synchronisée) --- */
+        /* --- Fenêtre Terminal --- */
         .terminal-box {
             background: var(--bg-box); 
             border: 2px solid var(--border-color); 
@@ -466,7 +464,7 @@
             width: 100%;
         }
         .terminal-content {
-            flex: 1; /* Le terminal s'étire pour occuper toute la hauteur interne */
+            flex: 1; 
             min-height: 300px;
             overflow-y: auto; 
             white-space: pre-wrap; 
@@ -478,7 +476,7 @@
             -webkit-user-select: text !important;
         }
 
-        /* --- Documentation Technique de Poche --- */
+        /* --- Documentation --- */
         .doc-box {
             background: #0a0a0a;
             border: 1px dashed #222;
@@ -743,6 +741,7 @@ function logHardwareTraffic(expediteur, destinataire, commande, categorie) {
 
 const flipperWorker = new Worker('flipper-worker.js');
 
+// 🚀 CENTRALISATION ET CAPTURE DU CONTEXTE AUDIO EN AMONT
 function unlockAudio() {
     if (!audioCtx) {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -769,9 +768,19 @@ function unlockAudio() {
         };
         audioNode.connect(audioCtx.destination);
         logToTerminal("🔊 Flux audio stéréo débloqué.");
+        
+        // Supprime l'écouteur global une fois débloqué avec succès
+        document.body.removeEventListener('click', unlockAudio);
+        document.body.removeEventListener('touchstart', unlockAudio);
     }
-    if (audioCtx.state === 'suspended') audioCtx.resume();
+    if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+    }
 }
+
+// 🎯 CORRECTIF : Attache immédiate dès le premier pixel touché sur le DOM
+document.body.addEventListener('click', unlockAudio, { passive: true });
+document.body.addEventListener('touchstart', unlockAudio, { passive: true });
 
 flipperWorker.onmessage = function(event) {
     const { type, payload, data } = event.data;
@@ -833,10 +842,14 @@ flipperWorker.onmessage = function(event) {
                 romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename');
                 romNameDisplay.style.color = "var(--neon-green)"; clearRomBtn.style.display = "inline-block";
             }
-            statusEl.textContent = "🟢 PinMAME Workbench V200.22 - COUPLAGE HARMONISÉ ACTIF";
+            statusEl.textContent = "🟢 PinMAME Workbench V200.23 - AUDIO RUNNING";
             statusEl.style.color = "#00ffcc";
             setupButtons(); setupSystemHandlers();
-            document.body.addEventListener('touchstart', unlockAudio, { passive: true });
+            
+            // 🚀 APPEL DE FORCE : Si le clic a eu lieu avant le chargement Wasm, on réaligne le contexte
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
             requestAnimationFrame(renderFrame);
             break;
     }
@@ -857,7 +870,7 @@ for (let i = 0; i < 80; i++) {
     let holdTimer = null; let isLocked = false; let isPressed = false;
 
     const pressDown = (e) => { 
-        if(e.type.startsWith('touch')) e.preventDefault(); unlockAudio();
+        if(e.type.startsWith('touch')) e.preventDefault();
         if (isLocked) {
             isLocked = false; cell.classList.remove('sw-locked'); notifierChangementInput(i, 0);
             isPressed = false; if(holdTimer) clearTimeout(holdTimer); return;
@@ -886,7 +899,7 @@ for (let i = 1; i <= 64; i++) {
     const cell = document.createElement('div'); cell.className = 'cell cell-cmd'; const description = SOUND_DICTIONARY[i] || "SFX";
     cell.innerHTML = `<div class="cell-cmd-num">${String(i).padStart(2, '0')}</div><div class="cell-cmd-desc">${description}</div>`;
     const triggerAudioCmd = (e) => {
-        if(e.type.startsWith('touch')) e.preventDefault(); unlockAudio();
+        if(e.type.startsWith('touch')) e.preventDefault();
         cell.classList.add('cmd-active'); setTimeout(() => cell.classList.remove('cmd-active'), 120);
         flipperWorker.postMessage({ type: 'TRIGGER_SOUND_CMD', payload: { cmdId: i } });
     };
@@ -943,7 +956,7 @@ function setupButtons() {
     const coinBtn = document.getElementById('coinBtn'); const startBtn = document.getElementById('startBtn'); const testBtn = document.getElementById('testBtn');
     const attachBtn = (btn, id) => {
         if(!btn) return;
-        const pDown = (e) => { if(e.type.startsWith('touch')) e.preventDefault(); unlockAudio(); swCells[id].classList.add('sw-user'); notifierChangementInput(id, 1); };
+        const pDown = (e) => { if(e.type.startsWith('touch')) e.preventDefault(); swCells[id].classList.add('sw-user'); notifierChangementInput(id, 1); };
         const pUp = (e) => { if(e.type.startsWith('touch')) e.preventDefault(); swCells[id].classList.remove('sw-user'); notifierChangementInput(id, 0); };
         btn.addEventListener('mousedown', pDown); btn.addEventListener('touchstart', pDown, {passive: false});
         btn.addEventListener('mouseup', pUp); btn.addEventListener('touchend', pUp, {passive: false});

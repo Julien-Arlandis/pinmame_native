@@ -1,6 +1,6 @@
 // =========================================================================
 // 🤖 THREAD DE CALCUL - PINMAME WORKER (flipper-worker.js)
-// 🏷️ VERSION : V200.04 - ÉVÉNEMENTIEL DISPLAY FIX
+// 🏷️ VERSION : V200.06 - WEB TERMINAL ROUTING INTEGRATION
 // =========================================================================
 
 self.window = self;
@@ -11,7 +11,10 @@ importScripts('pinmame_web.js');
 let pinmameInstance = null;
 let vfdMemoryPointer = 0;
 let finalRomName = "bonebstr";
-let ancienMasqueEcran = new Uint16Array(40); // Pour détecter les changements
+
+let ancienMasqueVFD = new Uint16Array(40);
+let anciennesLampes = new Uint8Array(12);
+let anciennesBobines = 0;
 
 var Module = {
     print: function(text) { self.postMessage({ type: 'LOG', data: text }); },
@@ -84,11 +87,9 @@ async function initialiserMoteur(customRomBytes, customRomName) {
             payload: { vfdMemoryPointer: vfdMemoryPointer, romName: finalRomName } 
         });
 
-        // Démarrage du CPU émulé
         setTimeout(() => { 
             instance._pinmame_web_boot(); 
-            // Lancement du scanner d'affichage synchronisé sur la boucle du Worker
-            sychroniserAffichageVFD();
+            lancerSurveillanceEvenementielle();
         }, 100);
 
     } catch (err) {
@@ -96,36 +97,56 @@ async function initialiserMoteur(customRomBytes, customRomName) {
     }
 }
 
-// 📺 SCANNER ÉVÉNEMENTIEL DE L'AFFICHEUR
-function sychroniserAffichageVFD() {
-    setInterval(() => {
-        if (!pinmameInstance || !vfdMemoryPointer) return;
-
-        let changementDetecte = false;
-        let masquesActuels = new Uint16Array(40);
-
-        // On extrait l'état des segments (2 octets par caractère pour 40 caractères)
-        for (let i = 0; i < 40; i++) {
-            let bas = pinmameInstance.HEAPU8[vfdMemoryPointer + (i * 2)];
-            let haut = pinmameInstance.HEAPU8[vfdMemoryPointer + (i * 2) + 1];
-            let masque16bits = bas | (haut << 8);
+function lancerSurveillanceEvenementielle() {
+    function loop() {
+        if (pinmameInstance && vfdMemoryPointer) {
             
-            masquesActuels[i] = masque16bits;
+            // 1. SURVEILLANCE VFD
+            let vfdChange = false;
+            let masquesActuels = new Uint16Array(40);
+            for (let i = 0; i < 40; i++) {
+                let m = pinmameInstance.HEAPU8[vfdMemoryPointer + (i * 2)] | (pinmameInstance.HEAPU8[vfdMemoryPointer + (i * 2) + 1] << 8);
+                masquesActuels[i] = m;
+                if (m !== ancienMasqueVFD[i]) vfdChange = true;
+            }
+            if (vfdChange) {
+                self.postMessage({ type: 'VFD_UPDATE', payload: { masques: masquesActuels } });
+                ancienMasqueVFD = masquesActuels;
+            }
 
-            if (masque16bits !==  ancienMasqueEcran[i]) {
-                changementDetecte = true;
+            // 2. SURVEILLANCE LAMPES
+            let lampChange = false;
+            let lampesActuelles = new Uint8Array(12);
+            for (let c = 0; c < 12; c++) {
+                let b = pinmameInstance.HEAPU8[vfdMemoryPointer + 300 + c];
+                lampesActuelles[c] = b;
+                if (b !== anciennesLampes[c]) lampChange = true;
+            }
+            if (lampChange) {
+                self.postMessage({ type: 'LAMPS_UPDATE', payload: { bytes: lampesActuelles } });
+                anciennesLampes = lampesActuelles;
+            }
+
+            // 3. SURVEILLANCE BOBINES
+            let solActuels = (pinmameInstance.HEAPU8[vfdMemoryPointer + 320] | 
+                              (pinmameInstance.HEAPU8[vfdMemoryPointer + 321] << 8) | 
+                              (pinmameInstance.HEAPU8[vfdMemoryPointer + 322] << 16) | 
+                              (pinmameInstance.HEAPU8[vfdMemoryPointer + 323] << 24)) >>> 0;
+            
+            if (solActuels !== anciennesBobines) {
+                for (let s = 0; s < 32; s++) {
+                    let ancienEtat = (anciennesBobines >> s) & 1;
+                    let nouvelEtat = (solActuels >> s) & 1;
+                    if (nouvelEtat !== ancienEtat) {
+                        self.postMessage({ type: 'DRIVER_ORDER', payload: { id: s, state: nouvelEtat } });
+                    }
+                }
+                anciennesBobines = solActuels;
             }
         }
-
-        // 🚀 Si l'afficheur a bougé, on envoie le nouveau calque à l'IHM
-        if (changementDetecte) {
-            self.postMessage({
-                type: 'VFD_UPDATE',
-                payload: { masques: masquesActuels }
-            });
-            ancienMasqueEcran = masquesActuels;
-        }
-    }, 16); // Vérification à ~60 Hz à l'intérieur du Worker
+        setTimeout(loop, 2); 
+    }
+    loop();
 }
 
 self.pushWasmAudio = function(ptr, count) {

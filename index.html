@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Dev Workbench V200.19 - Optimized Macro Layout</title>
+    <title>PinMAME WASM - Dev Workbench V200.22 - Harmonized Layout</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -90,7 +90,6 @@
             color: #888;
         }
 
-        /* --- Zone d'Action / Contrôles --- */
         .actions-section {
             display: flex;
             align-items: center;
@@ -133,7 +132,6 @@
             border-color: var(--neon-red);
         }
 
-        /* --- Indicateurs LED d'activité --- */
         .led-indicator {
             display: flex;
             align-items: center;
@@ -157,7 +155,7 @@
             box-shadow: 0 0 8px var(--neon-purple);
         }
 
-        /* --- Barre Macro (Remontée en haut) --- */
+        /* --- Barre Macro --- */
         .header-macro-bar {
             width: 100%;
             max-width: 1400px;
@@ -214,7 +212,7 @@
             height: auto;
         }
 
-        /* --- Grille de Diagnostic d'exploitation (Dashboard) --- */
+        /* --- Grille de Diagnostic Harmonisée --- */
         .dashboard {
             width: 100%;
             max-width: 1400px;
@@ -222,53 +220,78 @@
             flex-direction: row;
             gap: 15px;
             box-sizing: border-box;
-            align-items: stretch;
+            align-items: stretch; /* Force l'alignement vertical égal des colonnes */
         }
         .arcade-panel {
-            flex: 1.1;
+            flex: 1;
             display: flex;
             flex-direction: column;
             gap: 15px;
+            min-width: 0;
         }
         .panel-box {
             background: var(--bg-box);
             border: 1px solid var(--border-color);
             border-radius: 6px;
-            padding: 12px;
+            padding: 15px;
             box-sizing: border-box;
+            width: 100%;
+            overflow-x: auto; 
+            -webkit-overflow-scrolling: touch;
+            display: flex;
+            flex-direction: column;
+        }
+        .panel-box.expandable {
+            flex: 1; /* Permet au terminal et aux sons de s'auto-ajuster à la hauteur du reste */
         }
         .panel-title {
             font-size: 0.75rem;
             color: #888;
             text-transform: uppercase;
             letter-spacing: 1px;
-            margin-bottom: 10px;
+            margin-bottom: 12px;
             border-bottom: 1px solid #1a1a1a;
             padding-bottom: 5px;
             font-weight: bold;
+            position: sticky;
+            left: 0;
         }
 
-        /* --- Grilles de cellules tactiles --- */
+        /* 🎯 COUVERTURE HARMONISÉE : Remplacement des colonnes fixes par du "fr" proportionnel */
         .grid-container {
             display: grid;
-            grid-template-columns: repeat(10, 15fr);
-            gap: 5px;
+            grid-template-columns: repeat(10, 1fr);
+            gap: 6px;
+            width: 100%;
+            min-width: 500px; /* Conserve la lisibilité sur mobile */
         }
         .grid-container-sol {
             display: grid;
             grid-template-columns: repeat(8, 1fr);
-            gap: 5px;
+            gap: 6px;
+            width: 100%;
+            min-width: 400px;
         }
         .grid-container-lamp {
             display: grid;
             grid-template-columns: repeat(12, 1fr);
-            gap: 4px;
+            gap: 5px;
+            width: 100%;
+            min-width: 550px;
         }
+        .grid-container-cmd {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 6px;
+            width: 100%;
+            min-width: 450px;
+        }
+
         .cell {
             background: #161616;
             border: 1px solid #262626;
             border-radius: 3px;
-            height: 38px;
+            height: 42px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -310,11 +333,7 @@
             color: #ffffff !important;
             text-shadow: none !important;
         }
-        .cell.sw-user .sw-num-text, .cell.sw-locked .sw-num-text {
-            color: #fff;
-        }
 
-        /* --- États Matrice de Sortie (Bobines / Lampes) --- */
         .cell.sol-on {
             background: rgba(255, 51, 0, 0.25) !important;
             border-color: var(--neon-red) !important;
@@ -331,19 +350,6 @@
             box-shadow: 0 0 6px rgba(0, 255, 68, 0.2);
         }
 
-        /* --- Générateur de Commandes de diagnostic Audio --- */
-        .sound-rack {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-            height: 100%;
-            box-sizing: border-box;
-        }
-        .grid-container-cmd {
-            display: grid;
-            grid-template-columns: repeat(8, 1fr);
-            gap: 5px;
-        }
         .cell-cmd {
             background: #141419;
             border: 1px solid #222230;
@@ -379,36 +385,41 @@
             transform: scale(0.95);
         }
 
-        /* --- Micro-Interrupteurs DIP-SWITCH --- */
+        /* 🎯 HARMONISATION DES DIP-SWITCHES POUR REMPLIR LE CONTAINER */
         .dip-container {
             display: flex;
-            justify-content: space-between;
+            flex-direction: row;
+            flex-wrap: wrap;
             gap: 10px;
+            width: 100%;
+            box-sizing: border-box;
         }
         .dip-bank {
             background: #181818;
             border: 1px solid #262626;
             border-radius: 4px;
-            padding: 6px;
+            padding: 10px;
             display: flex;
-            gap: 8px;
-            flex: 1;
+            gap: 4px;
+            flex: 1; /* S'étend équitablement pour boucher les trous */
+            min-width: 250px;
             justify-content: space-around;
+            box-sizing: border-box;
         }
         .dip-switch {
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 4px;
+            gap: 5px;
         }
         .dip-switch span {
-            font-size: 0.55rem;
-            color: #555;
+            font-size: 0.65rem;
+            color: #888;
             font-weight: bold;
         }
         .dip-toggle {
-            width: 14px;
-            height: 26px;
+            width: 18px;
+            height: 30px;
             background: #331111;
             border: 1px solid #552222;
             border-radius: 2px;
@@ -418,10 +429,10 @@
         .dip-toggle::after {
             content: '';
             position: absolute;
-            left: 1px;
-            top: 1px;
-            width: 10px;
-            height: 10px;
+            left: 2px;
+            top: 2px;
+            width: 12px;
+            height: 11px;
             background: #cc3333;
             border-radius: 1px;
             transition: all 0.05s ease;
@@ -431,31 +442,32 @@
             border-color: #225222;
         }
         .dip-toggle.dip-on::after {
-            top: 13px;
+            top: 15px;
             background: #33cc33;
         }
 
-        /* --- Blocs Systèmes Périphériques --- */
         .peripheral-panel {
             flex: 1;
             display: flex;
             flex-direction: column;
             gap: 15px;
+            min-width: 0;
         }
 
-        /* --- Fenêtre Terminal (Hauteur Fixe Stricte) --- */
+        /* --- Fenêtre Terminal (Hauteur dynamique synchronisée) --- */
         .terminal-box {
             background: var(--bg-box); 
             border: 2px solid var(--border-color); 
-            padding: 12px; 
+            padding: 15px; 
             border-radius: 8px; 
-            flex: 1; 
             box-sizing: border-box; 
             display: flex; 
             flex-direction: column;
+            width: 100%;
         }
         .terminal-content {
-            height: 380px; 
+            flex: 1; /* Le terminal s'étire pour occuper toute la hauteur interne */
+            min-height: 300px;
             overflow-y: auto; 
             white-space: pre-wrap; 
             font-family: monospace; 
@@ -511,6 +523,29 @@
             font-weight: bold;
             padding-right: 6px !important;
         }
+
+        @media (max-width: 850px) {
+            .header-container {
+                flex-direction: column;
+                gap: 12px;
+                align-items: flex-start;
+            }
+            .actions-section {
+                width: 100%;
+                flex-wrap: wrap;
+                justify-content: space-between;
+            }
+            .header-macro-bar {
+                flex-direction: column;
+                gap: 6px;
+            }
+            .dashboard {
+                flex-direction: column;
+            }
+            .doc-grid {
+                grid-template-columns: 1fr;
+            }
+        }
     </style>
 </head>
 <body>
@@ -555,11 +590,11 @@
                 <div id="swGrid" class="grid-container"></div>
             </div>
 
-            <div class="terminal-box">
+            <div class="terminal-box expandable">
                 <div style="color: #00ff66; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 5px; border-bottom: 1px solid #142828; padding-bottom: 3px; font-weight: bold;">📟 Moniteur de flux de données (Événementiel pur)</div>
                 <div id="terminal" class="terminal-content">Démarrage du flux de log...</div>
                 
-                <div style="display: flex; gap: 15px; margin-top: 8px; padding-top: 5px; border-top: 1px solid #142828; font-size: 0.75rem; color: #888; align-items: center; justify-content: space-between;">
+                <div style="display: flex; gap: 15px; margin-top: 8px; padding-top: 5px; border-top: 1px solid #142828; font-size: 0.75rem; color: #888; align-items: center; justify-content: space-between; flex-wrap: wrap;">
                     <div style="display: flex; gap: 12px; align-items: center;">
                         <span style="font-weight: bold; color: #aaa;">Filtres :</span>
                         <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; color: var(--neon-cyan);">
@@ -572,7 +607,7 @@
                             <input type="checkbox" id="chkDisplay" style="accent-color: #fff;"> DISPLAY
                         </label>
                     </div>
-                    <button id="btnCopyLogs" style="background: #1f1f1f; border: 1px solid #333; color: #fff; padding: 2px 8px; border-radius: 3px; cursor: pointer; font-family: monospace; font-size: 0.7rem; transition: background 0.1s;">📋 Copier les logs</button>
+                    <button id="btnCopyLogs" style="background: #1f1f1f; border: 1px solid #333; color: #fff; padding: 4px 8px; border-radius: 3px; cursor: pointer; font-family: monospace; font-size: 0.7rem; transition: background 0.1s;">📋 Copier les logs</button>
                 </div>
             </div>
 
@@ -587,7 +622,7 @@
             
             <div class="panel-box">
                 <div class="panel-title">⚡ Carte Driver MA-789 (Lampes Commandées & Bobines)</div>
-                <div style="display: flex; flex-direction: column; gap: 10px;">
+                <div style="display: flex; flex-direction: column; gap: 15px;">
                     <div>
                         <div style="font-size: 0.65rem; color: #555; margin-bottom: 4px; font-weight: bold; text-transform: uppercase;">Solénoïdes de Puissance (Driver Transistors)</div>
                         <div id="solGrid" class="grid-container-sol"></div>
@@ -599,7 +634,7 @@
                 </div>
             </div>
 
-            <div class="panel-box">
+            <div class="panel-box expandable">
                 <div class="sound-rack">
                     <div class="panel-title">🎵 Générateur d'Interruptions Audio (Soundboard Hook)</div>
                     <div id="cmd-grid" class="grid-container-cmd"></div>
@@ -798,7 +833,7 @@ flipperWorker.onmessage = function(event) {
                 romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename');
                 romNameDisplay.style.color = "var(--neon-green)"; clearRomBtn.style.display = "inline-block";
             }
-            statusEl.textContent = "🟢 PinMAME Workbench V200.19 - LAYOUT CONFIRMED";
+            statusEl.textContent = "🟢 PinMAME Workbench V200.22 - COUPLAGE HARMONISÉ ACTIF";
             statusEl.style.color = "#00ffcc";
             setupButtons(); setupSystemHandlers();
             document.body.addEventListener('touchstart', unlockAudio, { passive: true });
@@ -858,12 +893,14 @@ for (let i = 1; i <= 64; i++) {
     cell.addEventListener('mousedown', triggerAudioCmd); cell.addEventListener('touchstart', triggerAudioCmd, {passive: false});
     cmdGridEl.appendChild(cell);
 }
+
 for (let bank = 0; bank < 4; bank++) {
     const bankEl = document.createElement('div'); bankEl.className = 'dip-bank';
     for (let bit = 0; bit < 8; bit++) {
         const dipId = (bank * 8) + bit; const swWrap = document.createElement('div'); swWrap.className = 'dip-switch';
         const label = document.createElement('span'); label.textContent = String(dipId + 1).padStart(2, '0');
         const toggle = document.createElement('div'); toggle.className = 'dip-toggle'; if (userDipStates[dipId]) toggle.classList.add('dip-on');
+
         const toggleDip = (e) => {
             if(e.type.startsWith('touch')) e.preventDefault(); userDipStates[dipId] = !userDipStates[dipId];
             if (userDipStates[dipId]) toggle.classList.add('dip-on'); else toggle.classList.remove('dip-on');

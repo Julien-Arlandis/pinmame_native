@@ -276,6 +276,7 @@ const ringBufferR = new Float32Array(RING_BUFFER_SIZE);
 let audioWritePtr = 0, audioReadPtr = 0;
 let lastSampleL = 0, lastSampleR = 0;
 let audioCtx = null, audioNode = null;
+let isBufferWarming = false;
 
 function feedAudioRingBuffer(left, right) {
     for (let i = 0; i < left.length; i++) {
@@ -285,19 +286,28 @@ function feedAudioRingBuffer(left, right) {
     }
 }
 
+function resetAudioRead() {
+    // Jette les samples accumulés avant le geste utilisateur
+    audioReadPtr = audioWritePtr;
+    isBufferWarming = true;
+}
+
 function unlockAudio(transport) {
     if (audioCtx) {
-        if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume().then(resetAudioRead).catch(() => {});
+        }
         return;
     }
     try {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
         logToTerminal(`📊 Audio: ${audioCtx.sampleRate}Hz, état: ${audioCtx.state}`);
+        resetAudioRead();
         if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
 
         audioNode = audioCtx.createScriptProcessor(4096, 1, 2);
 
-        // Wake up the audio chip on mobile
+        // Réveil de la puce audio sur mobile
         const kick = audioCtx.createOscillator();
         kick.frequency.value = 0;
         kick.connect(audioNode);
@@ -309,6 +319,14 @@ function unlockAudio(transport) {
             const outR = e.outputBuffer.getChannelData(1);
             const distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
             if (transport) transport.send('input', `@audio:distance=${distance}`);
+
+            // Attendre que le buffer se remplisse avant de jouer (évite le 1er son muet)
+            if (isBufferWarming) {
+                if (distance >= 4096) isBufferWarming = false;
+                for (let i = 0; i < outL.length; i++) outL[i] = outR[i] = 0;
+                return;
+            }
+
             for (let i = 0; i < outL.length; i++) {
                 if (audioReadPtr !== audioWritePtr) {
                     lastSampleL = ringBufferL[audioReadPtr];
@@ -321,7 +339,7 @@ function unlockAudio(transport) {
                 outL[i] = lastSampleL;
                 outR[i] = lastSampleR;
             }
-            if (distance > 24576) audioReadPtr = (audioWritePtr - 4096 + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
+            if (distance > 24576) audioReadPtr = (audioWritePtr - 8192 + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
             if (distance > 512) audioLed.classList.add('active');
             else audioLed.classList.remove('active');
         };

@@ -419,7 +419,7 @@ function handleStatusLine(line) {
     const p = new URLSearchParams(line.slice(8)), state = p.get('state');
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
-        statusEl.textContent = `🟢 PinMAME Workbench V200.29 — ${rom}`;
+        statusEl.textContent = `🟢 PinMAME Workbench v1.0 — ${rom}`;
         statusEl.style.color = '#00ffcc';
         romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename') || `${rom} (Interne)`;
         if (sessionStorage.getItem('custom_rom_bytes')) {

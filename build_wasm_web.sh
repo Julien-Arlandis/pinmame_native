@@ -3,11 +3,11 @@ set -e
 
 # =========================================================================
 # 🕸️ INFRASTRUCTURE PINMAME WASM - SCRIPT D'ASSEMBLAGE WEB FINAL
-# 🏷️ VERSION : WEBLINK-V93.3 (NO-MAIN LIBRARY EXPORT FIX)
+# 🏷️ VERSION : WEBLINK-V93.4 (BUILD SIZE REPORTING)
 # =========================================================================
 
 echo "=================================================="
-echo "🕵️ MODE DIAGNOSTIC STRICT : MULTIPLEXEUR MAME V93.3"
+echo "🕵️ MODE DIAGNOSTIC STRICT : MULTIPLEXEUR MAME V93.4"
 echo "=================================================="
 
 # 1. Vérification de l'environnement Emscripten
@@ -20,7 +20,7 @@ elif [ -f "/etc/profile.d/emscripten.sh" ]; then
 fi
 
 if ! command -v emcc &> /dev/null; then
-    echo "❌ [V93.3] ERREUR CRITIQUE : Compilateur 'emcc' introuvable."
+    echo "❌ [V93.4] ERREUR CRITIQUE : Compilateur 'emcc' introuvable."
     exit 1
 fi
 
@@ -30,7 +30,7 @@ WASM_TEMP_OBJ_DIR="$BASE_DIR/pinmame_workspace_wasm_objs"
 
 # Vérification de l'archive statique
 if [ ! -f "libpinmame_wasm.a" ]; then
-    echo "❌ [V93.3] ERREUR : libpinmame_wasm.a introuvable. Compile d'abord la lib statique."
+    echo "❌ [V93.4] ERREUR : libpinmame_wasm.a introuvable. Compile d'abord la lib statique."
     exit 1
 fi
 
@@ -50,7 +50,7 @@ API_FLAGS=(
     "-Wno-implicit-function-declaration"
 )
 
-echo "[*] [V93.3] Compilation du pont API C++..."
+echo "[*] [V93.4] Compilation du pont API C++..."
 emcc "${API_FLAGS[@]}" -c api.cpp -o "$WASM_TEMP_OBJ_DIR/api.o"
 
 # =========================================================================
@@ -76,7 +76,32 @@ LINK_FLAGS=(
     "-s" "EXPORTED_FUNCTIONS=['_pinmame_get_version','_pinmame_get_gprom_ptr','_pinmame_get_dsprom_ptr','_pinmame_get_display','_pinmame_web_entry','_pinmame_web_boot','_pinmame_web_tick','_api_pop_ascii_event','_api_hook_gottlieb_display_write']"
 )
 
-echo "[*] [V93.3] Liaison des archives et injection des symboles modulaire..."
+echo "[*] [V93.4] Liaison des archives et injection des symboles modulaire..."
 emcc "$WASM_TEMP_OBJ_DIR/api.o" libpinmame_wasm.a "${LINK_FLAGS[@]}" -o pinmame_web.js
 
-echo "✅ [V93.3] Compilation WebAssembly effectuée avec succès : pinmame_web.js / pinmame_web.wasm"
+# 📊 RAPPORT DE BUILD : Afficher la taille des fichiers générés
+if [ -f "pinmame_web.js" ] && [ -f "pinmame_web.wasm" ]; then
+    JS_SIZE=$(ls -lh pinmame_web.js | awk '{print $5}')
+    WASM_SIZE=$(ls -lh pinmame_web.wasm | awk '{print $5}')
+    JS_SIZE_BYTES=$(ls -l pinmame_web.js | awk '{print $5}')
+    WASM_SIZE_BYTES=$(ls -l pinmame_web.wasm | awk '{print $5}')
+    TOTAL_BYTES=$((JS_SIZE_BYTES + WASM_SIZE_BYTES))
+    
+    echo ""
+    echo "=================================================="
+    echo "📊 RAPPORT DE BUILD V93.4"
+    echo "=================================================="
+    echo "✅ pinmame_web.js  : $JS_SIZE ($JS_SIZE_BYTES bytes)"
+    echo "✅ pinmame_web.wasm : $WASM_SIZE ($WASM_SIZE_BYTES bytes)"
+    echo "───────────────────────────────────────────────────"
+    printf "📦 TOTAL           : "
+    if [ $TOTAL_BYTES -lt 1048576 ]; then
+        printf "%.2f KB\n" $(echo "scale=2; $TOTAL_BYTES / 1024" | bc)
+    else
+        printf "%.2f MB\n" $(echo "scale=2; $TOTAL_BYTES / 1048576" | bc)
+    fi
+    echo "=================================================="
+else
+    echo "⚠️  [V93.4] Certains fichiers n'ont pas été générés correctement."
+    exit 1
+fi

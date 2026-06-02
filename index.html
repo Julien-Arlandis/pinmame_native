@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Dev Workbench V200.24 - Mobile Audio Fix</title>
+    <title>PinMAME WASM - Dev Workbench V200.25 - Event-Driven Architecture</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -884,7 +884,7 @@ flipperWorker.onmessage = function(event) {
                 romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename');
                 romNameDisplay.style.color = "var(--neon-green)"; clearRomBtn.style.display = "inline-block";
             }
-            statusEl.textContent = "🟢 PinMAME Workbench V200.24 - AUDIO RUNNING";
+            statusEl.textContent = "🟢 PinMAME Workbench V200.25 - AUDIO RUNNING";
             statusEl.style.color = "#00ffcc";
             setupButtons(); setupSystemHandlers();
             

@@ -399,24 +399,47 @@ function updateMasterStatus(master) {
 
 // ── Handlers messages maître ──────────────────────────────────────────────────
 
+// Buffers pour batcher les mises à jour DOM dans requestAnimationFrame
+const _pendingLamp = new Uint8Array(96);   // nouvel état
+const _dirtyLamp   = new Uint8Array(96);   // 1 = à mettre à jour
+const _pendingSol  = new Int8Array(32);    // -1=rien, 0/1=état
+let   _driverRaf   = false;
+_pendingSol.fill(-1);
+
+function _flushDriver() {
+    _driverRaf = false;
+    for (let i = 0; i < 96; i++) {
+        if (!_dirtyLamp[i]) continue;
+        _dirtyLamp[i] = 0;
+        if (lampCells[i]) lampCells[i].classList.toggle('lamp-on', _pendingLamp[i] === 1);
+    }
+    for (let i = 0; i < 32; i++) {
+        if (_pendingSol[i] < 0) continue;
+        if (solCells[i]) solCells[i].classList.toggle('sol-on', _pendingSol[i] === 1);
+        _pendingSol[i] = -1;
+    }
+}
+
 function handleDriverLine(line) {
     if (line.startsWith('!lamp:')) {
         const p = new URLSearchParams(line.slice(6));
         const col = parseInt(p.get('col')), mask = parseInt(p.get('mask'));
         for (let row = 0; row < 8; row++) {
             const lampId = col * 8 + row, state = (mask >> row) & 1;
-            if (lampCells[lampId]) lampCells[lampId].classList.toggle('lamp-on', state === 1);
             if (state !== ancienEtatLampesIndividuelles[lampId]) {
                 logHardwareTraffic('MASTER', 'DRIVER', `!lamp:id=${lampId+1}&state=${state}`, 'DRIVER');
                 ancienEtatLampesIndividuelles[lampId] = state;
+                _pendingLamp[lampId] = state;
+                _dirtyLamp[lampId]   = 1;
             }
         }
     } else if (line.startsWith('!set:')) {
         const p = new URLSearchParams(line.slice(5));
         const id = parseInt(p.get('id')), state = parseInt(p.get('state'));
-        if (solCells[id]) solCells[id].classList.toggle('sol-on', state === 1);
+        _pendingSol[id] = state;
         logHardwareTraffic('MASTER', 'DRIVER', line, 'DRIVER');
     }
+    if (!_driverRaf) { _driverRaf = true; requestAnimationFrame(_flushDriver); }
 }
 
 function handleStatusLine(line) {

@@ -8,40 +8,85 @@
 //   Émet   (maître → browser) : !set:  !lamp:  !display:  @status:
 // ═══════════════════════════════════════════════════════════════════════════════
 
-class WorkerMaster {
-    constructor() {
-        this._worker = new Worker('runtime.js');
-        this._callbacks = [];
-        this._worker.onmessage = (e) => {
-            const msg = e.data;
-            if (msg.channel === 'audio') {
-                for (const cb of this._callbacks) cb(msg);
-            } else if (msg.line) {
-                for (const cb of this._callbacks) cb(msg.line);
-            }
-        };
-    }
-    send(line) { this._worker.postMessage({ channel: 'input', line }); }
-    onMessage(cb) { this._callbacks.push(cb); }
-    get name() { return 'runtime (local)'; }
+// ─── PORTS ───────────────────────────────────────────────────────────────────
+// Un port expose : { readable: ReadableStream<string>, writable: WritableStream<string>, name, isLocal? }
+// Le port Worker ajoute : onAudio(cb) — cb(left, right) — canal audio séparé du texte
+
+function createWorkerPort() {
+    const worker = new Worker('runtime.js');
+    let audioCallback = null;
+
+    const { readable, writable: innerWritable } = new TransformStream();
+    const lineWriter = innerWritable.getWriter();
+
+    worker.onmessage = ({ data: msg }) => {
+        if (msg.channel === 'audio') {
+            audioCallback?.(msg.left, msg.right);
+        } else if (msg.line) {
+            lineWriter.write(msg.line).catch(() => {});
+        }
+    };
+
+    const writable = new WritableStream({
+        write(line) { worker.postMessage({ channel: 'input', line }); }
+    });
+
+    return {
+        readable, writable,
+        name: 'runtime (local)', isLocal: true,
+        onAudio(cb) { audioCallback = cb; }
+    };
 }
 
-class WebSocketMaster {
-    constructor(ws, name) {
-        this._ws = ws;
-        this._name = name;
+function createWebSocketPort(ws, name) {
+    const { readable, writable: innerWritable } = new TransformStream();
+    const lineWriter = innerWritable.getWriter();
+
+    ws.onmessage = ({ data }) => lineWriter.write(data.trim()).catch(() => {});
+    ws.onclose   = ()        => lineWriter.close().catch(() => {});
+
+    const writable = new WritableStream({
+        write(line) { if (ws.readyState === WebSocket.OPEN) ws.send(line); }
+    });
+
+    return { readable, writable, name };
+}
+
+// ─── MAÎTRE ──────────────────────────────────────────────────────────────────
+// Transport agnostique — même classe pour Worker, WebSocket, ou futur WebSerial
+
+class SerialMaster {
+    constructor(port) {
+        this._port   = port;
+        this._writer = port.writable.getWriter();
         this._callbacks = [];
-        ws.onmessage = (e) => { for (const cb of this._callbacks) cb(e.data); };
-        ws.onclose = () => console.warn(`[WebSocketMaster] ${name} déconnecté`);
+        this.isLocal = port.isLocal || false;
+
+        if (port.onAudio) port.onAudio((l, r) => this._audioCallback?.(l, r));
+        this._pump(port.readable);
     }
-    send(line) { if (this._ws.readyState === WebSocket.OPEN) this._ws.send(line); }
+
+    async _pump(readable) {
+        const reader = readable.getReader();
+        try {
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                for (const cb of this._callbacks) cb(value);
+            }
+        } catch (e) { console.warn('[SerialMaster]', e); }
+        finally { reader.releaseLock(); }
+    }
+
+    send(line)    { this._writer.write(line).catch(() => {}); }
     onMessage(cb) { this._callbacks.push(cb); }
-    get name() { return this._name; }
+    onAudio(cb)   { this._audioCallback = cb; }
+    get name()    { return this._port.name; }
 }
 
 // Tente une connexion WebSocket, attend le handshake @master:name=...
-// Retourne un WebSocketMaster ou null au bout de 1,5 s
-async function tryWebSocketMaster(url) {
+// Retourne un SerialMaster ou null au bout de 1,5 s
+async function trySerialMaster(url) {
     return new Promise((resolve) => {
         let ws, timer;
         const done = (result) => { clearTimeout(timer); resolve(result); };
@@ -51,7 +96,7 @@ async function tryWebSocketMaster(url) {
             const line = e.data.trim();
             if (line.startsWith('@master:')) {
                 const name = new URLSearchParams(line.slice(8)).get('name') || url;
-                done(new WebSocketMaster(ws, name));
+                done(new SerialMaster(createWebSocketPort(ws, name)));
             }
         };
         ws.onerror = () => done(null);
@@ -65,17 +110,16 @@ const WS_CANDIDATES = [
 ];
 
 async function discoverMasters() {
-    const results = await Promise.all(WS_CANDIDATES.map(tryWebSocketMaster));
-    const masters = results.filter(Boolean);
-    masters.push(new WorkerMaster());
-    return masters;
+    const results = await Promise.all(WS_CANDIDATES.map(trySerialMaster));
+    const remote = results.filter(Boolean);
+    // Worker local créé uniquement en l'absence de maître distant
+    if (remote.length === 0) remote.push(new SerialMaster(createWorkerPort()));
+    return remote;
 }
 
-// Sélection : auto si 0 ou 1 maître WS trouvé, overlay sinon
+// Sélection : auto si 1 maître, overlay si plusieurs
 function selectMaster(masters) {
-    const real = masters.filter(m => m instanceof WebSocketMaster);
-    if (real.length === 0) return Promise.resolve(masters.find(m => m instanceof WorkerMaster));
-    if (real.length === 1) return Promise.resolve(real[0]);
+    if (masters.length <= 1) return Promise.resolve(masters[0]);
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:9999;';
@@ -308,7 +352,14 @@ function unlockAudio(master) {
 
 // ── Logs ──────────────────────────────────────────────────────────────────────
 
-function logToTerminal(msg) { termEl.textContent += '\n' + msg; termEl.scrollTop = termEl.scrollHeight; }
+const MAX_LOG_LINES = 200;
+const _logLines = [];
+function logToTerminal(msg) {
+    _logLines.push(msg);
+    if (_logLines.length > MAX_LOG_LINES) _logLines.splice(0, _logLines.length - MAX_LOG_LINES);
+    termEl.textContent = _logLines.join('\n');
+    termEl.scrollTop = termEl.scrollHeight;
+}
 
 const chkInput = document.getElementById('chkInput');
 const chkDriver = document.getElementById('chkDriver');
@@ -333,8 +384,7 @@ function logHardwareTraffic(from, to, line, cat) {
 function updateMasterStatus(master) {
     const el = document.getElementById('connectorStatus');
     if (!el) return;
-    const isWorker = master instanceof WorkerMaster;
-    el.innerHTML = isWorker
+    el.innerHTML = master.isLocal
         ? '<span style="color:#9d4edd">⚙ ÉMULATION LOCALE</span>'
         : `<span style="color:#00ff44">🔌 ${master.name}</span>`;
 }
@@ -381,13 +431,9 @@ function handleStatusLine(line) {
 // ── Connexion au maître ───────────────────────────────────────────────────────
 
 function connectMaster(master, display) {
-    master.onMessage((msg) => {
-        if (msg && typeof msg === 'object' && msg.channel === 'audio') {
-            feedAudioRingBuffer(msg.left, msg.right);
-            return;
-        }
-        const line = typeof msg === 'string' ? msg : null;
-        if (!line) return;
+    master.onAudio((left, right) => feedAudioRingBuffer(left, right));
+    master.onMessage((line) => {
+        if (typeof line !== 'string') return;
         if (line.startsWith('!display:')) {
             display.parseCommand(line);
             logHardwareTraffic('MASTER', 'DISPLAY', line, 'DISPLAY');
@@ -520,6 +566,9 @@ async function bootstrap() {
 
     const display = new GottliebDisplayEmulator('vfdCanvas');
     connectMaster(master, display);
+
+    // Annonce les 3 connecteurs au maître distant
+    if (!master.isLocal) master.send('@connect:input=1&display=1&driver=1');
 
     const audioUnlock = () => unlockAudio(master);
     document.body.addEventListener('click',      audioUnlock, { passive: true });

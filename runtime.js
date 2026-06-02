@@ -258,81 +258,172 @@ if (isNode) {
     module.exports = { createEmulator };
 
     if (require.main === module) {
-        const fs   = require('node:fs');
-        const path = require('node:path');
+        (async function main() {
+            const fs     = require('node:fs');
+            const path   = require('node:path');
+            const { spawn } = require('node:child_process');
 
-        const options = {};
-        for (const arg of process.argv.slice(2)) {
-            if (arg.startsWith('--rom='))        options.rom      = arg.split('=')[1];
-            else if (arg.startsWith('--custom-rom=')) options.customRom = arg.split('=')[1];
-            else if (arg.startsWith('--audio-out=')) options.audioOut  = arg.split('=')[1];
-        }
+            const HELP = `
+PinMAME Node Runtime
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Usage: node runtime.js [options]
 
-        let customRomBytes = null, customRomName = options.rom || 'bonebstr';
+ROM
+  --rom=<name>           Nom de la ROM intégrée    (défaut: bonebstr)
+  --custom-rom=<path>    Chemin vers un fichier .zip
 
-        if (options.customRom) {
-            const romPath = path.resolve(process.cwd(), options.customRom);
-            if (!fs.existsSync(romPath)) { console.error(`ROM introuvable : ${romPath}`); process.exit(1); }
-            customRomBytes = new Uint8Array(fs.readFileSync(romPath)).buffer;
-            customRomName  = path.basename(romPath);
-        }
+Réseau
+  --port=<n>             Port WebSocket             (défaut: 8765)
 
-        const audioOutputStream = options.audioOut
-            ? fs.createWriteStream(path.resolve(process.cwd(), options.audioOut))
-            : null;
-        let speaker = null;
-        try {
-            const Speaker = require('speaker');
-            speaker = new Speaker({ channels: 2, bitDepth: 16, sampleRate: 44100, signed: true });
-            console.log('🔊 Speaker détecté.');
-        } catch {
-            if (options.audioOut) console.log(`📝 Audio → ${options.audioOut}`);
-            else console.log('⚠️ Pas de module speaker.');
-        }
+Audio (détection automatique dans l'ordre : speaker → play → ffplay → aplay)
+  --speaker              Forcer le module npm speaker (erreur si absent)
+  --no-speaker           Désactiver toute sortie audio
+  --audio-out=<file>     Écrire le PCM 16-bit LE stéréo dans un fichier
 
-        function floatTo16BitPCM(left, right) {
-            const buf = Buffer.alloc(left.length * 4);
-            for (let i = 0; i < left.length; i++) {
-                buf.writeInt16LE(Math.round(Math.max(-1, Math.min(1, left[i]))  * 0x7fff), i * 4);
-                buf.writeInt16LE(Math.round(Math.max(-1, Math.min(1, right[i])) * 0x7fff), i * 4 + 2);
+Logs
+  --verbose, -v          Afficher les événements de l'émulateur
+  --help,    -h          Afficher cette aide
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+
+            const options = {};
+            for (const arg of process.argv.slice(2)) {
+                if      (arg === '--help'    || arg === '-h') { process.stdout.write(HELP); process.exit(0); }
+                else if (arg === '--verbose' || arg === '-v') options.verbose   = true;
+                else if (arg === '--speaker')                  options.speaker   = true;
+                else if (arg === '--no-speaker')               options.noSpeaker = true;
+                else if (arg.startsWith('--rom='))             options.rom       = arg.split('=')[1];
+                else if (arg.startsWith('--custom-rom='))      options.customRom = arg.split('=')[1];
+                else if (arg.startsWith('--port='))            options.port      = arg.split('=')[1];
+                else if (arg.startsWith('--audio-out='))       options.audioOut  = arg.split('=')[1];
             }
-            return buf;
-        }
 
-        const emulator = createEmulator();
-        const wsClients = new Set();
+            const log  = (...a) => { if (options.verbose) console.log(...a); };
+            const info = (...a) => console.log(...a);
 
-        // Serveur WebSocket — accessible via ws://localhost:PORT
-        const wsPort = parseInt(options.wsPort) || 8765;
-        try {
-            const { WebSocketServer } = require('ws');
-            const wss = new WebSocketServer({ port: wsPort });
-            console.log(`🌐 WebSocket : ws://localhost:${wsPort}`);
-            wss.on('connection', (ws) => {
-                wsClients.add(ws);
-                ws.send(`@master:name=runtime-node&version=1`);
-                ws.on('message', (data) => emulator.handleLine(data.toString().trim()));
-                ws.on('close', () => wsClients.delete(ws));
-                ws.on('error', () => wsClients.delete(ws));
-            });
-        } catch {
-            console.log('⚠️ Module ws absent — installez-le : npm install ws');
-        }
+            // ── ROM ──────────────────────────────────────────────────────────
+            let customRomBytes = null, customRomName = options.rom || 'bonebstr';
+            if (options.customRom) {
+                const romPath = path.resolve(process.cwd(), options.customRom);
+                if (!fs.existsSync(romPath)) { console.error(`ROM introuvable : ${romPath}`); process.exit(1); }
+                customRomBytes = new Uint8Array(fs.readFileSync(romPath)).buffer;
+                customRomName  = path.basename(romPath);
+            }
 
-        globalThis.onEmulatorMessage = function({ channel, line, left, right }) {
-            if (channel === 'audio') {
-                const pcm = floatTo16BitPCM(left, right);
-                if (speaker) speaker.write(pcm);
-                if (audioOutputStream) audioOutputStream.write(pcm);
-            } else if (line) {
-                if (channel === 'status') console.log(line);
-                // Diffuse toutes les lignes aux clients WebSocket connectés
-                for (const ws of wsClients) {
-                    if (ws.readyState === 1) ws.send(line);
+            // ── AUDIO ─────────────────────────────────────────────────────────
+            function floatTo16BitPCM(left, right) {
+                const buf = Buffer.alloc(left.length * 4);
+                for (let i = 0; i < left.length; i++) {
+                    buf.writeInt16LE(Math.round(Math.max(-1, Math.min(1, left[i]))  * 0x7fff), i * 4);
+                    buf.writeInt16LE(Math.round(Math.max(-1, Math.min(1, right[i])) * 0x7fff), i * 4 + 2);
                 }
+                return buf;
             }
-        };
 
-        emulator.sendMessage('INIT_ENGINE', { customRomBytes, customRomName });
+            // Tente de spawner un process audio ; retourne { write } ou null
+            function trySpawnSink(cmd, args) {
+                return new Promise(resolve => {
+                    let proc, alive = true;
+                    try { proc = spawn(cmd, args, { stdio: ['pipe', 'ignore', 'ignore'] }); }
+                    catch { return resolve(null); }
+                    proc.on('error', () => { alive = false; resolve(null); });
+                    setTimeout(() => resolve(alive ? { write: buf => { try { proc.stdin.write(buf); } catch {} } } : null), 80);
+                });
+            }
+
+            let audioSink = null, audioLabel = 'désactivé  →  npm install speaker';
+
+            if (options.audioOut) {
+                const stream = fs.createWriteStream(path.resolve(process.cwd(), options.audioOut));
+                audioSink  = { write: buf => stream.write(buf) };
+                audioLabel = `fichier → ${options.audioOut}`;
+            } else if (!options.noSpeaker) {
+                // 1. Module npm speaker
+                try {
+                    const Speaker = require('speaker');
+                    const spk = new Speaker({ channels: 2, bitDepth: 16, sampleRate: 44100, signed: true });
+                    audioSink  = { write: buf => spk.write(buf) };
+                    audioLabel = 'speaker (npm)';
+                } catch {}
+
+                // 2. Fallbacks système
+                if (!audioSink && process.platform === 'darwin') {
+                    // SoX play (homebrew: brew install sox)
+                    audioSink = await trySpawnSink('play', ['-r','44100','-b','16','-c','2','-e','signed-integer','-t','raw','-']);
+                    if (audioSink) audioLabel = 'play (SoX)';
+                }
+                if (!audioSink && process.platform === 'darwin') {
+                    // ffplay (homebrew: brew install ffmpeg)
+                    audioSink = await trySpawnSink('ffplay', ['-f','s16le','-ar','44100','-ac','2','-nodisp','-loglevel','quiet','-i','pipe:0']);
+                    if (audioSink) audioLabel = 'ffplay';
+                }
+                if (!audioSink && process.platform === 'linux') {
+                    // aplay — ALSA intégré sur la plupart des Linux/Pi
+                    audioSink = await trySpawnSink('aplay', ['-f','S16_LE','-r','44100','-c','2']);
+                    if (audioSink) audioLabel = 'aplay (ALSA)';
+                }
+
+                if (!audioSink && options.speaker) {
+                    console.error('⚠️  Aucune sortie audio trouvée — npm install speaker'); process.exit(1);
+                }
+            } else {
+                audioLabel = 'désactivé';
+            }
+
+            const wsPort = parseInt(options.port) || 8765;
+
+            info('PinMAME Node Runtime');
+            info(`  ROM      : ${customRomName}${customRomBytes ? ' (custom)' : ''}`);
+            info(`  WS port  : ${wsPort}`);
+            info(`  Audio    : ${audioLabel}`);
+            info(`  Verbosité: ${options.verbose ? 'activée' : 'désactivée  (--verbose pour les événements)'}`);
+
+            const emulator  = createEmulator();
+            const wsClients = new Set();
+
+            try {
+                const { WebSocketServer } = require('ws');
+                const wss = new WebSocketServer({ port: wsPort });
+                info(`  WebSocket: ws://localhost:${wsPort}`);
+                wss.on('connection', (ws) => {
+                    wsClients.add(ws);
+                    ws.connectors = [];
+                    ws.send(`@master:name=runtime-node&version=1`);
+                    ws.on('message', (data) => {
+                        const line = data.toString().trim();
+                        if (line.startsWith('@connect:')) {
+                            const p = new URLSearchParams(line.slice(9));
+                            if (p.get('input')   === '1') { ws.connectors.push('INPUT');   info('  [INPUT]   connecté'); }
+                            if (p.get('display') === '1') { ws.connectors.push('DISPLAY'); info('  [DISPLAY] connecté'); }
+                            if (p.get('driver')  === '1') { ws.connectors.push('DRIVER');  info('  [DRIVER]  connecté'); }
+                            return;
+                        }
+                        emulator.handleLine(line);
+                    });
+                    const disconnect = () => {
+                        if (!wsClients.has(ws)) return;
+                        wsClients.delete(ws);
+                        for (const c of ws.connectors) info(`  [${c.padEnd(7)}] déconnecté`);
+                    };
+                    ws.on('close', disconnect);
+                    ws.on('error', disconnect);
+                });
+            } catch {
+                console.error('⚠️  Module ws absent — npm install ws');
+            }
+
+            globalThis.onEmulatorMessage = function({ channel, line, left, right }) {
+                if (channel === 'audio') {
+                    if (audioSink) audioSink.write(floatTo16BitPCM(left, right));
+                } else if (line) {
+                    log(line);
+                    for (const ws of wsClients) {
+                        if (ws.readyState === 1) ws.send(line);
+                    }
+                }
+            };
+
+            emulator.sendMessage('INIT_ENGINE', { customRomBytes, customRomName });
+        })().catch(e => { console.error(e); process.exit(1); });
     }
 }

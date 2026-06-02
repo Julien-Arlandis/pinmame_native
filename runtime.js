@@ -177,14 +177,14 @@ function createEmulator() {
                     }
                 }
 
-                // Lamps: emit one line per column when changed
+                // Lamps: un seul message avec les 12 colonnes packées en hex
                 const lampCounter = readU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1084);
                 if (lampCounter !== lastLampCounter) {
                     lastLampCounter = lampCounter;
-                    for (let col = 0; col < 12; col++) {
-                        const mask = pinmameInstance.HEAPU8[vfdMemoryPointer + 300 + col];
-                        postToChannel('driver', `!lamp:col=${col}&mask=${mask}`);
-                    }
+                    let lampHex = '';
+                    for (let col = 0; col < 12; col++)
+                        lampHex += pinmameInstance.HEAPU8[vfdMemoryPointer + 300 + col].toString(16).padStart(2, '0');
+                    postToChannel('driver', `!lamp:${lampHex}`);
                 }
 
                 // Solenoids: emit one line per changed bit

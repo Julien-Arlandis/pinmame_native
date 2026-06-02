@@ -422,20 +422,25 @@ function _flushDriver() {
 
 function handleDriverLine(line) {
     if (line.startsWith('!lamp:')) {
-        const p = new URLSearchParams(line.slice(6));
-        const col = parseInt(p.get('col')), mask = parseInt(p.get('mask'));
-        for (let row = 0; row < 8; row++) {
-            const lampId = col * 8 + row, state = (mask >> row) & 1;
-            if (state !== ancienEtatLampesIndividuelles[lampId]) {
-                logHardwareTraffic('MASTER', 'DRIVER', `!lamp:id=${lampId+1}&state=${state}`, 'DRIVER');
-                ancienEtatLampesIndividuelles[lampId] = state;
-                _pendingLamp[lampId] = state;
-                _dirtyLamp[lampId]   = 1;
+        // format: !lamp:<24 hex chars> — 12 colonnes × 1 octet
+        const hex = line.slice(6);
+        for (let col = 0; col < 12; col++) {
+            const mask = parseInt(hex.slice(col * 2, col * 2 + 2), 16);
+            for (let row = 0; row < 8; row++) {
+                const lampId = col * 8 + row, state = (mask >> row) & 1;
+                if (state !== ancienEtatLampesIndividuelles[lampId]) {
+                    logHardwareTraffic('MASTER', 'DRIVER', `!lamp:id=${lampId+1}&state=${state}`, 'DRIVER');
+                    ancienEtatLampesIndividuelles[lampId] = state;
+                    _pendingLamp[lampId] = state;
+                    _dirtyLamp[lampId]   = 1;
+                }
             }
         }
     } else if (line.startsWith('!set:')) {
-        const p = new URLSearchParams(line.slice(5));
-        const id = parseInt(p.get('id')), state = parseInt(p.get('state'));
+        // format: !set:id=X&state=Y — parse manuel sans URLSearchParams
+        const amp = line.indexOf('&', 5);
+        const id    = parseInt(line.slice(8, amp));
+        const state = parseInt(line.slice(amp + 7));
         _pendingSol[id] = state;
         logHardwareTraffic('MASTER', 'DRIVER', line, 'DRIVER');
     }
@@ -447,7 +452,7 @@ function handleStatusLine(line) {
     const p = new URLSearchParams(line.slice(8)), state = p.get('state');
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
-        statusEl.textContent = `🟢 PinMAME Workbench v1.3 — ${rom}`;
+        statusEl.textContent = `🟢 PinMAME Workbench v1.4 — ${rom}`;
         statusEl.style.color = '#00ffcc';
         romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename') || `${rom} (Interne)`;
         if (sessionStorage.getItem('custom_rom_bytes')) {

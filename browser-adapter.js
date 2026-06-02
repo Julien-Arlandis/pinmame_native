@@ -226,7 +226,7 @@ flipperWorker.onmessage = function(event) {
                 romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename');
                 romNameDisplay.style.color = "var(--neon-green)"; clearRomBtn.style.display = "inline-block";
             }
-            statusEl.textContent = "🟢 PinMAME Workbench V200.26 - AUDIO RUNNING";
+            statusEl.textContent = "🟢 PinMAME Workbench V200.27 - AUDIO RUNNING";
             statusEl.style.color = "#00ffcc";
             setupButtons(); setupSystemHandlers();
             

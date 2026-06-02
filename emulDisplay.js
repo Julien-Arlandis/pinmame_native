@@ -1,7 +1,7 @@
 /**
  * =========================================================================
  * 📺 GOTTLEB SYSTEM 80B - VIRTUAL ALPHA-NUMERIC VFD DISPLAY EMULATOR
- * 🏷️ VERSION : DISPLAY-RENDER-CORE-V200.26 (SEMANTIC ASCII PARSER)
+ * 🏷️ VERSION : DISPLAY-RENDER-CORE-V200.27 (SEMANTIC ASCII PARSER)
  * =========================================================================
  * * Ce module est l'unique responsable de la conversion sémantique et du rendu.
  * index.html lui envoie des trames ASCII pures, et ce script calcule les masques

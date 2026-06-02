@@ -1,6 +1,6 @@
 // Node.js adapter logic for the shared emulator core.
 
-const { createEmulator } = require('./app.js');
+const { createEmulator } = require('./runtime.js');
 const fs = require('node:fs');
 const path = require('node:path');
 

@@ -1,7 +1,5 @@
-// app.js
-// Core emulator logic (shared). Replaces emulator-core.js
-
-// Shared emulator logic for browser workers and Node.js.
+// runtime.js
+// Shared emulator core used by both browser workers and Node.js
 
 const isWorker = typeof importScripts === 'function' && typeof self !== 'undefined' && typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope;
 const isNode = typeof process !== 'undefined' && process.versions?.node && !(typeof window !== 'undefined');
@@ -16,7 +14,7 @@ if (isWorker) {
     globalThis.window = globalThis;
     createPinMAMEFactory = require('./pinmame_web.js');
 } else {
-    throw new Error('Unsupported environment for app.js');
+    throw new Error('Unsupported environment for runtime.js');
 }
 
 function makeMessage(type, payload = {}) {
@@ -176,68 +174,4 @@ function createEmulator() {
                     postMessageFromCore(makeMessage('LAMPS_UPDATE', { bytes: lampesActuelles }));
                 }
 
-                const solCounter = readU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1088);
-                if (solCounter !== lastSolCounter) {
-                    lastSolCounter = solCounter;
-                    const solActuels = (pinmameInstance.HEAPU8[vfdMemoryPointer + 320] |
-                                         (pinmameInstance.HEAPU8[vfdMemoryPointer + 321] << 8) |
-                                         (pinmameInstance.HEAPU8[vfdMemoryPointer + 322] << 16) |
-                                         (pinmameInstance.HEAPU8[vfdMemoryPointer + 323] << 24)) >>> 0;
-                    for (let s = 0; s < 32; s++) {
-                        const ancienEtat = (lastSolState >> s) & 1;
-                        const nouvelEtat = (solActuels >> s) & 1;
-                        if (nouvelEtat !== ancienEtat) {
-                            postMessageFromCore(makeMessage('DRIVER_ORDER', { id: s, state: nouvelEtat }));
-                        }
-                    }
-                    lastSolState = solActuels;
-                }
-            }
-            setTimeout(loop, 16);
-        }
-        loop();
-    }
-
-    function handleMessage(type, payload) {
-        switch (type) {
-            case 'INIT_ENGINE':
-                return initialiserMoteur(payload.customRomBytes, payload.customRomName);
-            case 'INJECT_INPUT':
-                if (pinmameInstance && vfdMemoryPointer) {
-                    pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + payload.id] = payload.state;
-                }
-                break;
-            case 'UPDATE_DIPS':
-                if (pinmameInstance && vfdMemoryPointer) {
-                    for (let i = 0; i < 32; i++) {
-                        pinmameInstance.HEAPU8[vfdMemoryPointer + 400 + i] = payload.dips[i] ? 1 : 0;
-                    }
-                }
-                break;
-            case 'TRIGGER_SOUND_CMD':
-                if (pinmameInstance && vfdMemoryPointer) {
-                    pinmameInstance.HEAPU8[vfdMemoryPointer + 1060] = payload.cmdId;
-                }
-                break;
-            case 'UPDATE_AUDIO_DISTANCE':
-                if (pinmameInstance && vfdMemoryPointer) {
-                    writeU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1070, payload.distance);
-                }
-                break;
-        }
-    }
-
-    return { sendMessage: handleMessage };
-}
-
-if (isWorker) {
-    const emulator = createEmulator();
-    self.onmessage = function(event) {
-        const { type, payload } = event.data;
-        emulator.sendMessage(type, payload);
-    };
-}
-
-if (isNode) {
-    module.exports = { createEmulator };
-}
+        

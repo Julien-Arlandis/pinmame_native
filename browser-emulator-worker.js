@@ -3,7 +3,7 @@
 
 
 self.window = self;
-importScripts('app.js');
+importScripts('runtime.js');
 
 const emulator = createEmulator();
 

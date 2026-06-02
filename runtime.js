@@ -247,9 +247,7 @@ if (isWorker) {
             emulator.sendMessage(msg.type, msg.payload);
         }
     };
-    const customRomB64  = (typeof sessionStorage !== 'undefined') ? sessionStorage.getItem('custom_rom_bytes')    : null;
-    const customRomName = (typeof sessionStorage !== 'undefined') ? sessionStorage.getItem('custom_rom_filename') : null;
-    emulator.sendMessage('INIT_ENGINE', { customRomBytes: customRomB64, customRomName });
+    // INIT_ENGINE est envoyé par le thread principal (seul lui a accès à sessionStorage)
 }
 
 // ── Node.js ─────────────────────────────────────────────────────────────────

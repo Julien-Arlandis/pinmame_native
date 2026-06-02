@@ -31,6 +31,11 @@ function createWorkerPort() {
         write(line) { worker.postMessage({ channel: 'input', line }); }
     });
 
+    // sessionStorage n'est pas accessible depuis un Worker — on lit ici et on envoie
+    const customRomBytes = sessionStorage.getItem('custom_rom_bytes') || null;
+    const customRomName  = sessionStorage.getItem('custom_rom_filename') || null;
+    worker.postMessage({ type: 'INIT_ENGINE', payload: { customRomBytes, customRomName } });
+
     return {
         readable, writable,
         name: 'runtime (local)', isLocal: true,

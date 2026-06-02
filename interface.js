@@ -15,7 +15,7 @@ class WorkerMaster {
         this._worker.onmessage = (e) => {
             const msg = e.data;
             if (msg.channel === 'audio') {
-                for (const cb of this._callbacks) cb(msg); // { channel:'audio', left, right }
+                for (const cb of this._callbacks) cb(msg);
             } else if (msg.line) {
                 for (const cb of this._callbacks) cb(msg.line);
             }
@@ -26,98 +26,56 @@ class WorkerMaster {
     get name() { return 'runtime (local)'; }
 }
 
-async function* readSerialLines(port) {
-    const decoder = new TextDecoder();
-    let buffer = '';
-    const reader = port.readable.getReader();
-    try {
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buffer += decoder.decode(value, { stream: true });
-            let nl;
-            while ((nl = buffer.indexOf('\n')) !== -1) {
-                const line = buffer.slice(0, nl).trim();
-                buffer = buffer.slice(nl + 1);
-                if (line) yield line;
-            }
-        }
-    } finally { reader.releaseLock(); }
-}
-
-class SerialMaster {
-    constructor(port, name) {
-        this._port = port;
+class WebSocketMaster {
+    constructor(ws, name) {
+        this._ws = ws;
         this._name = name;
-        this._writer = null;
         this._callbacks = [];
+        ws.onmessage = (e) => { for (const cb of this._callbacks) cb(e.data); };
+        ws.onclose = () => console.warn(`[WebSocketMaster] ${name} déconnecté`);
     }
-    async start() {
-        this._writer = this._port.writable.getWriter();
-        (async () => {
-            try {
-                for await (const line of readSerialLines(this._port)) {
-                    for (const cb of this._callbacks) cb(line);
-                }
-            } catch { console.warn(`[SerialMaster] ${this._name} déconnecté`); }
-        })();
-    }
-    send(line) {
-        if (this._writer) this._writer.write(new TextEncoder().encode(line + '\n')).catch(() => {});
-    }
+    send(line) { if (this._ws.readyState === WebSocket.OPEN) this._ws.send(line); }
     onMessage(cb) { this._callbacks.push(cb); }
     get name() { return this._name; }
 }
 
-// Lit la 1re ligne d'un port pour identifier le maître : @master:name=xxx&version=1
-async function readMasterHandshake(port) {
-    try { await port.open({ baudRate: 115200 }); } catch { if (!port.readable) return null; }
-    const decoder = new TextDecoder();
-    let buf = '';
-    const reader = port.readable.getReader();
-    const deadline = Date.now() + 2000;
-    try {
-        while (Date.now() < deadline) {
-            const timeout = new Promise(r => setTimeout(() => r({ value: null, done: true }), 300));
-            const { value, done } = await Promise.race([reader.read(), timeout]);
-            if (done || !value) break;
-            buf += decoder.decode(value, { stream: true });
-            const nl = buf.indexOf('\n');
-            if (nl !== -1) {
-                const line = buf.slice(0, nl).trim();
-                if (line.startsWith('@master:')) {
-                    return new URLSearchParams(line.slice(8)).get('name') || 'maître série';
-                }
-                break;
+// Tente une connexion WebSocket, attend le handshake @master:name=...
+// Retourne un WebSocketMaster ou null au bout de 1,5 s
+async function tryWebSocketMaster(url) {
+    return new Promise((resolve) => {
+        let ws, timer;
+        const done = (result) => { clearTimeout(timer); resolve(result); };
+        timer = setTimeout(() => { try { ws?.close(); } catch (_) {} done(null); }, 1500);
+        try { ws = new WebSocket(url); } catch { done(null); return; }
+        ws.onmessage = (e) => {
+            const line = e.data.trim();
+            if (line.startsWith('@master:')) {
+                const name = new URLSearchParams(line.slice(8)).get('name') || url;
+                done(new WebSocketMaster(ws, name));
             }
-        }
-    } finally { reader.releaseLock(); }
-    return null;
+        };
+        ws.onerror = () => done(null);
+    });
 }
 
+// URLs candidates : localhost (ADB reverse / même machine) + Pi Zero gadget ethernet
+const WS_CANDIDATES = [
+    'ws://localhost:8765',
+    'ws://192.168.7.2:8765',
+];
+
 async function discoverMasters() {
-    const masters = [];
-    if (typeof navigator !== 'undefined' && navigator.serial) {
-        for (const port of await navigator.serial.getPorts()) {
-            const name = await readMasterHandshake(port);
-            if (name) masters.push(new SerialMaster(port, name));
-        }
-    }
-    masters.push(new WorkerMaster()); // toujours disponible en dernier recours
+    const results = await Promise.all(WS_CANDIDATES.map(tryWebSocketMaster));
+    const masters = results.filter(Boolean);
+    masters.push(new WorkerMaster());
     return masters;
 }
 
-async function requestSerialMaster() {
-    if (!navigator.serial) throw new Error('WebSerial non disponible');
-    const port = await navigator.serial.requestPort();
-    const name = await readMasterHandshake(port);
-    if (!name) throw new Error('Appareil non reconnu comme maître');
-    return new SerialMaster(port, name);
-}
-
-// Sélectionne automatiquement si un seul maître, sinon affiche un sélecteur
+// Sélection : auto si 0 ou 1 maître WS trouvé, overlay sinon
 function selectMaster(masters) {
-    if (masters.length === 1) return Promise.resolve(masters[0]);
+    const real = masters.filter(m => m instanceof WebSocketMaster);
+    if (real.length === 0) return Promise.resolve(masters.find(m => m instanceof WorkerMaster));
+    if (real.length === 1) return Promise.resolve(real[0]);
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:9999;';
@@ -547,17 +505,6 @@ function setupSystemHandlers(master) {
     };
     attachMacro('coinBtn', COIN_ID); attachMacro('startBtn', START_ID); attachMacro('testBtn', TEST_ID);
 
-    // Bouton connexion d'un nouveau maître série
-    const connectBtn = document.getElementById('connectHardwareBtn');
-    if (connectBtn && navigator.serial) {
-        connectBtn.style.display = 'inline-block';
-        connectBtn.onclick = async () => {
-            try {
-                const newMaster = await requestSerialMaster();
-                logToTerminal(`🔌 Nouveau maître : ${newMaster.name}`);
-            } catch (err) { logToTerminal(`❌ ${err.message}`); }
-        };
-    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -568,7 +515,6 @@ async function bootstrap() {
     const masters = await discoverMasters();
     const master  = await selectMaster(masters);
 
-    if (master instanceof SerialMaster) await master.start();
 
     updateMasterStatus(master);
 

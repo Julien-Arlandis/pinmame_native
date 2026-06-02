@@ -300,18 +300,36 @@ if (isNode) {
         }
 
         const emulator = createEmulator();
+        const wsClients = new Set();
+
+        // Serveur WebSocket — accessible via ws://localhost:PORT
+        const wsPort = parseInt(options.wsPort) || 8765;
+        try {
+            const { WebSocketServer } = require('ws');
+            const wss = new WebSocketServer({ port: wsPort });
+            console.log(`🌐 WebSocket : ws://localhost:${wsPort}`);
+            wss.on('connection', (ws) => {
+                wsClients.add(ws);
+                ws.send(`@master:name=runtime-node&version=1`);
+                ws.on('message', (data) => emulator.handleLine(data.toString().trim()));
+                ws.on('close', () => wsClients.delete(ws));
+                ws.on('error', () => wsClients.delete(ws));
+            });
+        } catch {
+            console.log('⚠️ Module ws absent — installez-le : npm install ws');
+        }
 
         globalThis.onEmulatorMessage = function({ channel, line, left, right }) {
             if (channel === 'audio') {
                 const pcm = floatTo16BitPCM(left, right);
                 if (speaker) speaker.write(pcm);
                 if (audioOutputStream) audioOutputStream.write(pcm);
-            } else if (channel === 'status') {
-                console.log(line);
-            } else if (channel === 'driver') {
-                console.log(`[DRIVER]  ${line}`);
-            } else if (channel === 'display') {
-                console.log(`[DISPLAY] ${line}`);
+            } else if (line) {
+                if (channel === 'status') console.log(line);
+                // Diffuse toutes les lignes aux clients WebSocket connectés
+                for (const ws of wsClients) {
+                    if (ws.readyState === 1) ws.send(line);
+                }
             }
         };
 

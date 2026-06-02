@@ -236,8 +236,74 @@ if (isWorker) {
         const { type, payload } = event.data;
         emulator.sendMessage(type, payload);
     };
+    const customRomB64 = (typeof sessionStorage !== 'undefined') ? sessionStorage.getItem('custom_rom_bytes') : null;
+    const customRomName = (typeof sessionStorage !== 'undefined') ? sessionStorage.getItem('custom_rom_filename') : null;
+    emulator.sendMessage('INIT_ENGINE', { customRomBytes: customRomB64, customRomName });
 }
 
 if (isNode) {
     module.exports = { createEmulator };
+
+    if (require.main === module) {
+        const fs = require('node:fs');
+        const path = require('node:path');
+
+        const options = {};
+        for (const arg of process.argv.slice(2)) {
+            if (arg.startsWith('--rom=')) options.rom = arg.split('=')[1];
+            else if (arg.startsWith('--custom-rom=')) options.customRom = arg.split('=')[1];
+            else if (arg.startsWith('--audio-out=')) options.audioOut = arg.split('=')[1];
+        }
+
+        let customRomBytes = null;
+        let customRomName = options.rom || 'bonebstr';
+
+        if (options.customRom) {
+            const romPath = path.resolve(process.cwd(), options.customRom);
+            if (!fs.existsSync(romPath)) { console.error(`ROM introuvable : ${romPath}`); process.exit(1); }
+            customRomBytes = new Uint8Array(fs.readFileSync(romPath)).buffer;
+            customRomName = path.basename(romPath);
+        }
+
+        const audioOutputStream = options.audioOut ? fs.createWriteStream(path.resolve(process.cwd(), options.audioOut)) : null;
+        let speaker = null;
+        try {
+            const Speaker = require('speaker');
+            speaker = new Speaker({ channels: 2, bitDepth: 16, sampleRate: 44100, signed: true });
+            console.log('🔊 Speaker détecté : sortie audio activée.');
+        } catch (err) {
+            if (options.audioOut) console.log(`📝 Audio → ${options.audioOut}`);
+            else console.log('⚠️ Pas de module speaker. Son désactivé.');
+        }
+
+        function floatTo16BitPCM(left, right) {
+            const buf = Buffer.alloc(left.length * 4);
+            for (let i = 0; i < left.length; i++) {
+                buf.writeInt16LE(Math.round(Math.max(-1, Math.min(1, left[i])) * 0x7fff), i * 4);
+                buf.writeInt16LE(Math.round(Math.max(-1, Math.min(1, right[i])) * 0x7fff), i * 4 + 2);
+            }
+            return buf;
+        }
+
+        const emulator = createEmulator();
+
+        globalThis.onEmulatorMessage = function(message) {
+            const { type, payload } = message;
+            switch (type) {
+                case 'STATUS':    console.log((payload && payload.message) ? payload.message : JSON.stringify(payload)); break;
+                case 'ENGINE_READY': console.log(`✅ Engine ready: ${payload.romName}`); break;
+                case 'AUDIO_CMD_LOG': console.log(`[AUDIO CMD] 0x${payload.cmdId.toString(16).toUpperCase()}`); break;
+                case 'AUDIO_DATA': {
+                    const pcm = floatTo16BitPCM(payload.left, payload.right);
+                    if (speaker) speaker.write(pcm);
+                    if (audioOutputStream) audioOutputStream.write(pcm);
+                    break;
+                }
+                case 'DRIVER_ORDER': console.log(`[DRIVER] id=${payload.id} state=${payload.state}`); break;
+            }
+        };
+
+        emulator.sendMessage('INIT_ENGINE', { customRomBytes, customRomName });
+        console.log('🎛️  Démarrage de l\'émulateur Node.js...');
+    }
 }

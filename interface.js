@@ -63,7 +63,7 @@ function logHardwareTraffic(expediteur, destinataire, commande, categorie) {
     logToTerminal(`[${expediteur} ➔ ${destinataire}] ${commande.trim()}`);
 }
 
-const flipperWorker = new Worker('browser-emulator-worker.js');
+const flipperWorker = new Worker('runtime.js');
 
 function unlockAudio() {
     try {
@@ -320,10 +320,3 @@ function drawGottlieb14Segment(ctx, x, y, mask) {
     ctx.restore();
 }
 
-flipperWorker.postMessage({
-    type: 'INIT_ENGINE',
-    payload: {
-        customRomBytes: sessionStorage.getItem('custom_rom_bytes'),
-        customRomName: sessionStorage.getItem('custom_rom_filename')
-    }
-});

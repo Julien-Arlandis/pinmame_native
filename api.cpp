@@ -429,12 +429,14 @@ extern "C" {
     extern struct GameDriver driver_tagteam;
     extern struct GameDriver driver_excalibr;
     extern struct GameDriver driver_diamond;
+    extern struct GameDriver driver_gts80b_generic;
 
     struct GameDriver *drivers[] = {
         &driver_bonebstr, &driver_badgirls, &driver_genesis, &driver_txsector,
         &driver_victory,  &driver_arena,    &driver_raven,    &driver_rock,
         &driver_bighouse, &driver_bountyh,  &driver_tagteam,   &driver_excalibr,
         &driver_diamond,
+        &driver_gts80b_generic,
         nullptr
     };
 
@@ -443,17 +445,24 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     void pinmame_web_boot() {
         const char* rom_name = (const char*)&g_shared_corridor[1000];
-        int i = 0; bool found = false;
+        int i = 0;
+        int generic_index = -1;
+        g_selected_game_index = 0;
+
         while (drivers[i] != nullptr) {
+            if (strcmp(drivers[i]->name, "gts80b_generic") == 0)
+                generic_index = i;
             if (strcmp(drivers[i]->name, rom_name) == 0) {
-                g_selected_game_index = i; found = true; break;
+                g_selected_game_index = i; break;
             }
             i++;
         }
-        if (!found) g_selected_game_index = 0;
-        
+        // Aucun driver nommé trouvé : utilise le driver générique System 80B
+        if (drivers[i] == nullptr && generic_index >= 0)
+            g_selected_game_index = generic_index;
+
         options.samplerate = 44100;
         bailing = 0;
-        run_game(g_selected_game_index); 
+        run_game(g_selected_game_index);
     }
 }

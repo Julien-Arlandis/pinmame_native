@@ -487,9 +487,12 @@ extern "C" {
     void pinmame_web_boot() {
         const char* rom_name = (const char*)&g_shared_corridor[1000];
         int i = 0;
-        g_selected_game_index = 0; // driver_gts80b_generic est le seul et unique
+        // Le driver générique adopte le nom de la ROM → MAME ouvre le bon ZIP
+        driver_gts80b_generic.name = rom_name;
 
+        g_selected_game_index = 0;
         options.samplerate = 44100;
+        options.gui_host = 1; // supprime "Press any key to continue"
         bailing = 0;
         run_game(g_selected_game_index);
     }

@@ -87,8 +87,12 @@ function unlockAudio() {
                 return;
             }
             
-            audioCtx = new AudioContext(); // 1. Laisse Android choisir sa fréquence (souvent 48000Hz)
-            logToTerminal(`📊 Contexte Audio créé : ${audioCtx.sampleRate}Hz, état: ${audioCtx.state}`);
+            const requestedSampleRate = 44100;
+            audioCtx = new AudioContext({ sampleRate: requestedSampleRate });
+            logToTerminal(`📊 Contexte Audio créé : ${audioCtx.sampleRate}Hz (demandé ${requestedSampleRate}Hz), état: ${audioCtx.state}`);
+            if (audioCtx.sampleRate !== requestedSampleRate) {
+                logToTerminal(`⚠️ La fréquence souhaitée n'a pas pu être appliquée. Résultat : ${audioCtx.sampleRate}Hz`);
+            }
             
             // 🔥 CRITIQUE : Résumer immédiatement le contexte sur mobile
             if (audioCtx.state === 'suspended') {
@@ -121,9 +125,8 @@ function unlockAudio() {
                 const outL = e.outputBuffer.getChannelData(0); const outR = e.outputBuffer.getChannelData(1);
                 let distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
                 flipperWorker.postMessage({ type: 'UPDATE_AUDIO_DISTANCE', payload: { distance: distance } });
-                if (isBufferWarming) {
-                    if (distance >= 8192) isBufferWarming = false;
-                    else { outL.fill(0); outR.fill(0); audioLed.classList.remove('active'); return; }
+                if (isBufferWarming && distance >= 8192) {
+                    isBufferWarming = false;
                 }
                 for (let i = 0; i < outL.length; i++) {
                     if (audioReadPtr !== audioWritePtr) {
@@ -173,7 +176,10 @@ flipperWorker.onmessage = function(event) {
             break;
 
         case 'AUDIO_DATA':
-            if (!audioCtx) return;
+            if (!audioCtx) {
+                unlockAudio();
+                if (!audioCtx) return;
+            }
             const left = payload.left; const right = payload.right;
             for (let i = 0; i < left.length; i++) {
                 ringBufferL[audioWritePtr] = left[i]; ringBufferR[audioWritePtr] = right[i];
@@ -220,7 +226,7 @@ flipperWorker.onmessage = function(event) {
                 romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename');
                 romNameDisplay.style.color = "var(--neon-green)"; clearRomBtn.style.display = "inline-block";
             }
-            statusEl.textContent = "🟢 PinMAME Workbench V200.25 - AUDIO RUNNING";
+            statusEl.textContent = "🟢 PinMAME Workbench V200.26 - AUDIO RUNNING";
             statusEl.style.color = "#00ffcc";
             setupButtons(); setupSystemHandlers();
             

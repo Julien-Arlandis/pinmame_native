@@ -416,25 +416,54 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     void pinmame_web_tick(int cycles) {}
 
-    extern struct GameDriver driver_bonebstr;
-    extern struct GameDriver driver_badgirls;
-    extern struct GameDriver driver_genesis;
-    extern struct GameDriver driver_txsector;
-    extern struct GameDriver driver_victory;
-    extern struct GameDriver driver_arena;
-    extern struct GameDriver driver_raven;
-    extern struct GameDriver driver_rock;
-    extern struct GameDriver driver_bighouse;
-    extern struct GameDriver driver_bountyh;
-    extern struct GameDriver driver_tagteam;
-    extern struct GameDriver driver_excalibr;
-    extern struct GameDriver driver_diamond;
+    // ── Constantes GTS80B sans inclusion de gts80.h (évite le conflit sim.h) ──
+    #define GTS80B_MEMREG_CPU   REGION_CPU1
+    #define GTS80B_MEMREG_SCPU1 REGION_CPU2
+    #define GTS80B_MEMREG_SCPU2 REGION_CPU3
+    #define GTS80B_MEMREG_SCPU3 REGION_CPU4
+    #define GTS80B_DISPALPHA    0x01
+
+    // ── Driver générique System 80B ──────────────────────────────────────────
+    static core_tLCDLayout gts80b_dispAlpha[] = {
+        {0, 0, 0,20,CORE_SEG16}, {2, 0,20,20,CORE_SEG16}, {0}
+    };
+    static core_tGameData gts80b_genericData = {
+        GEN_GTS80B, gts80b_dispAlpha,
+        {FLIP_SWNO(6,16), 0, 0, 0, (20<<8)|0 /*SNDBRD_GTS80B*/, GTS80B_DISPALPHA},
+        NULL, {{0},{0x80}}
+    };
+    static void init_gts80b_generic(void) { core_gameData = &gts80b_genericData; }
+    static const struct InputPortTiny input_ports_gts80b_generic[] = {
+        { 0, 0, IPT_END, 0 }
+    };
+    ROM_START(gts80b_generic)
+      NORMALREGION(0x10000, GTS80B_MEMREG_CPU)
+        ROM_LOAD("prom2.cpu", 0x1000, 0x0800, NO_DUMP)
+          ROM_CONTINUE(0x9000, 0x0800)
+          ROM_RELOAD  (0x5000, 0x0800)
+          ROM_CONTINUE(0xd000, 0x0800)
+        ROM_LOAD("prom1.cpu", 0x2000, 0x2000, NO_DUMP)
+          ROM_RELOAD(0x6000, 0x2000)
+          ROM_RELOAD(0xa000, 0x2000)
+          ROM_RELOAD(0xe000, 0x2000)
+      SOUNDREGION(0x10000, GTS80B_MEMREG_SCPU3)
+        ROM_LOAD("drom2.snd", 0x8000, 0x8000, NO_DUMP)
+      SOUNDREGION(0x10000, GTS80B_MEMREG_SCPU2)
+        ROM_LOAD("drom1.snd", 0x8000, 0x8000, NO_DUMP)
+      SOUNDREGION(0x10000, GTS80B_MEMREG_SCPU1)
+        ROM_LOAD("yrom1.snd", 0x8000, 0x8000, NO_DUMP)
+    GTS80_ROMEND
+    extern void construct_gts80bs3a(struct InternalMachineDriver *machine);
+    struct GameDriver driver_gts80b_generic = {
+        __FILE__, NULL, "gts80b_generic", NULL,
+        "Gottlieb System 80B (generic)", "1988", "Gottlieb",
+        construct_gts80bs3a, input_ports_gts80b_generic,
+        init_gts80b_generic, rom_gts80b_generic, ROT0
+    };
+    // ─────────────────────────────────────────────────────────────────────────
 
     struct GameDriver *drivers[] = {
-        &driver_bonebstr, &driver_badgirls, &driver_genesis, &driver_txsector,
-        &driver_victory,  &driver_arena,    &driver_raven,    &driver_rock,
-        &driver_bighouse, &driver_bountyh,  &driver_tagteam,   &driver_excalibr,
-        &driver_diamond,
+        &driver_gts80b_generic,
         nullptr
     };
 
@@ -443,17 +472,10 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     void pinmame_web_boot() {
         const char* rom_name = (const char*)&g_shared_corridor[1000];
-        int i = 0; bool found = false;
-        while (drivers[i] != nullptr) {
-            if (strcmp(drivers[i]->name, rom_name) == 0) {
-                g_selected_game_index = i; found = true; break;
-            }
-            i++;
-        }
-        if (!found) g_selected_game_index = 0;
-        
+        driver_gts80b_generic.name = rom_name;
         options.samplerate = 44100;
+        options.gui_host = 1;
         bailing = 0;
-        run_game(g_selected_game_index); 
+        run_game(0);
     }
 }

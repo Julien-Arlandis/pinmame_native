@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V195.00 (DEEP MAME PORT INJECTION)
+// 🏷️ VERSION : API-CORE-GATEWAY-V195.06 (FULL KEEPALIVE EXPORTS)
 // =========================================================================
 
 #include <iostream>
@@ -27,7 +27,6 @@ extern "C" {
 #include "usrintrf.h"
 #include "sound/ym2151.h" 
 #include "sound/samples.h" 
-// 🌟 LE SECRET : On importe la structure intime des ports de MAME 🌟
 #include "inptport.h" 
 }
 
@@ -47,6 +46,35 @@ static INT16 g_audio_ring_buffer[C_AUDIO_BUFFER_MAX];
 static int g_audio_write_idx = 0;
 static int g_audio_read_idx = 0; 
 static INT16 g_linear_audio_buffer[C_AUDIO_BUFFER_MAX];
+
+// =========================================================================
+// 🛰️ STRUCTURE ET TAMPON FIFO DU PROTOCOLE ASCII EXTRAIT
+// =========================================================================
+#define DISPLAY_QUEUE_MAX 512
+
+struct DisplayEvent {
+    uint8_t position;   // Adresse de la cellule (0 à 39)
+    uint8_t ascii_char; // Code ASCII (7-bits ou combiné 8-bits ex: 0xB2)
+    uint8_t action;     // 0 = WRITE, 1 = MOVE, 2 = CLEAR
+};
+
+static DisplayEvent g_display_queue[DISPLAY_QUEUE_MAX];
+static int g_display_write_ptr = 0;
+static int g_display_read_ptr = 0;
+static uint8_t g_virtual_cursor = 0; // Registre de suivi de curseur Gottlieb
+
+/**
+ * Pousse un événement ASCII brut intercepté dans la file d'attente WebAssembly
+ */
+static void push_display_event(uint8_t pos, uint8_t ascii, uint8_t action) {
+    int next_write = (g_display_write_ptr + 1) % DISPLAY_QUEUE_MAX;
+    if (next_write == g_display_read_ptr) return; // Sécurité : file saturée, on drop
+    
+    g_display_queue[g_display_write_ptr].position = pos;
+    g_display_queue[g_display_write_ptr].ascii_char = ascii;
+    g_display_queue[g_display_write_ptr].action = action;
+    g_display_write_ptr = next_write;
+}
 
 extern "C" void emscripten_sleep(unsigned int ms);
 extern "C" void sndbrd_0_data_w(int offset, int data);
@@ -108,7 +136,7 @@ extern "C" {
     extern int bailing;
     extern struct osd_bitmap *scrbitmap;
 
-    char build_version[] = "PinMAME-WASM-V195.00";
+    char build_version[] = "PinMAME-WASM-V195.06";
     int alpha_active = 0;
     int spriteram_size = 0;
     int spriteram_2_size = 0;
@@ -256,6 +284,41 @@ extern "C" {
     void* play2sIntf = nullptr;   void* play3sIntf = nullptr;   void* play4sIntf = nullptr;   void* zsuIntf = nullptr;      
     void* playzsIntf = nullptr;   void* tecnoplayIntf = nullptr; void* joctronicIntf = nullptr; void* barniIntf = nullptr;
 
+    // =========================================================================
+    // 🎯 3. LE RÉCEPTACLE DES INTERCEPTIONS ASCII (NATIVE HOOK)
+    // =========================================================================
+    EMSCRIPTEN_KEEPALIVE
+    void api_hook_gottlieb_display_write(uint8_t data) {
+        if (data == 0x01) { 
+            g_virtual_cursor = 0;
+            push_display_event(0, 0, 2); 
+            return;
+        }
+        if (data >= 0x40 && data <= 0x53) { 
+            g_virtual_cursor = data - 0x40;
+            push_display_event(g_virtual_cursor, 0, 1); 
+            return;
+        }
+        if (data >= 0x60 && data <= 0x73) { 
+            g_virtual_cursor = (data - 0x60) + 20;
+            push_display_event(g_virtual_cursor, 0, 1); 
+            return;
+        }
+        if (data >= 0x20) { 
+            push_display_event(g_virtual_cursor, data, 0); 
+            g_virtual_cursor++;
+            if (g_virtual_cursor >= 40) g_virtual_cursor = 0;
+        }
+    }
+
+    EMSCRIPTEN_KEEPALIVE
+    DisplayEvent* api_pop_ascii_event() {
+        if (g_display_read_ptr == g_display_write_ptr) return nullptr;
+        DisplayEvent* ev = &g_display_queue[g_display_read_ptr];
+        g_display_read_ptr = (g_display_read_ptr + 1) % DISPLAY_QUEUE_MAX;
+        return ev;
+    }
+
     void artwork_update_video_and_audio(struct mame_display *display) {
         uint16_t* vfd_export = (uint16_t*)g_shared_corridor;
         for (int i = 0; i < 20; i++) {
@@ -263,20 +326,14 @@ extern "C" {
             vfd_export[20 + i] = coreGlobals.segments[20 + i].w & 0xFFFF;
         }
         
-        // --- BOUCLE DE LECTURE DES CONTACTS DU PLATEAU ---
         for (int sw = 0; sw < 80; sw++) { core_setSw(sw, g_shared_corridor[100 + sw]); }
 
-        // =========================================================================
-        // 🌟 INJECTION DIRECTE DES DIP SWITCHES DANS LES PORTS MAME 🌟
-        // On parcoure le hardware simulé pour forcer les interrupteurs un par un.
-        // =========================================================================
         if (Machine && Machine->input_ports) {
             struct InputPort *port = Machine->input_ports;
             int current_dip_index = 0;
             
             while (port->type != IPT_END && current_dip_index < 32) {
                 if (port->type == IPT_DIPSWITCH_NAME) {
-                    // Si l'interrupteur Web est allumé (1), on force le masque du port
                     if (g_shared_corridor[400 + current_dip_index]) {
                         port->default_value = port->mask; 
                     } else {
@@ -325,11 +382,26 @@ extern "C" {
         artwork_update_video_and_audio(display);
     }
 
+    // =========================================================================
+    // 🎯 4. EXPORTS MAME VERS WEBASSEMBLY (VERROUILLAGE KEEPALIVE COMPLET)
+    // =========================================================================
+    
+    EMSCRIPTEN_KEEPALIVE
     uint8_t* pinmame_get_gprom_ptr() { return g_shared_corridor; }
+    
+    EMSCRIPTEN_KEEPALIVE
     uint8_t* pinmame_get_dsprom_ptr() { return g_shared_corridor; } 
+    
+    EMSCRIPTEN_KEEPALIVE
     const char* pinmame_get_display() { return g_display_text; }
-    const char* pinmame_get_version() { return "PinMAME Pure Native Link V195.00"; }
+    
+    EMSCRIPTEN_KEEPALIVE
+    const char* pinmame_get_version() { return "PinMAME Pure Native Link V195.06"; }
+    
+    EMSCRIPTEN_KEEPALIVE
     void pinmame_web_entry(int gprom_size, int dsprom_size) {}
+    
+    EMSCRIPTEN_KEEPALIVE
     void pinmame_web_tick(int cycles) {}
 
     extern struct GameDriver driver_bonebstr;
@@ -356,6 +428,7 @@ extern "C" {
 
     extern GameOptions options;
 
+    EMSCRIPTEN_KEEPALIVE
     void pinmame_web_boot() {
         const char* rom_name = (const char*)&g_shared_corridor[1000];
         int i = 0; bool found = false;
@@ -367,9 +440,7 @@ extern "C" {
         }
         if (!found) g_selected_game_index = 0;
         
-        // Allumage du moteur sonore natif
         options.samplerate = 44100;
-
         bailing = 0;
         run_game(g_selected_game_index); 
     }

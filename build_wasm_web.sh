@@ -3,11 +3,11 @@ set -e
 
 # =========================================================================
 # 🕸️ INFRASTRUCTURE PINMAME WASM - SCRIPT D'ASSEMBLAGE WEB FINAL
-# 🏷️ VERSION : WEBLINK-V93.0 (ZLIB & 64MB RAM FIX)
+# 🏷️ VERSION : WEBLINK-V93.3 (NO-MAIN LIBRARY EXPORT FIX)
 # =========================================================================
 
 echo "=================================================="
-echo "🕵️ MODE DIAGNOSTIC STRICT : MULTIPLEXEUR MAME V93.0"
+echo "🕵️ MODE DIAGNOSTIC STRICT : MULTIPLEXEUR MAME V93.3"
 echo "=================================================="
 
 # 1. Vérification de l'environnement Emscripten
@@ -20,7 +20,7 @@ elif [ -f "/etc/profile.d/emscripten.sh" ]; then
 fi
 
 if ! command -v emcc &> /dev/null; then
-    echo "❌ [V93.0] ERREUR CRITIQUE : Compilateur 'emcc' introuvable."
+    echo "❌ [V93.3] ERREUR CRITIQUE : Compilateur 'emcc' introuvable."
     exit 1
 fi
 
@@ -30,31 +30,27 @@ WASM_TEMP_OBJ_DIR="$BASE_DIR/pinmame_workspace_wasm_objs"
 
 # Vérification de l'archive statique
 if [ ! -f "libpinmame_wasm.a" ]; then
-    echo "❌ [V93.0] ERREUR : libpinmame_wasm.a est introuvable."
+    echo "❌ [V93.3] ERREUR : libpinmame_wasm.a introuvable. Compile d'abord la lib statique."
     exit 1
 fi
 
-echo "[*] [V93.0] Génération du binaire avec cartographie complète des symboles (-g)..."
+mkdir -p "$WASM_TEMP_OBJ_DIR"
 
-# =========================================================================
-# ⚙️ COMPILATION DU PONT C++ (API.CPP)
-# =========================================================================
 API_FLAGS=(
     "-O0"
     "-g"
-    "-include" "$WASM_TEMP_OBJ_DIR/emscripten_macros.h"
-    "-I$WASM_TEMP_OBJ_DIR/include"
     "-I$NATIVE_WORKSPACE/src"
+    "-I$NATIVE_WORKSPACE/src/wpclib"
     "-I$NATIVE_WORKSPACE/src/wpc"
-    "-I$NATIVE_WORKSPACE/src/unix"
-    "-I$NATIVE_WORKSPACE/src/cores"
-    "-I$NATIVE_WORKSPACE/src/cpu"
     "-I$NATIVE_WORKSPACE/src/sound"
+    "-I$NATIVE_WORKSPACE/src/sdl"
+    "-I$NATIVE_WORKSPACE/src/unix"
+    "-I$NATIVE_WORKSPACE/src/win32"
     "-DINLINE=static inline"
     "-Wno-implicit-function-declaration"
 )
 
-# On compile le pont 
+echo "[*] [V93.3] Compilation du pont API C++..."
 emcc "${API_FLAGS[@]}" -c api.cpp -o "$WASM_TEMP_OBJ_DIR/api.o"
 
 # =========================================================================
@@ -66,30 +62,21 @@ LINK_FLAGS=(
     "-s" "WASM=1"
     "-s" "MODULARIZE=1"
     "-s" "EXPORT_NAME='createPinMAME'"
-    
-    # 🌟 CORRECTION 1 : ON DONNE 64 Mo DE RAM AU DÉMARRAGE 🌟
     "-s" "ALLOW_MEMORY_GROWTH=1"
     "-s" "INITIAL_MEMORY=64MB"
     "-s" "MAXIMUM_MEMORY=2GB"
-    
     "-s" "NO_EXIT_RUNTIME=1"
     "-s" "FORCE_FILESYSTEM=1"
     "-s" "ASYNCIFY"
     "-s" "ASSERTIONS=1"
-    
-    # 🌟 CORRECTION 2 : ON ACTIVE LA LIBRAIRIE ZIP INTERNE D'EMSCRIPTEN 🌟
     "-s" "USE_ZLIB=1"
     
-    "-s" "EXPORTED_RUNTIME_METHODS=['FS', 'HEAP8', 'HEAPU8', 'HEAP16']"
-    "-s" "EXPORTED_FUNCTIONS=['_pinmame_get_version', '_pinmame_get_gprom_ptr', '_pinmame_get_dsprom_ptr', '_pinmame_get_display', '_pinmame_web_entry', '_pinmame_web_boot', '_pinmame_web_tick', '_malloc', '_free']"
+    # 🎯 CORRECTION : On retire '_main' qui n'existe pas dans notre API
+    "-s" "EXPORTED_RUNTIME_METHODS=['FS','HEAP8','HEAPU8','HEAP16','ccall','cwrap']"
+    "-s" "EXPORTED_FUNCTIONS=['_pinmame_get_version','_pinmame_get_gprom_ptr','_pinmame_get_dsprom_ptr','_pinmame_get_display','_pinmame_web_entry','_pinmame_web_boot','_pinmame_web_tick','_api_pop_ascii_event','_api_hook_gottlieb_display_write']"
 )
 
-# Fusion de l'API et du Cœur
-emcc "$WASM_TEMP_OBJ_DIR/api.o" "libpinmame_wasm.a" -o pinmame_web.js "${LINK_FLAGS[@]}"
+echo "[*] [V93.3] Liaison des archives et injection des symboles modulaire..."
+emcc "$WASM_TEMP_OBJ_DIR/api.o" libpinmame_wasm.a "${LINK_FLAGS[@]}" -o pinmame_web.js
 
-# Nettoyage
-rm -f "$WASM_TEMP_OBJ_DIR/api.o"
-
-echo "=================================================="
-echo "🟢 [V93.0] ARCHITECTURE WEB ASSEMBLÉE AVEC SUCCÈS !"
-echo "=================================================="
+echo "✅ [V93.3] Compilation WebAssembly effectuée avec succès : pinmame_web.js / pinmame_web.wasm"

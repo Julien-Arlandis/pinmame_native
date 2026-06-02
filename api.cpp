@@ -473,6 +473,9 @@ extern "C" {
     void pinmame_web_boot() {
         const char* rom_name = (const char*)&g_shared_corridor[1000];
         driver_gts80b_generic.name = rom_name;
+        // core_gameData doit être valide AVANT run_game car du code GTS80
+        // y accède pendant memory_init (avant que driver_init soit appelé)
+        core_gameData = &gts80b_genericData;
         options.samplerate = 44100;
         options.gui_host = 1;
         bailing = 0;

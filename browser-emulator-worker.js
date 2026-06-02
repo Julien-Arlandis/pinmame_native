@@ -1,8 +1,9 @@
 // browser-emulator-worker.js
 // Worker wrapper that delegates emulator logic to emulator-core.js.
 
+
 self.window = self;
-importScripts('emulator-core.js');
+importScripts('app.js');
 
 const emulator = createEmulator();
 

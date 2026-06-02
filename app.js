@@ -1,4 +1,6 @@
-// emulator-core.js
+// app.js
+// Core emulator logic (shared). Replaces emulator-core.js
+
 // Shared emulator logic for browser workers and Node.js.
 
 const isWorker = typeof importScripts === 'function' && typeof self !== 'undefined' && typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope;
@@ -14,7 +16,7 @@ if (isWorker) {
     globalThis.window = globalThis;
     createPinMAMEFactory = require('./pinmame_web.js');
 } else {
-    throw new Error('Unsupported environment for emulator-core');
+    throw new Error('Unsupported environment for app.js');
 }
 
 function makeMessage(type, payload = {}) {

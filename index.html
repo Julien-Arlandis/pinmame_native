@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Dev Workbench V200.23 - Auto Audio Unlock</title>
+    <title>PinMAME WASM - Dev Workbench V200.24 - Mobile Audio Fix</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -743,49 +743,86 @@ const flipperWorker = new Worker('flipper-worker.js');
 
 // 🚀 CENTRALISATION ET CAPTURE DU CONTEXTE AUDIO EN AMONT
 function unlockAudio() {
-    if (!audioCtx) {
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        audioCtx = new AudioContext(); // 1. Laisse Android choisir sa fréquence (souvent 48000Hz)
-        audioNode = audioCtx.createScriptProcessor(4096, 1, 2); // 2. Ajoute 1 canal d'entrée virtuel
-        
-        // 3. HACK ANDROID : On connecte un oscillateur silencieux pour forcer le réveil de la puce
-        const reveilAudio = audioCtx.createOscillator();
-        reveilAudio.connect(audioNode);
-        reveilAudio.start();
-        audioNode.onaudioprocess = function(e) {
-            const outL = e.outputBuffer.getChannelData(0); const outR = e.outputBuffer.getChannelData(1);
-            let distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
-            flipperWorker.postMessage({ type: 'UPDATE_AUDIO_DISTANCE', payload: { distance: distance } });
-            if (isBufferWarming) {
-                if (distance >= 8192) isBufferWarming = false;
-                else { outL.fill(0); outR.fill(0); audioLed.classList.remove('active'); return; }
+    try {
+        if (!audioCtx) {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!AudioContext) {
+                logToTerminal("❌ Web Audio API non disponible sur cet appareil.");
+                return;
             }
-            for (let i = 0; i < outL.length; i++) {
-                if (audioReadPtr !== audioWritePtr) {
-                    lastSampleL = ringBufferL[audioReadPtr]; lastSampleR = ringBufferR[audioReadPtr];
-                    audioReadPtr = (audioReadPtr + 1) % RING_BUFFER_SIZE; outL[i] = lastSampleL; outR[i] = lastSampleR;
-                } else {
-                    lastSampleL *= 0.90; lastSampleR *= 0.90; outL[i] = lastSampleL; outR[i] = lastSampleR;
+            
+            audioCtx = new AudioContext(); // 1. Laisse Android choisir sa fréquence (souvent 48000Hz)
+            logToTerminal(`📊 Contexte Audio créé : ${audioCtx.sampleRate}Hz, état: ${audioCtx.state}`);
+            
+            // 🔥 CRITIQUE : Résumer immédiatement le contexte sur mobile
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume().then(() => {
+                    logToTerminal("✅ Contexte Audio repris (resumed)");
+                }).catch(err => {
+                    logToTerminal(`⚠️ Erreur lors de resume(): ${err.message}`);
+                });
+            }
+            
+            audioNode = audioCtx.createScriptProcessor(4096, 1, 2); // 2. Ajoute 1 canal d'entrée virtuel
+            
+            // 3. HACK ANDROID : On connecte un oscillateur silencieux pour forcer le réveil de la puce
+            const reveilAudio = audioCtx.createOscillator();
+            reveilAudio.frequency.value = 0; // Fréquence 0 = silencieux
+            reveilAudio.connect(audioNode);
+            reveilAudio.start(0);
+            
+            // Arrêter l'oscillateur après 500ms pour éviter une fuite mémoire
+            setTimeout(() => {
+                try {
+                    reveilAudio.stop();
+                    logToTerminal("🛑 Oscillateur d'accès arrêté");
+                } catch (e) {
+                    // L'oscillateur est peut-être déjà arrêté
                 }
-            }
-            if (distance > 24576) audioReadPtr = (audioWritePtr - 4096 + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
-            if (distance > 512) audioLed.classList.add('active'); else audioLed.classList.remove('active');
-        };
-        audioNode.connect(audioCtx.destination);
-        logToTerminal("🔊 Flux audio stéréo débloqué.");
-        
-        // Supprime l'écouteur global une fois débloqué avec succès
-        document.body.removeEventListener('click', unlockAudio);
-        document.body.removeEventListener('touchstart', unlockAudio);
-    }
-    if (audioCtx && audioCtx.state === 'suspended') {
-        audioCtx.resume();
+            }, 500);
+            
+            audioNode.onaudioprocess = function(e) {
+                const outL = e.outputBuffer.getChannelData(0); const outR = e.outputBuffer.getChannelData(1);
+                let distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
+                flipperWorker.postMessage({ type: 'UPDATE_AUDIO_DISTANCE', payload: { distance: distance } });
+                if (isBufferWarming) {
+                    if (distance >= 8192) isBufferWarming = false;
+                    else { outL.fill(0); outR.fill(0); audioLed.classList.remove('active'); return; }
+                }
+                for (let i = 0; i < outL.length; i++) {
+                    if (audioReadPtr !== audioWritePtr) {
+                        lastSampleL = ringBufferL[audioReadPtr]; lastSampleR = ringBufferR[audioReadPtr];
+                        audioReadPtr = (audioReadPtr + 1) % RING_BUFFER_SIZE; outL[i] = lastSampleL; outR[i] = lastSampleR;
+                    } else {
+                        lastSampleL *= 0.90; lastSampleR *= 0.90; outL[i] = lastSampleL; outR[i] = lastSampleR;
+                    }
+                }
+                if (distance > 24576) audioReadPtr = (audioWritePtr - 4096 + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
+                if (distance > 512) audioLed.classList.add('active'); else audioLed.classList.remove('active');
+            };
+            audioNode.connect(audioCtx.destination);
+            logToTerminal("🔊 Flux audio stéréo débloqué et connecté.");
+        } else if (audioCtx.state === 'suspended') {
+            // Si le contexte existe déjà mais est suspendu, le reprendre
+            audioCtx.resume().then(() => {
+                logToTerminal("✅ Contexte Audio repris (était suspendu)");
+            }).catch(err => {
+                logToTerminal(`⚠️ Erreur lors de resume(): ${err.message}`);
+            });
+        }
+    } catch (err) {
+        logToTerminal(`❌ Erreur lors de l'initialisation Audio: ${err.message}`);
     }
 }
 
 // 🎯 CORRECTIF : Attache immédiate dès le premier pixel touché sur le DOM
+// NE PAS supprimer les écouteurs - ils peuvent être nécessaires si le contexte audio se suspend à nouveau
 document.body.addEventListener('click', unlockAudio, { passive: true });
 document.body.addEventListener('touchstart', unlockAudio, { passive: true });
+window.addEventListener('resume', unlockAudio, { passive: true }); // Pour les apps hybrides
+
+// Tentative initiale après 500ms si aucun geste n'a été détecté
+setTimeout(unlockAudio, 500);
 
 flipperWorker.onmessage = function(event) {
     const { type, payload, data } = event.data;
@@ -847,13 +884,19 @@ flipperWorker.onmessage = function(event) {
                 romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename');
                 romNameDisplay.style.color = "var(--neon-green)"; clearRomBtn.style.display = "inline-block";
             }
-            statusEl.textContent = "🟢 PinMAME Workbench V200.23 - AUDIO RUNNING";
+            statusEl.textContent = "🟢 PinMAME Workbench V200.24 - AUDIO RUNNING";
             statusEl.style.color = "#00ffcc";
             setupButtons(); setupSystemHandlers();
             
-            // 🚀 APPEL DE FORCE : Si le clic a eu lieu avant le chargement Wasm, on réaligne le contexte
+            // 🚀 APPEL DE FORCE : Vérifier et reprendre le contexte audio à ce stade
+            unlockAudio();
             if (audioCtx && audioCtx.state === 'suspended') {
-                audioCtx.resume();
+                logToTerminal("⏳ Tentative supplémentaire de reprise audio...");
+                audioCtx.resume().then(() => {
+                    logToTerminal("✅ Audio repris après ENGINE_READY");
+                }).catch(err => {
+                    logToTerminal(`⚠️ Audio en attente d'interaction utilisateur: ${err.message}`);
+                });
             }
             requestAnimationFrame(renderFrame);
             break;

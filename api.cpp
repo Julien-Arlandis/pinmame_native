@@ -452,7 +452,7 @@ extern "C" {
         ROM_LOAD("drom1.snd", 0x8000, 0x8000, NO_DUMP)
       SOUNDREGION(0x10000, GTS80B_MEMREG_SCPU1)
         ROM_LOAD("yrom1.snd", 0x8000, 0x8000, NO_DUMP)
-    GTS80_ROMEND
+    ROM_END
     extern void construct_gts80bs3a(struct InternalMachineDriver *machine);
     struct GameDriver driver_gts80b_generic = {
         __FILE__, NULL, "gts80b_generic", NULL,

@@ -1,3 +1,10 @@
+# Dépendances Node
+node_modules/
+package-lock.json
+
+# macOS
+.DS_Store
+
 # Exécutables et archives de test
 test_pure_lib_exec/
 libpinmame_native.a

@@ -76,6 +76,8 @@ function createEmulator() {
             return path;
         }
     };
+    // Ensure Emscripten runtime flags expected by the generated module
+    Module.noExitRuntime = true;
 
     globalThis.pushWasmAudio = function(ptr, count) {
         if (!pinmameInstance) return;
@@ -96,7 +98,7 @@ function createEmulator() {
     };
 
     async function initialiserMoteur(customRomBytes, customRomName) {
-        postMessageFromCore(makeMessage('STATUS', { }, `🟡 Chargement du moteur WebAssembly...`));
+        postMessageFromCore(makeMessage('STATUS', { message: '🟡 Chargement du moteur WebAssembly...' }));
         if (isNode) {
             globalThis.window = globalThis;
         }
@@ -174,4 +176,68 @@ function createEmulator() {
                     postMessageFromCore(makeMessage('LAMPS_UPDATE', { bytes: lampesActuelles }));
                 }
 
-        
+                const solCounter = readU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1088);
+                if (solCounter !== lastSolCounter) {
+                    lastSolCounter = solCounter;
+                    const solActuels = (pinmameInstance.HEAPU8[vfdMemoryPointer + 320] |
+                                         (pinmameInstance.HEAPU8[vfdMemoryPointer + 321] << 8) |
+                                         (pinmameInstance.HEAPU8[vfdMemoryPointer + 322] << 16) |
+                                         (pinmameInstance.HEAPU8[vfdMemoryPointer + 323] << 24)) >>> 0;
+                    for (let s = 0; s < 32; s++) {
+                        const ancienEtat = (lastSolState >> s) & 1;
+                        const nouvelEtat = (solActuels >> s) & 1;
+                        if (nouvelEtat !== ancienEtat) {
+                            postMessageFromCore(makeMessage('DRIVER_ORDER', { id: s, state: nouvelEtat }));
+                        }
+                    }
+                    lastSolState = solActuels;
+                }
+            }
+            setTimeout(loop, 16);
+        }
+        loop();
+    }
+
+    function handleMessage(type, payload) {
+        switch (type) {
+            case 'INIT_ENGINE':
+                return initialiserMoteur(payload.customRomBytes, payload.customRomName);
+            case 'INJECT_INPUT':
+                if (pinmameInstance && vfdMemoryPointer) {
+                    pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + payload.id] = payload.state;
+                }
+                break;
+            case 'UPDATE_DIPS':
+                if (pinmameInstance && vfdMemoryPointer) {
+                    for (let i = 0; i < 32; i++) {
+                        pinmameInstance.HEAPU8[vfdMemoryPointer + 400 + i] = payload.dips[i] ? 1 : 0;
+                    }
+                }
+                break;
+            case 'TRIGGER_SOUND_CMD':
+                if (pinmameInstance && vfdMemoryPointer) {
+                    pinmameInstance.HEAPU8[vfdMemoryPointer + 1060] = payload.cmdId;
+                }
+                break;
+            case 'UPDATE_AUDIO_DISTANCE':
+                if (pinmameInstance && vfdMemoryPointer) {
+                    writeU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1070, payload.distance);
+                }
+                break;
+        }
+    }
+
+    return { sendMessage: handleMessage };
+}
+
+if (isWorker) {
+    const emulator = createEmulator();
+    self.onmessage = function(event) {
+        const { type, payload } = event.data;
+        emulator.sendMessage(type, payload);
+    };
+}
+
+if (isNode) {
+    module.exports = { createEmulator };
+}

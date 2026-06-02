@@ -1,13 +1,5 @@
 // browser-emulator-worker.js
-// Worker wrapper that delegates emulator logic to emulator-core.js.
-
+// Charge runtime.js qui gère lui-même l'initialisation du worker et le handler onmessage.
 
 self.window = self;
 importScripts('runtime.js');
-
-const emulator = createEmulator();
-
-self.onmessage = function(event) {
-    const { type, payload } = event.data;
-    emulator.sendMessage(type, payload);
-};

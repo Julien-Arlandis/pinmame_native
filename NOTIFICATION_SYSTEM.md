@@ -85,7 +85,7 @@ Ces données continuent de fonctionner exactement comme avant :
                │
                ▼ (Mémoire partagée)
 ┌─────────────────────────────────────────┐
-│   WORKER (flipper-worker.js)            │
+│   WORKER (browser-emulator-worker.js)   │
 │  Check counters toutes les 16ms         │
 │  Si changement → Envoyer notification   │
 └──────────────┬──────────────────────────┘

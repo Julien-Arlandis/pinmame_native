@@ -97,11 +97,12 @@ class GottliebDisplayEmulator {
                 }
                 break;
 
-            case 'write':
+            case 'write': {
+                const posParam = params.get('pos');
+                if (posParam !== null) this.cursorPosition = parseInt(posParam, 10);
                 const text = params.get('text') || "";
                 for (let i = 0; i < text.length; i++) {
-                    if (this.cursorPosition >= 40) break; // Fin d'afficheur atteint
-                    
+                    if (this.cursorPosition >= 40) break;
                     let charCode = text.charCodeAt(i);
                     let baseChar = charCode & 0x7F; // On isole les 7 bits ASCII standards
                     let mask = this.ascii2gottlieb[baseChar];
@@ -114,9 +115,10 @@ class GottliebDisplayEmulator {
                     }
 
                     this.vfdCells[this.cursorPosition] = mask;
-                    this.cursorPosition++; // Avancement automatique de la tête
+                    this.cursorPosition++;
                 }
                 break;
+            }
         }
     }
 

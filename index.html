@@ -558,6 +558,9 @@
                 <div id="audio-led" class="led-dot"></div>
                 <span>AUDIO STRM</span>
             </div>
+            <div id="connectorStatus" style="display:flex;align-items:center;gap:8px;background:#161616;padding:4px 10px;border-radius:4px;border:1px solid #222;font-size:0.75rem;font-weight:bold;letter-spacing:0.5px;">
+                <span style="color:#555">⏳ Détection...</span>
+            </div>
             <div style="display: flex; align-items: center; gap: 6px; background: #161616; padding: 4px 8px; border-radius: 4px; border: 1px solid #222;">
                 <span style="font-size: 0.7rem; color: #666;">ROM :</span>
                 <span id="romNameDisplay" style="font-size: 0.75rem; font-weight: bold; color: #aaa;">bonebstr (Interne)</span>
@@ -565,6 +568,7 @@
             </div>
             <input type="file" id="romUploader" accept=".zip" style="display: none;">
             <button onclick="document.getElementById('romUploader').click()" class="rom-upload-btn">📁 Injecter pack ROM (.zip)</button>
+            <button id="connectHardwareBtn" class="btn-system" style="display:none;border-color:rgba(0,255,68,0.4);color:#99ffbb;">🔌 Connecter hardware</button>
             <button id="rebootBtn" class="btn-system">🔄 Hard Reboot</button>
         </div>
     </div>
@@ -670,6 +674,8 @@
         </div>
     </div>
 
+    <script src="emulDisplay.js"></script>
+    <script src="transport.js"></script>
     <script src="interface.js"></script>
 </body>
 </html>

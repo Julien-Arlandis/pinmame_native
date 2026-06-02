@@ -25,9 +25,12 @@ extern "C" {
 #include "driver.h"
 #include "core.h"
 #include "usrintrf.h"
-#include "sound/ym2151.h" 
-#include "sound/samples.h" 
-#include "inptport.h" 
+#include "sound/ym2151.h"
+#include "sound/samples.h"
+#include "inptport.h"
+#include "wpc/gts80.h"
+#include "wpc/gts80s.h"
+#include "wpc/sndbrd.h"
 }
 
 static uint8_t g_dummy_buffer[1024 * 1024] = {0}; 
@@ -415,6 +418,65 @@ extern "C" {
     
     EMSCRIPTEN_KEEPALIVE
     void pinmame_web_tick(int cycles) {}
+
+    // ── Driver générique Gottlieb System 80B ─────────────────────────────────
+    // Charge prom1.cpu / prom2.cpu / drom1.snd / drom2.snd / yrom1.snd
+    // sans vérification de checksum (NO_DUMP).
+    // Utilisé en fallback quand aucun driver nommé ne correspond à la ROM.
+
+    static core_tLCDLayout gts80b_generic_dispAlpha[] = {
+        {0, 0, 0,20,CORE_SEG16}, {2, 0,20,20,CORE_SEG16}, {0}
+    };
+
+    static core_tGameData gts80b_genericGameData = {
+        GEN_GTS80B, gts80b_generic_dispAlpha,
+        {FLIP_SWNO(6,16), 0, 0, 0, SNDBRD_GTS80B, GTS80_DISPALPHA},
+        NULL, {{0},{0x80}}
+    };
+
+    static void init_gts80b_generic(void) { core_gameData = &gts80b_genericGameData; }
+
+    static const struct InputPortTiny input_ports_gts80b_generic[] = {
+        { 0, 0, IPT_END, 0 }
+    };
+
+    // Table ROM : mêmes adresses que GTS80B_4K_ROMSTART + GTS80BSSOUND3x32
+    // mais avec NO_DUMP — pas de vérification de checksum
+    ROM_START(gts80b_generic)
+      NORMALREGION(0x10000, GTS80_MEMREG_CPU)
+        ROM_LOAD("prom2.cpu", 0x1000, 0x0800, NO_DUMP)
+          ROM_CONTINUE(0x9000, 0x0800)
+          ROM_RELOAD  (0x5000, 0x0800)
+          ROM_CONTINUE(0xd000, 0x0800)
+        ROM_LOAD("prom1.cpu", 0x2000, 0x2000, NO_DUMP)
+          ROM_RELOAD(0x6000, 0x2000)
+          ROM_RELOAD(0xa000, 0x2000)
+          ROM_RELOAD(0xe000, 0x2000)
+      SOUNDREGION(0x10000, GTS80_MEMREG_SCPU3)
+        ROM_LOAD("drom2.snd", 0x8000, 0x8000, NO_DUMP)
+      SOUNDREGION(0x10000, GTS80_MEMREG_SCPU2)
+        ROM_LOAD("drom1.snd", 0x8000, 0x8000, NO_DUMP)
+      SOUNDREGION(0x10000, GTS80_MEMREG_SCPU1)
+        ROM_LOAD("yrom1.snd", 0x8000, 0x8000, NO_DUMP)
+    GTS80_ROMEND
+
+    MACHINE_DRIVER_EXTERN(gts80bs3a);
+    extern const struct GameDriver driver_0;
+    const struct GameDriver driver_gts80b_generic = {
+        __FILE__,
+        &driver_0,
+        "gts80b_generic",
+        NULL,
+        "Gottlieb System 80B (generic)",
+        "1988",
+        "Gottlieb",
+        construct_gts80bs3a,
+        input_ports_gts80b_generic,
+        init_gts80b_generic,
+        rom_gts80b_generic,
+        ROT0
+    };
+    // ─────────────────────────────────────────────────────────────────────────
 
     extern struct GameDriver driver_bonebstr;
     extern struct GameDriver driver_badgirls;

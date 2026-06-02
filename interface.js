@@ -1,24 +1,30 @@
 // interface.js
-// Transport layer + Browser UI: WebSerial hardware and local Worker fallback
+// Browser UI — découverte de maîtres (WebSerial ou Worker local), sélection, connexion
 
-// ── WorkerTransport ───────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAÎTRES
+// Un maître parle le protocole texte ligne par ligne :
+//   Reçoit (browser → maître) : @set:  @dip:  @sound:  @audio:
+//   Émet   (maître → browser) : !set:  !lamp:  !display:  @status:
+// ═══════════════════════════════════════════════════════════════════════════════
 
-class WorkerTransport {
+class WorkerMaster {
     constructor() {
         this._worker = new Worker('runtime.js');
         this._callbacks = [];
         this._worker.onmessage = (e) => {
             const msg = e.data;
-            if (msg.channel) for (const cb of this._callbacks) cb(msg.channel, msg.line || null, msg);
+            if (msg.channel === 'audio') {
+                for (const cb of this._callbacks) cb(msg); // { channel:'audio', left, right }
+            } else if (msg.line) {
+                for (const cb of this._callbacks) cb(msg.line);
+            }
         };
     }
-    send(channel, line) { this._worker.postMessage({ channel, line }); }
+    send(line) { this._worker.postMessage({ channel: 'input', line }); }
     onMessage(cb) { this._callbacks.push(cb); }
-    get type() { return 'worker'; }
-    get connectedTypes() { return { input: 1, driver: 1, display: 1 }; }
+    get name() { return 'runtime (local)'; }
 }
-
-// ── SerialTransport ───────────────────────────────────────────────────────────
 
 async function* readSerialLines(port) {
     const decoder = new TextDecoder();
@@ -39,90 +45,102 @@ async function* readSerialLines(port) {
     } finally { reader.releaseLock(); }
 }
 
-class SerialTransport {
-    constructor() {
-        this._ports   = { input: [], driver: [], display: [] };
-        this._writers = { input: [], driver: [], display: [] };
+class SerialMaster {
+    constructor(port, name) {
+        this._port = port;
+        this._name = name;
+        this._writer = null;
         this._callbacks = [];
     }
-    onMessage(cb) { this._callbacks.push(cb); }
-    send(channel, line) {
-        const encoded = new TextEncoder().encode(line + '\n');
-        for (const w of (this._writers[channel] || [])) w.write(encoded).catch(() => {});
-    }
-    async addPort(port) {
-        try { await port.open({ baudRate: 115200 }); } catch { if (!port.readable) return null; }
-        const deviceType = await this._readHandshake(port);
-        if (!deviceType || !this._ports[deviceType]) return null;
-        const writer = port.writable.getWriter();
-        this._ports[deviceType].push(port);
-        this._writers[deviceType].push(writer);
-        this._startReadLoop(port, deviceType);
-        return deviceType;
-    }
-    async _readHandshake(port) {
-        const decoder = new TextDecoder();
-        let buf = '';
-        const reader = port.readable.getReader();
-        const deadline = Date.now() + 2000;
-        try {
-            while (Date.now() < deadline) {
-                const timeout = new Promise(r => setTimeout(() => r({ value: null, done: true }), 300));
-                const { value, done } = await Promise.race([reader.read(), timeout]);
-                if (done || !value) break;
-                buf += decoder.decode(value, { stream: true });
-                const nl = buf.indexOf('\n');
-                if (nl !== -1) {
-                    const line = buf.slice(0, nl).trim();
-                    if (line.startsWith('@device:')) {
-                        return new URLSearchParams(line.slice(8)).get('type');
-                    }
-                    break;
-                }
-            }
-        } finally { reader.releaseLock(); }
-        return null;
-    }
-    _startReadLoop(port, channel) {
+    async start() {
+        this._writer = this._port.writable.getWriter();
         (async () => {
             try {
-                for await (const line of readSerialLines(port)) {
-                    for (const cb of this._callbacks) cb(channel, line, { channel, line });
+                for await (const line of readSerialLines(this._port)) {
+                    for (const cb of this._callbacks) cb(line);
                 }
-            } catch {
-                console.warn(`[Serial] port ${channel} déconnecté`);
-                const idx = this._ports[channel].indexOf(port);
-                if (idx !== -1) { this._ports[channel].splice(idx, 1); this._writers[channel].splice(idx, 1); }
-            }
+            } catch { console.warn(`[SerialMaster] ${this._name} déconnecté`); }
         })();
     }
-    get type() { return 'serial'; }
-    get connectedTypes() {
-        return { input: this._ports.input.length, driver: this._ports.driver.length, display: this._ports.display.length };
+    send(line) {
+        if (this._writer) this._writer.write(new TextEncoder().encode(line + '\n')).catch(() => {});
     }
+    onMessage(cb) { this._callbacks.push(cb); }
+    get name() { return this._name; }
 }
 
-async function scanAuthorizedPorts(transport) {
-    if (!navigator.serial) return;
-    for (const port of await navigator.serial.getPorts()) await transport.addPort(port);
+// Lit la 1re ligne d'un port pour identifier le maître : @master:name=xxx&version=1
+async function readMasterHandshake(port) {
+    try { await port.open({ baudRate: 115200 }); } catch { if (!port.readable) return null; }
+    const decoder = new TextDecoder();
+    let buf = '';
+    const reader = port.readable.getReader();
+    const deadline = Date.now() + 2000;
+    try {
+        while (Date.now() < deadline) {
+            const timeout = new Promise(r => setTimeout(() => r({ value: null, done: true }), 300));
+            const { value, done } = await Promise.race([reader.read(), timeout]);
+            if (done || !value) break;
+            buf += decoder.decode(value, { stream: true });
+            const nl = buf.indexOf('\n');
+            if (nl !== -1) {
+                const line = buf.slice(0, nl).trim();
+                if (line.startsWith('@master:')) {
+                    return new URLSearchParams(line.slice(8)).get('name') || 'maître série';
+                }
+                break;
+            }
+        }
+    } finally { reader.releaseLock(); }
+    return null;
 }
 
-async function requestNewPort(transport) {
-    if (!navigator.serial) throw new Error('WebSerial non disponible');
-    return transport.addPort(await navigator.serial.requestPort());
-}
-
-async function createTransport() {
+async function discoverMasters() {
+    const masters = [];
     if (typeof navigator !== 'undefined' && navigator.serial) {
-        const serial = new SerialTransport();
-        await scanAuthorizedPorts(serial);
-        const ct = serial.connectedTypes;
-        if (ct.input + ct.driver + ct.display > 0) return serial;
+        for (const port of await navigator.serial.getPorts()) {
+            const name = await readMasterHandshake(port);
+            if (name) masters.push(new SerialMaster(port, name));
+        }
     }
-    return new WorkerTransport();
+    masters.push(new WorkerMaster()); // toujours disponible en dernier recours
+    return masters;
 }
 
-// ── GottliebDisplayEmulator ───────────────────────────────────────────────────
+async function requestSerialMaster() {
+    if (!navigator.serial) throw new Error('WebSerial non disponible');
+    const port = await navigator.serial.requestPort();
+    const name = await readMasterHandshake(port);
+    if (!name) throw new Error('Appareil non reconnu comme maître');
+    return new SerialMaster(port, name);
+}
+
+// Sélectionne automatiquement si un seul maître, sinon affiche un sélecteur
+function selectMaster(masters) {
+    if (masters.length === 1) return Promise.resolve(masters[0]);
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:9999;';
+        const title = document.createElement('div');
+        title.style.cssText = 'color:#fff;font-family:monospace;font-size:1rem;margin-bottom:8px;';
+        title.textContent = 'Sélectionner un maître';
+        overlay.appendChild(title);
+        for (const m of masters) {
+            const btn = document.createElement('button');
+            btn.style.cssText = 'background:#1c1c1c;border:1px solid #444;color:#fff;padding:10px 24px;border-radius:4px;font-family:monospace;font-size:0.9rem;cursor:pointer;min-width:200px;';
+            btn.textContent = m.name;
+            btn.onmouseenter = () => btn.style.borderColor = '#00ffff';
+            btn.onmouseleave = () => btn.style.borderColor = '#444';
+            btn.onclick = () => { overlay.remove(); resolve(m); };
+            overlay.appendChild(btn);
+        }
+        document.body.appendChild(overlay);
+    });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// AFFICHEUR GOTTLIEB 14 SEGMENTS
+// ═══════════════════════════════════════════════════════════════════════════════
 
 class GottliebDisplayEmulator {
     constructor(canvasId) {
@@ -156,16 +174,14 @@ class GottliebDisplayEmulator {
     parseCommand(cmd) {
         if (!cmd || !cmd.startsWith('!display:')) return;
         const params = new URLSearchParams(cmd.slice(9));
-        const action = params.get('action');
-        switch (action) {
+        switch (params.get('action')) {
             case 'raw': {
                 const data = params.get('data') || '';
                 for (let i = 0; i < 40; i++)
                     this.vfdCells[i] = parseInt(data.slice(i * 4, i * 4 + 4), 16) || 0;
                 break;
             }
-            case 'clear':
-                this.vfdCells.fill(0); this.cursorPosition = 0; break;
+            case 'clear': this.vfdCells.fill(0); this.cursorPosition = 0; break;
             case 'move': {
                 const p = parseInt(params.get('pos'), 10);
                 if (p >= 0 && p < 40) this.cursorPosition = p;
@@ -187,7 +203,7 @@ class GottliebDisplayEmulator {
     }
 
     _drawSegment(x, y, mask) {
-        const ctx = this.ctx; const w = this.CHAR_WIDTH, h = this.CHAR_HEIGHT, m = h / 2, hw = w / 2;
+        const ctx = this.ctx, w = this.CHAR_WIDTH, h = this.CHAR_HEIGHT, m = h / 2, hw = w / 2;
         ctx.save(); ctx.translate(x, y); ctx.transform(1, 0, -0.15, 1, 0, 0);
         ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
         const seg = (bit, fn) => {
@@ -229,37 +245,36 @@ class GottliebDisplayEmulator {
     }
 }
 
-// ── Browser UI ────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// UI NAVIGATEUR
+// ═══════════════════════════════════════════════════════════════════════════════
 
 const SOUND_DICTIONARY = { 1: "STOP", 2: "BGM 1", 3: "BGM 2", 4: "BGM 3", 5: "BGM 4", 61: "BANK CLEAR", 63: "TEST TONE" };
 const SWITCH_DICTIONARY = {
-    0: "10 Points", 1: "10 Points", 2: "10 Points", 3: "10 Points", 4: "Left Outlane", 5: "Left Return", 6: "Right Return", 7: "Test Button",
-    10: "10 Points", 11: "10 Points", 12: "10 Points", 13: "10 Points", 14: "Right Outlane", 15: "Left Top Lane", 16: "Right Top Lane", 17: "Center Coin Chute (8 Cr)",
-    20: "10 Points", 21: "10 Points", 22: "10 Points", 23: "10 Points", 24: "Left Drop - Top", 25: "Left Drop - Center", 26: "Left Drop - Bottom", 27: "Left Coin Chute (1/2 Cr)",
-    30: "10 Points", 31: "10 Points", 32: "10 Points", 33: "Left Bumper", 34: "Right Drop - Top", 35: "Right Drop - Center", 36: "Right Drop - Bottom", 37: "Coin Chute 4",
-    40: "Target 'B'", 41: "Target 'O'", 42: "Target 'N'", 43: "Shooter Lane", 44: "Left Captive", 45: "Right Captive", 46: "Outhole", 47: "Replay Button (START)",
-    50: "Target 'E'", 51: "Target 'S'", 52: "Target 'U'", 53: "Trough 1", 54: "Trough 2", 55: "Trough 3", 56: "Trough 4", 57: "Right Coin Chute",
-    60: "Target 'B' (Bust)", 61: "Target 'U' (Bust)", 62: "Target 'S' (Bust)", 63: "Target 'T' (Bust)", 64: "Target 'E' (Bust)", 65: "Target 'R' (Bust)", 66: "Target 'S' (Bust)", 67: "Slam Tilt",
-    70: "Top Rebound", 71: "Right Bumper", 72: "Bottom Bumper", 73: "Kicker", 74: "Standup Right", 75: "Standup Left", 76: "Spinner", 77: "Plumb Bob Tilt"
+    0:"10 Points",1:"10 Points",2:"10 Points",3:"10 Points",4:"Left Outlane",5:"Left Return",6:"Right Return",7:"Test Button",
+    10:"10 Points",11:"10 Points",12:"10 Points",13:"10 Points",14:"Right Outlane",15:"Left Top Lane",16:"Right Top Lane",17:"Center Coin Chute (8 Cr)",
+    20:"10 Points",21:"10 Points",22:"10 Points",23:"10 Points",24:"Left Drop - Top",25:"Left Drop - Center",26:"Left Drop - Bottom",27:"Left Coin Chute (1/2 Cr)",
+    30:"10 Points",31:"10 Points",32:"10 Points",33:"Left Bumper",34:"Right Drop - Top",35:"Right Drop - Center",36:"Right Drop - Bottom",37:"Coin Chute 4",
+    40:"Target 'B'",41:"Target 'O'",42:"Target 'N'",43:"Shooter Lane",44:"Left Captive",45:"Right Captive",46:"Outhole",47:"Replay Button (START)",
+    50:"Target 'E'",51:"Target 'S'",52:"Target 'U'",53:"Trough 1",54:"Trough 2",55:"Trough 3",56:"Trough 4",57:"Right Coin Chute",
+    60:"Target 'B' (Bust)",61:"Target 'U' (Bust)",62:"Target 'S' (Bust)",63:"Target 'T' (Bust)",64:"Target 'E' (Bust)",65:"Target 'R' (Bust)",66:"Target 'S' (Bust)",67:"Slam Tilt",
+    70:"Top Rebound",71:"Right Bumper",72:"Bottom Bumper",73:"Kicker",74:"Standup Right",75:"Standup Left",76:"Spinner",77:"Plumb Bob Tilt"
 };
 
-// ── DOM refs ─────────────────────────────────────────────────────────────────
+// ── DOM ───────────────────────────────────────────────────────────────────────
 
-const statusEl      = document.getElementById('status');
-const termEl        = document.getElementById('terminal');
-const dipContainer  = document.getElementById('dipContainer');
-const romUploader   = document.getElementById('romUploader');
+const statusEl       = document.getElementById('status');
+const termEl         = document.getElementById('terminal');
+const dipContainer   = document.getElementById('dipContainer');
+const romUploader    = document.getElementById('romUploader');
 const romNameDisplay = document.getElementById('romNameDisplay');
-const clearRomBtn   = document.getElementById('clearRomBtn');
-const rebootBtn     = document.getElementById('rebootBtn');
-const audioLed      = document.getElementById('audio-led');
+const clearRomBtn    = document.getElementById('clearRomBtn');
+const rebootBtn      = document.getElementById('rebootBtn');
+const audioLed       = document.getElementById('audio-led');
 
-// ── State ─────────────────────────────────────────────────────────────────────
+// ── État ──────────────────────────────────────────────────────────────────────
 
-const swCells   = [];
-const lampCells = [];
-const solCells  = [];
-const dipToggles = [];
+const swCells    = [], lampCells = [], solCells = [], dipToggles = [];
 const userSwitchStates = new Array(80).fill(false);
 const ancienEtatLampesIndividuelles = new Uint8Array(96).fill(0);
 
@@ -268,7 +283,7 @@ try { const s = localStorage.getItem('pinmame_dips'); if (s) userDipStates = JSO
 
 const COIN_ID = 27, START_ID = 47, TEST_ID = 7;
 
-// ── Audio ring buffer ─────────────────────────────────────────────────────────
+// ── Audio ─────────────────────────────────────────────────────────────────────
 
 const RING_BUFFER_SIZE = 131072;
 const ringBufferL = new Float32Array(RING_BUFFER_SIZE);
@@ -287,16 +302,13 @@ function feedAudioRingBuffer(left, right) {
 }
 
 function resetAudioRead() {
-    // Jette les samples accumulés avant le geste utilisateur
     audioReadPtr = audioWritePtr;
     isBufferWarming = true;
 }
 
-function unlockAudio(transport) {
+function unlockAudio(master) {
     if (audioCtx) {
-        if (audioCtx.state === 'suspended') {
-            audioCtx.resume().then(resetAudioRead).catch(() => {});
-        }
+        if (audioCtx.state === 'suspended') audioCtx.resume().then(resetAudioRead).catch(() => {});
         return;
     }
     try {
@@ -306,112 +318,86 @@ function unlockAudio(transport) {
         if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
 
         audioNode = audioCtx.createScriptProcessor(4096, 1, 2);
-
-        // Réveil de la puce audio sur mobile
-        const kick = audioCtx.createOscillator();
-        kick.frequency.value = 0;
-        kick.connect(audioNode);
-        kick.start(0);
+        const kick = audioCtx.createOscillator(); kick.frequency.value = 0;
+        kick.connect(audioNode); kick.start(0);
         setTimeout(() => { try { kick.stop(); } catch (_) {} }, 500);
 
         audioNode.onaudioprocess = function(e) {
             const outL = e.outputBuffer.getChannelData(0);
             const outR = e.outputBuffer.getChannelData(1);
             const distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
-            if (transport) transport.send('input', `@audio:distance=${distance}`);
-
-            // Attendre que le buffer se remplisse avant de jouer (évite le 1er son muet)
+            if (master) master.send(`@audio:distance=${distance}`);
             if (isBufferWarming) {
                 if (distance >= 4096) isBufferWarming = false;
                 for (let i = 0; i < outL.length; i++) outL[i] = outR[i] = 0;
                 return;
             }
-
             for (let i = 0; i < outL.length; i++) {
                 if (audioReadPtr !== audioWritePtr) {
                     lastSampleL = ringBufferL[audioReadPtr];
                     lastSampleR = ringBufferR[audioReadPtr];
                     audioReadPtr = (audioReadPtr + 1) % RING_BUFFER_SIZE;
-                } else {
-                    lastSampleL *= 0.90;
-                    lastSampleR *= 0.90;
-                }
-                outL[i] = lastSampleL;
-                outR[i] = lastSampleR;
+                } else { lastSampleL *= 0.90; lastSampleR *= 0.90; }
+                outL[i] = lastSampleL; outR[i] = lastSampleR;
             }
             if (distance > 24576) audioReadPtr = (audioWritePtr - 8192 + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
-            if (distance > 512) audioLed.classList.add('active');
-            else audioLed.classList.remove('active');
+            audioLed.classList.toggle('active', distance > 512);
         };
         audioNode.connect(audioCtx.destination);
         logToTerminal('🔊 Flux audio connecté.');
-    } catch (err) {
-        logToTerminal(`❌ Erreur audio: ${err.message}`);
-    }
+    } catch (err) { logToTerminal(`❌ Erreur audio: ${err.message}`); }
 }
 
-// ── Logging ───────────────────────────────────────────────────────────────────
+// ── Logs ──────────────────────────────────────────────────────────────────────
 
-function logToTerminal(msg) {
-    termEl.textContent += '\n' + msg;
-    termEl.scrollTop = termEl.scrollHeight;
-}
+function logToTerminal(msg) { termEl.textContent += '\n' + msg; termEl.scrollTop = termEl.scrollHeight; }
 
-const chkInput  = document.getElementById('chkInput');
+const chkInput = document.getElementById('chkInput');
 const chkDriver = document.getElementById('chkDriver');
 const chkDisplay = document.getElementById('chkDisplay');
-document.getElementById('btnCopyLogs').onclick = function() {
+document.getElementById('btnCopyLogs').onclick = () => {
     navigator.clipboard.writeText(termEl.textContent).then(() => {
-        const btn = document.getElementById('btnCopyLogs');
-        const orig = btn.textContent;
+        const btn = document.getElementById('btnCopyLogs'), orig = btn.textContent;
         btn.textContent = '✔ Copié !'; btn.style.background = '#004411';
         setTimeout(() => { btn.textContent = orig; btn.style.background = '#1f1f1f'; }, 1200);
     });
 };
 
-function logHardwareTraffic(from, to, line, category) {
-    if (category === 'INPUT'   && !chkInput.checked)   return;
-    if (category === 'DRIVER'  && !chkDriver.checked)  return;
-    if (category === 'DISPLAY' && !chkDisplay.checked) return;
+function logHardwareTraffic(from, to, line, cat) {
+    if (cat === 'INPUT' && !chkInput.checked) return;
+    if (cat === 'DRIVER' && !chkDriver.checked) return;
+    if (cat === 'DISPLAY' && !chkDisplay.checked) return;
     logToTerminal(`[${from} ➔ ${to}] ${line}`);
 }
 
-// ── Connector status UI ───────────────────────────────────────────────────────
+// ── Statut maître ─────────────────────────────────────────────────────────────
 
-function updateConnectorStatus(connectedTypes, transportType) {
+function updateMasterStatus(master) {
     const el = document.getElementById('connectorStatus');
     if (!el) return;
-    if (transportType === 'worker') {
-        el.innerHTML = '<span style="color:#9d4edd">⚙ MODE ÉMULATION LOCALE</span>';
-        return;
-    }
-    const fmt = (type, n) => {
-        const color = n > 0 ? '#00ff44' : '#555';
-        return `<span style="color:${color}">${type.toUpperCase()} ×${n}</span>`;
-    };
-    el.innerHTML = `${fmt('input', connectedTypes.input)} &nbsp; ${fmt('driver', connectedTypes.driver)} &nbsp; ${fmt('display', connectedTypes.display)}`;
+    const isWorker = master instanceof WorkerMaster;
+    el.innerHTML = isWorker
+        ? '<span style="color:#9d4edd">⚙ ÉMULATION LOCALE</span>'
+        : `<span style="color:#00ff44">🔌 ${master.name}</span>`;
 }
 
-// ── Message handler ───────────────────────────────────────────────────────────
+// ── Handlers messages maître ──────────────────────────────────────────────────
 
 function handleDriverLine(line) {
     if (line.startsWith('!lamp:')) {
-        const p   = new URLSearchParams(line.slice(6));
-        const col  = parseInt(p.get('col'));
-        const mask = parseInt(p.get('mask'));
+        const p = new URLSearchParams(line.slice(6));
+        const col = parseInt(p.get('col')), mask = parseInt(p.get('mask'));
         for (let row = 0; row < 8; row++) {
-            const lampId = col * 8 + row;
-            const state  = (mask >> row) & 1;
+            const lampId = col * 8 + row, state = (mask >> row) & 1;
             if (lampCells[lampId]) lampCells[lampId].classList.toggle('lamp-on', state === 1);
             if (state !== ancienEtatLampesIndividuelles[lampId]) {
-                logHardwareTraffic('MASTER', 'DRIVER', `!lamp:id=${lampId + 1}&state=${state}`, 'DRIVER');
+                logHardwareTraffic('MASTER', 'DRIVER', `!lamp:id=${lampId+1}&state=${state}`, 'DRIVER');
                 ancienEtatLampesIndividuelles[lampId] = state;
             }
         }
     } else if (line.startsWith('!set:')) {
-        const p    = new URLSearchParams(line.slice(5));
-        const id   = parseInt(p.get('id'));
-        const state = parseInt(p.get('state'));
+        const p = new URLSearchParams(line.slice(5));
+        const id = parseInt(p.get('id')), state = parseInt(p.get('state'));
         if (solCells[id]) solCells[id].classList.toggle('sol-on', state === 1);
         logHardwareTraffic('MASTER', 'DRIVER', line, 'DRIVER');
     }
@@ -419,8 +405,7 @@ function handleDriverLine(line) {
 
 function handleStatusLine(line) {
     if (!line.startsWith('@status:')) return;
-    const p     = new URLSearchParams(line.slice(8));
-    const state = p.get('state');
+    const p = new URLSearchParams(line.slice(8)), state = p.get('state');
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         statusEl.textContent = `🟢 PinMAME Workbench V200.28 — ${rom}`;
@@ -428,93 +413,101 @@ function handleStatusLine(line) {
         romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename') || `${rom} (Interne)`;
         if (sessionStorage.getItem('custom_rom_bytes')) {
             romNameDisplay.style.color = 'var(--neon-green)';
-            clearRomBtn.style.display  = 'inline-block';
+            clearRomBtn.style.display = 'inline-block';
         }
     } else if (state === 'loading') {
-        statusEl.textContent = '🟡 Chargement du moteur WebAssembly...';
-        statusEl.style.color = '';
+        statusEl.textContent = '🟡 Chargement...'; statusEl.style.color = '';
     }
 }
 
-// ── Grid builders ─────────────────────────────────────────────────────────────
+// ── Connexion au maître ───────────────────────────────────────────────────────
 
-function buildSwitchGrid(transport) {
+function connectMaster(master, display) {
+    master.onMessage((msg) => {
+        if (msg && typeof msg === 'object' && msg.channel === 'audio') {
+            feedAudioRingBuffer(msg.left, msg.right);
+            return;
+        }
+        const line = typeof msg === 'string' ? msg : null;
+        if (!line) return;
+        if (line.startsWith('!display:')) {
+            display.parseCommand(line);
+            logHardwareTraffic('MASTER', 'DISPLAY', line, 'DISPLAY');
+        } else if (line.startsWith('!set:') || line.startsWith('!lamp:')) {
+            handleDriverLine(line);
+        } else if (line.startsWith('@status:')) {
+            handleStatusLine(line);
+        }
+    });
+}
+
+// ── Grilles ───────────────────────────────────────────────────────────────────
+
+function buildSwitchGrid(master) {
     const grid = document.getElementById('swGrid');
     for (let i = 0; i < 80; i++) {
-        const cell = document.createElement('div');
-        cell.className = 'cell';
-        cell.title = SWITCH_DICTIONARY[i] || `Contact ${String(i).padStart(2, '0')}`;
-        cell.innerHTML = `<span class="sw-num-text">${String(i).padStart(2, '0')}</span><svg class="mini-loader-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle></svg>`;
-
+        const cell = document.createElement('div'); cell.className = 'cell';
+        cell.title = SWITCH_DICTIONARY[i] || `Contact ${String(i).padStart(2,'0')}`;
+        cell.innerHTML = `<span class="sw-num-text">${String(i).padStart(2,'0')}</span><svg class="mini-loader-svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle></svg>`;
         let holdTimer = null, isLocked = false, isPressed = false;
-
-        const notifier = (state) => {
-            userSwitchStates[i] = (state === 1);
+        const notify = (state) => {
+            userSwitchStates[i] = state === 1;
             logHardwareTraffic('INPUT', 'MASTER', `@set:id=${i}&state=${state}`, 'INPUT');
-            transport.send('input', `@set:id=${i}&state=${state}`);
+            master.send(`@set:id=${i}&state=${state}`);
         };
-
-        const pressDown = (e) => {
+        const down = (e) => {
             if (e.type.startsWith('touch')) e.preventDefault();
-            if (isLocked) {
-                isLocked = false; cell.classList.remove('sw-locked'); notifier(0);
-                isPressed = false; clearTimeout(holdTimer); return;
-            }
+            if (isLocked) { isLocked = false; cell.classList.remove('sw-locked'); notify(0); isPressed = false; clearTimeout(holdTimer); return; }
             if (!isPressed) {
-                isPressed = true; notifier(1);
+                isPressed = true; notify(1);
                 cell.classList.remove('sw-user'); void cell.offsetWidth; cell.classList.add('sw-user');
-                holdTimer = setTimeout(() => {
-                    if (isPressed) { isLocked = true; cell.classList.remove('sw-user'); cell.classList.add('sw-locked'); }
-                }, 500);
+                holdTimer = setTimeout(() => { if (isPressed) { isLocked = true; cell.classList.remove('sw-user'); cell.classList.add('sw-locked'); } }, 500);
             }
         };
-        const releaseUp = (e) => {
+        const up = (e) => {
             if (e && e.type.startsWith('touch')) e.preventDefault();
             clearTimeout(holdTimer); holdTimer = null;
-            if (isPressed && !isLocked) { isPressed = false; notifier(0); cell.classList.remove('sw-user'); }
+            if (isPressed && !isLocked) { isPressed = false; notify(0); cell.classList.remove('sw-user'); }
         };
-
-        cell.addEventListener('mousedown',  pressDown);  cell.addEventListener('touchstart',  pressDown,  { passive: false });
-        cell.addEventListener('mouseup',    releaseUp);  cell.addEventListener('touchend',    releaseUp,  { passive: false });
-        cell.addEventListener('mouseleave', releaseUp);  cell.addEventListener('touchcancel', releaseUp,  { passive: false });
-        grid.appendChild(cell);
-        swCells.push(cell);
+        cell.addEventListener('mousedown',  down); cell.addEventListener('touchstart',  down, { passive:false });
+        cell.addEventListener('mouseup',    up);   cell.addEventListener('touchend',    up,   { passive:false });
+        cell.addEventListener('mouseleave', up);   cell.addEventListener('touchcancel', up,   { passive:false });
+        grid.appendChild(cell); swCells.push(cell);
     }
 }
 
-function buildSoundGrid(transport) {
+function buildSoundGrid(master) {
     const grid = document.getElementById('cmd-grid');
     for (let i = 1; i <= 64; i++) {
-        const cell = document.createElement('div');
-        cell.className = 'cell cell-cmd';
-        cell.innerHTML = `<div class="cell-cmd-num">${String(i).padStart(2, '0')}</div><div class="cell-cmd-desc">${SOUND_DICTIONARY[i] || 'SFX'}</div>`;
+        const cell = document.createElement('div'); cell.className = 'cell cell-cmd';
+        cell.innerHTML = `<div class="cell-cmd-num">${String(i).padStart(2,'0')}</div><div class="cell-cmd-desc">${SOUND_DICTIONARY[i]||'SFX'}</div>`;
         const trigger = (e) => {
             if (e.type.startsWith('touch')) e.preventDefault();
             cell.classList.add('cmd-active'); setTimeout(() => cell.classList.remove('cmd-active'), 120);
-            transport.send('input', `@sound:cmd=${i}`);
+            master.send(`@sound:cmd=${i}`);
         };
-        cell.addEventListener('mousedown', trigger); cell.addEventListener('touchstart', trigger, { passive: false });
+        cell.addEventListener('mousedown', trigger); cell.addEventListener('touchstart', trigger, { passive:false });
         grid.appendChild(cell);
     }
 }
 
-function buildDipSwitches(transport) {
+function buildDipSwitches(master) {
     for (let bank = 0; bank < 4; bank++) {
         const bankEl = document.createElement('div'); bankEl.className = 'dip-bank';
         for (let bit = 0; bit < 8; bit++) {
             const dipId = bank * 8 + bit;
-            const wrap  = document.createElement('div'); wrap.className = 'dip-switch';
-            const label  = document.createElement('span'); label.textContent = String(dipId + 1).padStart(2, '0');
-            const toggle = document.createElement('div');  toggle.className = 'dip-toggle';
+            const wrap = document.createElement('div'); wrap.className = 'dip-switch';
+            const label = document.createElement('span'); label.textContent = String(dipId+1).padStart(2,'0');
+            const toggle = document.createElement('div'); toggle.className = 'dip-toggle';
             if (userDipStates[dipId]) toggle.classList.add('dip-on');
             const toggleDip = (e) => {
                 if (e.type.startsWith('touch')) e.preventDefault();
                 userDipStates[dipId] = !userDipStates[dipId];
                 toggle.classList.toggle('dip-on', userDipStates[dipId]);
-                transport.send('input', `@dip:id=${dipId}&state=${userDipStates[dipId] ? 1 : 0}`);
+                master.send(`@dip:id=${dipId}&state=${userDipStates[dipId]?1:0}`);
                 localStorage.setItem('pinmame_dips', JSON.stringify(userDipStates));
             };
-            toggle.addEventListener('mousedown', toggleDip); toggle.addEventListener('touchstart', toggleDip, { passive: false });
+            toggle.addEventListener('mousedown', toggleDip); toggle.addEventListener('touchstart', toggleDip, { passive:false });
             wrap.appendChild(label); wrap.appendChild(toggle); bankEl.appendChild(wrap); dipToggles.push(toggle);
         }
         dipContainer.appendChild(bankEl);
@@ -523,114 +516,76 @@ function buildDipSwitches(transport) {
 
 function buildLampGrid() {
     const grid = document.getElementById('lampGrid');
-    for (let i = 0; i < 96; i++) {
-        const cell = document.createElement('div'); cell.className = 'cell';
-        cell.textContent = 'L' + String(i + 1).padStart(2, '0');
-        grid.appendChild(cell); lampCells.push(cell);
-    }
+    for (let i = 0; i < 96; i++) { const c = document.createElement('div'); c.className='cell'; c.textContent='L'+String(i+1).padStart(2,'0'); grid.appendChild(c); lampCells.push(c); }
 }
 
 function buildSolGrid() {
     const grid = document.getElementById('solGrid');
-    for (let i = 0; i < 32; i++) {
-        const cell = document.createElement('div'); cell.className = 'cell';
-        cell.textContent = 'S' + String(i + 1).padStart(2, '0');
-        grid.appendChild(cell); solCells.push(cell);
-    }
+    for (let i = 0; i < 32; i++) { const c = document.createElement('div'); c.className='cell'; c.textContent='S'+String(i+1).padStart(2,'0'); grid.appendChild(c); solCells.push(c); }
 }
 
-function setupSystemHandlers(transport) {
+function setupSystemHandlers(master) {
     rebootBtn.onclick = () => location.reload();
-    clearRomBtn.onclick = () => {
-        sessionStorage.removeItem('custom_rom_bytes');
-        sessionStorage.removeItem('custom_rom_filename');
-        location.reload();
-    };
+    clearRomBtn.onclick = () => { sessionStorage.removeItem('custom_rom_bytes'); sessionStorage.removeItem('custom_rom_filename'); location.reload(); };
     romUploader.onchange = (e) => {
         const file = e.target.files[0]; if (!file) return;
         const reader = new FileReader();
         reader.onload = (evt) => {
-            const bytes = new Uint8Array(evt.target.result);
-            let bin = ''; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-            sessionStorage.setItem('custom_rom_bytes',    btoa(bin));
-            sessionStorage.setItem('custom_rom_filename', file.name);
-            location.reload();
+            const bytes = new Uint8Array(evt.target.result); let bin = '';
+            for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+            sessionStorage.setItem('custom_rom_bytes', btoa(bin)); sessionStorage.setItem('custom_rom_filename', file.name); location.reload();
         };
         reader.readAsArrayBuffer(file);
     };
-
-    const attachMacroBtn = (btnId, id) => {
+    const attachMacro = (btnId, id) => {
         const btn = document.getElementById(btnId); if (!btn) return;
-        const down = (e) => { if (e.type.startsWith('touch')) e.preventDefault(); swCells[id]?.classList.add('sw-user');    transport.send('input', `@set:id=${id}&state=1`); };
-        const up   = (e) => { if (e.type.startsWith('touch')) e.preventDefault(); swCells[id]?.classList.remove('sw-user'); transport.send('input', `@set:id=${id}&state=0`); };
-        btn.addEventListener('mousedown', down); btn.addEventListener('touchstart', down, { passive: false });
-        btn.addEventListener('mouseup',   up);   btn.addEventListener('touchend',   up,   { passive: false });
-        btn.addEventListener('mouseleave', up);  btn.addEventListener('touchcancel', up,  { passive: false });
+        const down = (e) => { if (e.type.startsWith('touch')) e.preventDefault(); swCells[id]?.classList.add('sw-user');    master.send(`@set:id=${id}&state=1`); };
+        const up   = (e) => { if (e.type.startsWith('touch')) e.preventDefault(); swCells[id]?.classList.remove('sw-user'); master.send(`@set:id=${id}&state=0`); };
+        btn.addEventListener('mousedown', down); btn.addEventListener('touchstart', down, { passive:false });
+        btn.addEventListener('mouseup',   up);   btn.addEventListener('touchend',   up,   { passive:false });
+        btn.addEventListener('mouseleave', up);  btn.addEventListener('touchcancel', up,  { passive:false });
     };
-    attachMacroBtn('coinBtn',  COIN_ID);
-    attachMacroBtn('startBtn', START_ID);
-    attachMacroBtn('testBtn',  TEST_ID);
+    attachMacro('coinBtn', COIN_ID); attachMacro('startBtn', START_ID); attachMacro('testBtn', TEST_ID);
+
+    // Bouton connexion d'un nouveau maître série
+    const connectBtn = document.getElementById('connectHardwareBtn');
+    if (connectBtn && navigator.serial) {
+        connectBtn.style.display = 'inline-block';
+        connectBtn.onclick = async () => {
+            try {
+                const newMaster = await requestSerialMaster();
+                logToTerminal(`🔌 Nouveau maître : ${newMaster.name}`);
+            } catch (err) { logToTerminal(`❌ ${err.message}`); }
+        };
+    }
 }
 
-// ── Bootstrap ─────────────────────────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════════════════════════════
+// BOOTSTRAP
+// ═══════════════════════════════════════════════════════════════════════════════
 
-async function connectTransport() {
-    const transport = await createTransport();
+async function bootstrap() {
+    const masters = await discoverMasters();
+    const master  = await selectMaster(masters);
 
-    // Audio unlock on any interaction
-    const audioUnlock = () => unlockAudio(transport);
+    if (master instanceof SerialMaster) await master.start();
+
+    updateMasterStatus(master);
+
+    const display = new GottliebDisplayEmulator('vfdCanvas');
+    connectMaster(master, display);
+
+    const audioUnlock = () => unlockAudio(master);
     document.body.addEventListener('click',      audioUnlock, { passive: true });
     document.body.addEventListener('touchstart', audioUnlock, { passive: true });
     setTimeout(audioUnlock, 500);
 
-    // Connector status
-    updateConnectorStatus(transport.connectedTypes, transport.type);
-
-    // "Connect hardware" button (only if WebSerial available)
-    const connectBtn = document.getElementById('connectHardwareBtn');
-    if (connectBtn) {
-        if (navigator.serial) {
-            connectBtn.style.display = 'inline-block';
-            connectBtn.onclick = async () => {
-                try {
-                    const type = await requestNewPort(transport);
-                    if (type) {
-                        updateConnectorStatus(transport.connectedTypes, transport.type);
-                        logToTerminal(`🔌 ${type} connecté via WebSerial`);
-                    }
-                } catch (err) {
-                    logToTerminal(`❌ ${err.message}`);
-                }
-            };
-        }
-    }
-
-    // Display emulator (emulDisplay.js)
-    const display = new GottliebDisplayEmulator('vfdCanvas');
-
-    // Message routing
-    transport.onMessage((channel, line, raw) => {
-        if (channel === 'audio') {
-            feedAudioRingBuffer(raw.left, raw.right);
-            return;
-        }
-        if (channel === 'display') {
-            display.parseCommand(line);
-            logHardwareTraffic('MASTER', 'DISPLAY', line, 'DISPLAY');
-        } else if (channel === 'driver') {
-            handleDriverLine(line);
-        } else if (channel === 'status') {
-            handleStatusLine(line);
-        }
-    });
-
-    // Build grids now that transport is ready
-    buildSwitchGrid(transport);
-    buildSoundGrid(transport);
-    buildDipSwitches(transport);
+    buildSwitchGrid(master);
+    buildSoundGrid(master);
+    buildDipSwitches(master);
     buildLampGrid();
     buildSolGrid();
-    setupSystemHandlers(transport);
+    setupSystemHandlers(master);
 }
 
-connectTransport();
+bootstrap();

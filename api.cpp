@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V195.06 (FULL KEEPALIVE EXPORTS)
+// 🏷️ VERSION : API-CORE-GATEWAY-V195.07 (EVENT-DRIVEN NOTIFICATION COUNTERS)
 // =========================================================================
 
 #include <iostream>
@@ -326,6 +326,10 @@ extern "C" {
             vfd_export[20 + i] = coreGlobals.segments[20 + i].w & 0xFFFF;
         }
         
+        // 🔔 NOTIFICATION : Incrémenter le counter VFD pour signaler les changements
+        uint32_t* vfd_counter = (uint32_t*)&g_shared_corridor[1080];
+        (*vfd_counter)++;
+        
         for (int sw = 0; sw < 80; sw++) { core_setSw(sw, g_shared_corridor[100 + sw]); }
 
         if (Machine && Machine->input_ports) {
@@ -348,8 +352,16 @@ extern "C" {
         for (int b = 0; b < 10; b++) { g_shared_corridor[200 + b] = coreGlobals.swMatrix[b]; }
         for (int l = 0; l < 12; l++) { g_shared_corridor[300 + l] = coreGlobals.lampMatrix[l]; }
         
+        // 🔔 NOTIFICATION : Incrémenter le counter LAMPES pour signaler les changements
+        uint32_t* lamp_counter = (uint32_t*)&g_shared_corridor[1084];
+        (*lamp_counter)++;
+        
         uint32_t solenoids_state = coreGlobals.solenoids;
         memcpy(&g_shared_corridor[320], &solenoids_state, 4);
+        
+        // 🔔 NOTIFICATION : Incrémenter le counter SOLENOIDS pour signaler les changements
+        uint32_t* sol_counter = (uint32_t*)&g_shared_corridor[1088];
+        (*sol_counter)++;
 
         uint8_t sound_user_cmd = g_shared_corridor[1060];
         if (sound_user_cmd > 0) {

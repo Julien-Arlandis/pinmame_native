@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Dev Workbench V200.24 - Auto Audio Unlock</title>
+    <title>PinMAME WASM - Dev Workbench V200.23 - Auto Audio Unlock</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -745,8 +745,13 @@ const flipperWorker = new Worker('flipper-worker.js');
 function unlockAudio() {
     if (!audioCtx) {
         const AudioContext = window.AudioContext || window.webkitAudioContext;
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        audioNode = audioCtx.createScriptProcessor(4096, 0, 2);
+        audioCtx = new AudioContext(); // 1. Laisse Android choisir sa fréquence (souvent 48000Hz)
+        audioNode = audioCtx.createScriptProcessor(4096, 1, 2); // 2. Ajoute 1 canal d'entrée virtuel
+        
+        // 3. HACK ANDROID : On connecte un oscillateur silencieux pour forcer le réveil de la puce
+        const reveilAudio = audioCtx.createOscillator();
+        reveilAudio.connect(audioNode);
+        reveilAudio.start();
         audioNode.onaudioprocess = function(e) {
             const outL = e.outputBuffer.getChannelData(0); const outR = e.outputBuffer.getChannelData(1);
             let distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
@@ -842,7 +847,7 @@ flipperWorker.onmessage = function(event) {
                 romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename');
                 romNameDisplay.style.color = "var(--neon-green)"; clearRomBtn.style.display = "inline-block";
             }
-            statusEl.textContent = "🟢 PinMAME Workbench V200.24 - AUDIO RUNNING";
+            statusEl.textContent = "🟢 PinMAME Workbench V200.23 - AUDIO RUNNING";
             statusEl.style.color = "#00ffcc";
             setupButtons(); setupSystemHandlers();
             
@@ -946,7 +951,7 @@ function setupSystemHandlers() {
         reader.onload = (evt) => {
             const bytes = new Uint8Array(evt.target.result); let binaryStr = "";
             for (let i = 0; i < bytes.length; i++) binaryStr += String.fromCharCode(bytes[i]);
-            sessionStorage.setItem('custom_rom_bytes', btoa(binaryStr)); sessionStorage.setItem('custom_rom_filename', file.name.toLowerCase().trim().replace(/\s+/g, '')); location.reload();
+            sessionStorage.setItem('custom_rom_bytes', btoa(binaryStr)); sessionStorage.setItem('custom_rom_filename', file.name); location.reload();
         };
         reader.readAsArrayBuffer(file);
     };

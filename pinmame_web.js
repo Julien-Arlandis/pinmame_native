@@ -4533,6 +4533,124 @@ var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
 
 
 
+  var getCFunc = (ident) => {
+      var func = Module['_' + ident]; // closure exported function
+      assert(func, `Cannot call unknown function ${ident}, make sure it is exported`);
+      return func;
+    };
+  
+  var writeArrayToMemory = (array, buffer) => {
+      assert(array.length >= 0, 'writeArrayToMemory array must have a length (should be an array or typed array)')
+      HEAP8.set(array, buffer);
+    };
+  
+  
+  
+  var stackAlloc = (sz) => __emscripten_stack_alloc(sz);
+  var stringToUTF8OnStack = (str) => {
+      var size = lengthBytesUTF8(str) + 1;
+      var ret = stackAlloc(size);
+      stringToUTF8(str, ret, size);
+      return ret;
+    };
+  
+  
+  
+  
+  
+  
+  
+    /**
+   * @param {string|null=} returnType
+   * @param {Array=} argTypes
+   * @param {Array=} args
+   * @param {Object=} opts
+   */
+  var ccall = (ident, returnType, argTypes, args, opts) => {
+      // For fast lookup of conversion functions
+      var toC = {
+        'string': (str) => {
+          var ret = 0;
+          if (str !== null && str !== undefined && str !== 0) { // null string
+            ret = stringToUTF8OnStack(str);
+          }
+          return ret;
+        },
+        'array': (arr) => {
+          var ret = stackAlloc(arr.length);
+          writeArrayToMemory(arr, ret);
+          return ret;
+        }
+      };
+  
+      function convertReturnValue(ret) {
+        if (returnType === 'string') {
+          return UTF8ToString(ret);
+        }
+        if (returnType === 'boolean') return Boolean(ret);
+        return ret;
+      }
+  
+      var func = getCFunc(ident);
+      var cArgs = [];
+      var stack = 0;
+      assert(returnType !== 'array', 'return type should not be "array"');
+      if (args) {
+        for (var i = 0; i < args.length; i++) {
+          var converter = toC[argTypes[i]];
+          if (converter) {
+            if (stack === 0) stack = stackSave();
+            cArgs[i] = converter(args[i]);
+          } else {
+            cArgs[i] = args[i];
+          }
+        }
+      }
+      // Data for a previous async operation that was in flight before us.
+      var previousAsync = Asyncify.currData;
+      var ret = func(...cArgs);
+      function onDone(ret) {
+        runtimeKeepalivePop();
+        if (stack !== 0) stackRestore(stack);
+        return convertReturnValue(ret);
+      }
+    var asyncMode = opts?.async;
+  
+      // Keep the runtime alive through all calls. Note that this call might not be
+      // async, but for simplicity we push and pop in all calls.
+      runtimeKeepalivePush();
+      if (Asyncify.currData != previousAsync) {
+        // A change in async operation happened. If there was already an async
+        // operation in flight before us, that is an error: we should not start
+        // another async operation while one is active, and we should not stop one
+        // either. The only valid combination is to have no change in the async
+        // data (so we either had one in flight and left it alone, or we didn't have
+        // one), or to have nothing in flight and to start one.
+        assert(!(previousAsync && Asyncify.currData), 'We cannot start an async operation when one is already in flight');
+        assert(!(previousAsync && !Asyncify.currData), 'We cannot stop an async operation in flight');
+        // This is a new async operation. The wasm is paused and has unwound its stack.
+        // We need to return a Promise that resolves the return value
+        // once the stack is rewound and execution finishes.
+        assert(asyncMode, `The call to ${ident} is running asynchronously. If this was intended, add the async option to the ccall/cwrap call.`);
+        return Asyncify.whenDone().then(onDone);
+      }
+  
+      ret = onDone(ret);
+      // If this is an async ccall, ensure we return a promise
+      if (asyncMode) return Promise.resolve(ret);
+      return ret;
+    };
+
+  
+    /**
+   * @param {string=} returnType
+   * @param {Array=} argTypes
+   * @param {Object=} opts
+   */
+  var cwrap = (ident, returnType, argTypes, opts) => {
+      return (...args) => ccall(ident, returnType, argTypes, args, opts);
+    };
+
   var FS_createPath = (...args) => FS.createPath(...args);
 
 
@@ -4597,6 +4715,8 @@ if (Module['wasmBinary']) wasmBinary = Module['wasmBinary'];
 // Begin runtime exports
   Module['addRunDependency'] = addRunDependency;
   Module['removeRunDependency'] = removeRunDependency;
+  Module['ccall'] = ccall;
+  Module['cwrap'] = cwrap;
   Module['FS_preloadFile'] = FS_preloadFile;
   Module['FS_unlink'] = FS_unlink;
   Module['FS_createPath'] = FS_createPath;
@@ -4615,7 +4735,6 @@ if (Module['wasmBinary']) wasmBinary = Module['wasmBinary'];
   'convertI32PairToI53',
   'convertI32PairToI53Checked',
   'convertU32PairToI53',
-  'stackAlloc',
   'getTempRet0',
   'setTempRet0',
   'zeroMemory',
@@ -4640,8 +4759,6 @@ if (Module['wasmBinary']) wasmBinary = Module['wasmBinary'];
   'STACK_ALIGN',
   'POINTER_SIZE',
   'ASSERTIONS',
-  'ccall',
-  'cwrap',
   'convertJsFunctionToWasm',
   'getEmptyTableSlot',
   'updateTableMap',
@@ -4658,8 +4775,6 @@ if (Module['wasmBinary']) wasmBinary = Module['wasmBinary'];
   'stringToUTF32',
   'lengthBytesUTF32',
   'stringToNewUTF8',
-  'stringToUTF8OnStack',
-  'writeArrayToMemory',
   'registerKeyEventCallback',
   'maybeCStringToJsString',
   'findEventTarget',
@@ -4783,6 +4898,7 @@ missingLibrarySymbols.forEach(missingLibrarySymbol)
   'HEAPU64',
   'stackSave',
   'stackRestore',
+  'stackAlloc',
   'createNamedFunction',
   'ptrToString',
   'exitJS',
@@ -4831,6 +4947,8 @@ missingLibrarySymbols.forEach(missingLibrarySymbol)
   'lengthBytesUTF8',
   'intArrayFromString',
   'UTF16Decoder',
+  'stringToUTF8OnStack',
+  'writeArrayToMemory',
   'JSEvents',
   'specialHTMLTargets',
   'findCanvasEventTarget',
@@ -5019,6 +5137,8 @@ var ASM_CONSTS = {
 };
 
 // Imports from the Wasm binary.
+var _api_hook_gottlieb_display_write = Module['_api_hook_gottlieb_display_write'] = makeInvalidEarlyAccess('_api_hook_gottlieb_display_write');
+var _api_pop_ascii_event = Module['_api_pop_ascii_event'] = makeInvalidEarlyAccess('_api_pop_ascii_event');
 var _pinmame_get_gprom_ptr = Module['_pinmame_get_gprom_ptr'] = makeInvalidEarlyAccess('_pinmame_get_gprom_ptr');
 var _pinmame_get_dsprom_ptr = Module['_pinmame_get_dsprom_ptr'] = makeInvalidEarlyAccess('_pinmame_get_dsprom_ptr');
 var _pinmame_get_display = Module['_pinmame_get_display'] = makeInvalidEarlyAccess('_pinmame_get_display');
@@ -5026,8 +5146,8 @@ var _pinmame_get_version = Module['_pinmame_get_version'] = makeInvalidEarlyAcce
 var _pinmame_web_entry = Module['_pinmame_web_entry'] = makeInvalidEarlyAccess('_pinmame_web_entry');
 var _pinmame_web_tick = Module['_pinmame_web_tick'] = makeInvalidEarlyAccess('_pinmame_web_tick');
 var _pinmame_web_boot = Module['_pinmame_web_boot'] = makeInvalidEarlyAccess('_pinmame_web_boot');
-var _free = Module['_free'] = makeInvalidEarlyAccess('_free');
-var _malloc = Module['_malloc'] = makeInvalidEarlyAccess('_malloc');
+var _free = makeInvalidEarlyAccess('_free');
+var _malloc = makeInvalidEarlyAccess('_malloc');
 var _fflush = makeInvalidEarlyAccess('_fflush');
 var _emscripten_stack_get_end = makeInvalidEarlyAccess('_emscripten_stack_get_end');
 var _emscripten_stack_get_base = makeInvalidEarlyAccess('_emscripten_stack_get_base');
@@ -5060,6 +5180,8 @@ var __indirect_function_table = makeInvalidEarlyAccess('__indirect_function_tabl
 var wasmMemory = makeInvalidEarlyAccess('wasmMemory');
 
 function assignWasmExports(wasmExports) {
+  assert(typeof wasmExports['api_hook_gottlieb_display_write'] != 'undefined', 'missing Wasm export: api_hook_gottlieb_display_write');
+  assert(typeof wasmExports['api_pop_ascii_event'] != 'undefined', 'missing Wasm export: api_pop_ascii_event');
   assert(typeof wasmExports['pinmame_get_gprom_ptr'] != 'undefined', 'missing Wasm export: pinmame_get_gprom_ptr');
   assert(typeof wasmExports['pinmame_get_dsprom_ptr'] != 'undefined', 'missing Wasm export: pinmame_get_dsprom_ptr');
   assert(typeof wasmExports['pinmame_get_display'] != 'undefined', 'missing Wasm export: pinmame_get_display');
@@ -5098,6 +5220,8 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['asyncify_stop_rewind'] != 'undefined', 'missing Wasm export: asyncify_stop_rewind');
   assert(typeof wasmExports['memory'] != 'undefined', 'missing Wasm export: memory');
   assert(typeof wasmExports['__indirect_function_table'] != 'undefined', 'missing Wasm export: __indirect_function_table');
+  _api_hook_gottlieb_display_write = Module['_api_hook_gottlieb_display_write'] = createExportWrapper('api_hook_gottlieb_display_write', 1);
+  _api_pop_ascii_event = Module['_api_pop_ascii_event'] = createExportWrapper('api_pop_ascii_event', 0);
   _pinmame_get_gprom_ptr = Module['_pinmame_get_gprom_ptr'] = createExportWrapper('pinmame_get_gprom_ptr', 0);
   _pinmame_get_dsprom_ptr = Module['_pinmame_get_dsprom_ptr'] = createExportWrapper('pinmame_get_dsprom_ptr', 0);
   _pinmame_get_display = Module['_pinmame_get_display'] = createExportWrapper('pinmame_get_display', 0);
@@ -5105,8 +5229,8 @@ function assignWasmExports(wasmExports) {
   _pinmame_web_entry = Module['_pinmame_web_entry'] = createExportWrapper('pinmame_web_entry', 2);
   _pinmame_web_tick = Module['_pinmame_web_tick'] = createExportWrapper('pinmame_web_tick', 1);
   _pinmame_web_boot = Module['_pinmame_web_boot'] = createExportWrapper('pinmame_web_boot', 0);
-  _free = Module['_free'] = createExportWrapper('free', 1);
-  _malloc = Module['_malloc'] = createExportWrapper('malloc', 1);
+  _free = createExportWrapper('free', 1);
+  _malloc = createExportWrapper('malloc', 1);
   _fflush = createExportWrapper('fflush', 1);
   _emscripten_stack_get_end = wasmExports['emscripten_stack_get_end'];
   _emscripten_stack_get_base = wasmExports['emscripten_stack_get_base'];

@@ -533,14 +533,36 @@ function buildSolGrid() {
 
 function setupSystemHandlers(master) {
     rebootBtn.onclick = () => location.reload();
-    clearRomBtn.onclick = () => { sessionStorage.removeItem('custom_rom_bytes'); sessionStorage.removeItem('custom_rom_filename'); location.reload(); };
+    clearRomBtn.onclick = () => {
+        if (master.isLocal) {
+            sessionStorage.removeItem('custom_rom_bytes');
+            sessionStorage.removeItem('custom_rom_filename');
+            location.reload();
+        } else {
+            master.send('@rom:name=bonebstr');
+            clearRomBtn.style.display = 'none';
+            romNameDisplay.textContent = 'bonebstr (Interne)';
+            romNameDisplay.style.color = '';
+        }
+    };
     romUploader.onchange = (e) => {
         const file = e.target.files[0]; if (!file) return;
         const reader = new FileReader();
         reader.onload = (evt) => {
-            const bytes = new Uint8Array(evt.target.result); let bin = '';
+            const bytes = new Uint8Array(evt.target.result);
+            let bin = '';
             for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
-            sessionStorage.setItem('custom_rom_bytes', btoa(bin)); sessionStorage.setItem('custom_rom_filename', file.name); location.reload();
+            const b64 = btoa(bin);
+            if (master.isLocal) {
+                sessionStorage.setItem('custom_rom_bytes', b64);
+                sessionStorage.setItem('custom_rom_filename', file.name);
+                location.reload();
+            } else {
+                master.send(`@rom:name=${encodeURIComponent(file.name)}&data=${b64}`);
+                romNameDisplay.textContent = file.name;
+                romNameDisplay.style.color = 'var(--neon-green)';
+                clearRomBtn.style.display = 'inline-block';
+            }
         };
         reader.readAsArrayBuffer(file);
     };

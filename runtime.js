@@ -416,6 +416,14 @@ Logs
                             if (p.get('driver')  === '1') { ws.connectors.push('DRIVER');  info('  [DRIVER]  connecté'); }
                             return;
                         }
+                        if (line.startsWith('@rom:')) {
+                            const p = new URLSearchParams(line.slice(5));
+                            const name = decodeURIComponent(p.get('name') || 'bonebstr');
+                            const data = p.get('data') || null;
+                            info(`  ROM      : changement → ${name}`);
+                            emulator.sendMessage('INIT_ENGINE', { customRomBytes: data, customRomName: name });
+                            return;
+                        }
                         emulator.handleLine(line);
                     });
                     const disconnect = () => {

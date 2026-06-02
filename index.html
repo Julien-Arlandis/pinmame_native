@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME WASM - Dev Workbench V200.28</title>
+    <title>PinMAME WASM - Dev Workbench V200.29</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -299,7 +299,6 @@
             color: #888;
             position: relative;
             cursor: pointer;
-            transition: all 0.05s ease;
         }
         
         .cell .sw-num-text {
@@ -312,14 +311,13 @@
         }
 
         .cell:focus, .cell:hover {
-            background: #222 !important;
-            border: 2px solid var(--neon-cyan) !important;
+            background: #2a2a2a !important;
             color: #ffffff !important;
             outline: none;
         }
         .cell.sw-user {
             background: #008888 !important;
-            border: 2px solid #ffffff !important;
+            border-color: #008888 !important;
             color: #ffffff !important;
             text-shadow: none !important;
         }
@@ -328,7 +326,7 @@
         }
         .cell.sw-locked {
             background: #cc6600 !important;
-            border: 2px solid #ffffff !important;
+            border-color: #cc6600 !important;
             color: #ffffff !important;
             text-shadow: none !important;
         }

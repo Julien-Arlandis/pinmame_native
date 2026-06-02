@@ -75,13 +75,14 @@ class SerialMaster {
                 for (const cb of this._callbacks) cb(value);
             }
         } catch (e) { console.warn('[SerialMaster]', e); }
-        finally { reader.releaseLock(); }
+        finally { reader.releaseLock(); this._disconnectCallback?.(); }
     }
 
-    send(line)    { this._writer.write(line).catch(() => {}); }
-    onMessage(cb) { this._callbacks.push(cb); }
-    onAudio(cb)   { this._audioCallback = cb; }
-    get name()    { return this._port.name; }
+    send(line)         { this._writer.write(line).catch(() => {}); }
+    onMessage(cb)      { this._callbacks.push(cb); }
+    onAudio(cb)        { this._audioCallback = cb; }
+    onDisconnect(cb)   { this._disconnectCallback = cb; }
+    get name()         { return this._port.name; }
 }
 
 // Tente une connexion WebSocket, attend le handshake @master:name=...
@@ -152,6 +153,7 @@ class GottliebDisplayEmulator {
         this.CHAR_WIDTH = 40; this.CHAR_HEIGHT = 70; this.SPACING = 15;
         this.vfdCells = new Uint16Array(40);
         this.cursorPosition = 0;
+        this._dirty = false;
         this.ascii2gottlieb = new Uint16Array([
             0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,
             0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,
@@ -202,6 +204,7 @@ class GottliebDisplayEmulator {
                 break;
             }
         }
+        this._dirty = true;
     }
 
     _drawSegment(x, y, mask) {
@@ -242,7 +245,7 @@ class GottliebDisplayEmulator {
     }
 
     _startRenderLoop() {
-        const loop = () => { this._render(); requestAnimationFrame(loop); };
+        const loop = () => { if (this._dirty) { this._dirty = false; this._render(); } requestAnimationFrame(loop); };
         requestAnimationFrame(loop);
     }
 }
@@ -416,7 +419,7 @@ function handleStatusLine(line) {
     const p = new URLSearchParams(line.slice(8)), state = p.get('state');
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
-        statusEl.textContent = `🟢 PinMAME Workbench V200.28 — ${rom}`;
+        statusEl.textContent = `🟢 PinMAME Workbench V200.29 — ${rom}`;
         statusEl.style.color = '#00ffcc';
         romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename') || `${rom} (Interne)`;
         if (sessionStorage.getItem('custom_rom_bytes')) {
@@ -464,7 +467,7 @@ function buildSwitchGrid(master) {
             if (isLocked) { isLocked = false; cell.classList.remove('sw-locked'); notify(0); isPressed = false; clearTimeout(holdTimer); return; }
             if (!isPressed) {
                 isPressed = true; notify(1);
-                cell.classList.remove('sw-user'); void cell.offsetWidth; cell.classList.add('sw-user');
+                cell.classList.add('sw-user');
                 holdTimer = setTimeout(() => { if (isPressed) { isLocked = true; cell.classList.remove('sw-user'); cell.classList.add('sw-locked'); } }, 500);
             }
         };
@@ -564,16 +567,25 @@ async function bootstrap() {
 
     updateMasterStatus(master);
 
+    master.onDisconnect(() => {
+        const el = document.getElementById('connectorStatus');
+        if (el) el.innerHTML = '<span style="color:#ff4444">⚡ MAÎTRE DÉCONNECTÉ — rechargez la page</span>';
+        logToTerminal('⚡ Maître déconnecté');
+    });
+
     const display = new GottliebDisplayEmulator('vfdCanvas');
     connectMaster(master, display);
 
     // Annonce les 3 connecteurs au maître distant
     if (!master.isLocal) master.send('@connect:input=1&display=1&driver=1');
 
-    const audioUnlock = () => unlockAudio(master);
-    document.body.addEventListener('click',      audioUnlock, { passive: true });
-    document.body.addEventListener('touchstart', audioUnlock, { passive: true });
-    setTimeout(audioUnlock, 500);
+    // Audio local uniquement si le maître tourne dans la page (Worker)
+    if (master.isLocal) {
+        const audioUnlock = () => unlockAudio(master);
+        document.body.addEventListener('click',      audioUnlock, { passive: true });
+        document.body.addEventListener('touchstart', audioUnlock, { passive: true });
+        setTimeout(audioUnlock, 500);
+    }
 
     buildSwitchGrid(master);
     buildSoundGrid(master);

@@ -341,21 +341,39 @@ Logs
                 // 1. Module npm speaker
                 try {
                     const Speaker = require('speaker');
-                    const spk = new Speaker({ channels: 2, bitDepth: 16, sampleRate: 44100, signed: true });
-                    audioSink  = { write: buf => spk.write(buf) };
+                    let spk = null;
+                    // Queue max ~100ms (4 chunks de ~22ms chacun)
+                    const queue = [], QUEUE_MAX = 4;
+                    let draining = false;
+
+                    const flush = () => {
+                        while (queue.length > 0 && spk) {
+                            const ok = spk.write(queue.shift());
+                            if (!ok) { draining = true; spk.once('drain', () => { draining = false; flush(); }); return; }
+                        }
+                    };
+
+                    const makeSpk = () => {
+                        spk = new Speaker({ channels: 2, bitDepth: 16, sampleRate: 44100, signed: true });
+                        spk.on('error', () => { spk = null; setTimeout(makeSpk, 200); });
+                        spk.on('close', () => { spk = null; setTimeout(makeSpk, 200); });
+                    };
+                    makeSpk();
+
+                    audioSink  = { write: buf => {
+                        // Jette les vieux buffers si on accumule trop (rythme émulateur > rythme réel)
+                        while (queue.length >= QUEUE_MAX) queue.shift();
+                        queue.push(buf);
+                        if (!draining) flush();
+                    }};
                     audioLabel = 'speaker (npm)';
-                } catch {}
+                } catch (e) { info(`  Audio    : speaker non chargé — ${e.message}`); }
 
                 // 2. Fallbacks système
                 if (!audioSink && process.platform === 'darwin') {
                     // SoX play (homebrew: brew install sox)
                     audioSink = await trySpawnSink('play', ['-r','44100','-b','16','-c','2','-e','signed-integer','-t','raw','-']);
                     if (audioSink) audioLabel = 'play (SoX)';
-                }
-                if (!audioSink && process.platform === 'darwin') {
-                    // ffplay (homebrew: brew install ffmpeg)
-                    audioSink = await trySpawnSink('ffplay', ['-f','s16le','-ar','44100','-ac','2','-nodisp','-loglevel','quiet','-i','pipe:0']);
-                    if (audioSink) audioLabel = 'ffplay';
                 }
                 if (!audioSink && process.platform === 'linux') {
                     // aplay — ALSA intégré sur la plupart des Linux/Pi
@@ -412,8 +430,21 @@ Logs
                 console.error('⚠️  Module ws absent — npm install ws');
             }
 
+            // Pacing : simule le feedback @audio:distance du navigateur
+            // Sans ça l'émulateur tourne en roue libre (trop rapide, son haché)
+            let samplesProduced = 0;
+            const paceStart = Date.now();
+            const SAMPLE_RATE = 44100;
+
+            setInterval(() => {
+                const samplesConsumed = Math.floor((Date.now() - paceStart) / 1000 * SAMPLE_RATE);
+                const distance = Math.max(0, samplesProduced - samplesConsumed);
+                emulator.handleLine(`@audio:distance=${distance}`);
+            }, 32);
+
             globalThis.onEmulatorMessage = function({ channel, line, left, right }) {
                 if (channel === 'audio') {
+                    samplesProduced += left.length;
                     if (audioSink) audioSink.write(floatTo16BitPCM(left, right));
                 } else if (line) {
                     log(line);

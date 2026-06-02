@@ -30,7 +30,6 @@ extern "C" {
 #include "inptport.h"
 #include "wpc/gts80.h"
 #include "wpc/gts80s.h"
-#include "wpc/sndbrd.h"
 }
 
 static uint8_t g_dummy_buffer[1024 * 1024] = {0}; 
@@ -461,10 +460,9 @@ extern "C" {
     GTS80_ROMEND
 
     MACHINE_DRIVER_EXTERN(gts80bs3a);
-    extern const struct GameDriver driver_0;
-    const struct GameDriver driver_gts80b_generic = {
+    struct GameDriver driver_gts80b_generic = {
         __FILE__,
-        &driver_0,
+        NULL,                          // pas de parent
         "gts80b_generic",
         NULL,
         "Gottlieb System 80B (generic)",
@@ -491,7 +489,6 @@ extern "C" {
     extern struct GameDriver driver_tagteam;
     extern struct GameDriver driver_excalibr;
     extern struct GameDriver driver_diamond;
-    extern struct GameDriver driver_gts80b_generic;
 
     struct GameDriver *drivers[] = {
         &driver_bonebstr, &driver_badgirls, &driver_genesis, &driver_txsector,

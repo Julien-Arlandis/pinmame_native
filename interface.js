@@ -1,5 +1,235 @@
 // interface.js
-// Browser UI: transport discovery, display rendering, grids, audio
+// Transport layer + Browser UI: WebSerial hardware and local Worker fallback
+
+// ── WorkerTransport ───────────────────────────────────────────────────────────
+
+class WorkerTransport {
+    constructor() {
+        this._worker = new Worker('runtime.js');
+        this._callbacks = [];
+        this._worker.onmessage = (e) => {
+            const msg = e.data;
+            if (msg.channel) for (const cb of this._callbacks) cb(msg.channel, msg.line || null, msg);
+        };
+    }
+    send(channel, line) { this._worker.postMessage({ channel, line }); }
+    onMessage(cb) { this._callbacks.push(cb); }
+    get type() { return 'worker'; }
+    get connectedTypes() { return { input: 1, driver: 1, display: 1 }; }
+}
+
+// ── SerialTransport ───────────────────────────────────────────────────────────
+
+async function* readSerialLines(port) {
+    const decoder = new TextDecoder();
+    let buffer = '';
+    const reader = port.readable.getReader();
+    try {
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let nl;
+            while ((nl = buffer.indexOf('\n')) !== -1) {
+                const line = buffer.slice(0, nl).trim();
+                buffer = buffer.slice(nl + 1);
+                if (line) yield line;
+            }
+        }
+    } finally { reader.releaseLock(); }
+}
+
+class SerialTransport {
+    constructor() {
+        this._ports   = { input: [], driver: [], display: [] };
+        this._writers = { input: [], driver: [], display: [] };
+        this._callbacks = [];
+    }
+    onMessage(cb) { this._callbacks.push(cb); }
+    send(channel, line) {
+        const encoded = new TextEncoder().encode(line + '\n');
+        for (const w of (this._writers[channel] || [])) w.write(encoded).catch(() => {});
+    }
+    async addPort(port) {
+        try { await port.open({ baudRate: 115200 }); } catch { if (!port.readable) return null; }
+        const deviceType = await this._readHandshake(port);
+        if (!deviceType || !this._ports[deviceType]) return null;
+        const writer = port.writable.getWriter();
+        this._ports[deviceType].push(port);
+        this._writers[deviceType].push(writer);
+        this._startReadLoop(port, deviceType);
+        return deviceType;
+    }
+    async _readHandshake(port) {
+        const decoder = new TextDecoder();
+        let buf = '';
+        const reader = port.readable.getReader();
+        const deadline = Date.now() + 2000;
+        try {
+            while (Date.now() < deadline) {
+                const timeout = new Promise(r => setTimeout(() => r({ value: null, done: true }), 300));
+                const { value, done } = await Promise.race([reader.read(), timeout]);
+                if (done || !value) break;
+                buf += decoder.decode(value, { stream: true });
+                const nl = buf.indexOf('\n');
+                if (nl !== -1) {
+                    const line = buf.slice(0, nl).trim();
+                    if (line.startsWith('@device:')) {
+                        return new URLSearchParams(line.slice(8)).get('type');
+                    }
+                    break;
+                }
+            }
+        } finally { reader.releaseLock(); }
+        return null;
+    }
+    _startReadLoop(port, channel) {
+        (async () => {
+            try {
+                for await (const line of readSerialLines(port)) {
+                    for (const cb of this._callbacks) cb(channel, line, { channel, line });
+                }
+            } catch {
+                console.warn(`[Serial] port ${channel} déconnecté`);
+                const idx = this._ports[channel].indexOf(port);
+                if (idx !== -1) { this._ports[channel].splice(idx, 1); this._writers[channel].splice(idx, 1); }
+            }
+        })();
+    }
+    get type() { return 'serial'; }
+    get connectedTypes() {
+        return { input: this._ports.input.length, driver: this._ports.driver.length, display: this._ports.display.length };
+    }
+}
+
+async function scanAuthorizedPorts(transport) {
+    if (!navigator.serial) return;
+    for (const port of await navigator.serial.getPorts()) await transport.addPort(port);
+}
+
+async function requestNewPort(transport) {
+    if (!navigator.serial) throw new Error('WebSerial non disponible');
+    return transport.addPort(await navigator.serial.requestPort());
+}
+
+async function createTransport() {
+    if (typeof navigator !== 'undefined' && navigator.serial) {
+        const serial = new SerialTransport();
+        await scanAuthorizedPorts(serial);
+        const ct = serial.connectedTypes;
+        if (ct.input + ct.driver + ct.display > 0) return serial;
+    }
+    return new WorkerTransport();
+}
+
+// ── GottliebDisplayEmulator ───────────────────────────────────────────────────
+
+class GottliebDisplayEmulator {
+    constructor(canvasId) {
+        this.canvas = document.getElementById(canvasId);
+        if (!this.canvas) throw new Error(`Canvas '${canvasId}' introuvable`);
+        this.ctx = this.canvas.getContext('2d');
+        this.CHAR_WIDTH = 40; this.CHAR_HEIGHT = 70; this.SPACING = 15;
+        this.vfdCells = new Uint16Array(40);
+        this.cursorPosition = 0;
+        this.ascii2gottlieb = new Uint16Array([
+            0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,
+            0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,
+            0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,
+            0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,
+            0x0000,0x000c,0x0202,0x12bc,0x298d,0x1248,0x2af5,0x0400,
+            0x2400,0x0900,0x3f3f,0x0b0b,0x0000,0x0909,0x0000,0x2100,
+            0x003f,0x0006,0x09db,0x09cf,0x0966,0x09ed,0x09fd,0x0007,
+            0x09ff,0x09ef,0x0000,0x0000,0x2400,0x0909,0x0900,0x2203,
+            0x003f,0x09f7,0x2a0f,0x0039,0x220f,0x0979,0x0971,0x01bd,
+            0x09f6,0x2209,0x001e,0x2470,0x0038,0x0536,0x1136,0x003f,
+            0x09f3,0x103f,0x19f3,0x09ed,0x2201,0x003e,0x4430,0x5036,
+            0x5500,0x2500,0x4409,0x0039,0x4400,0x000f,0x0000,0x0008,
+            0x0100,0x09f7,0x2a0f,0x0039,0x220f,0x0979,0x0971,0x01bd,
+            0x09f6,0x2209,0x001e,0x2470,0x0038,0x0536,0x1136,0x003f,
+            0x09f3,0x103f,0x19f3,0x09ed,0x2201,0x003e,0x4430,0x5036,
+            0x5500,0x2500,0x4409,0x0000,0x0000,0x0000,0x0000
+        ]);
+        this._startRenderLoop();
+    }
+
+    parseCommand(cmd) {
+        if (!cmd || !cmd.startsWith('!display:')) return;
+        const params = new URLSearchParams(cmd.slice(9));
+        const action = params.get('action');
+        switch (action) {
+            case 'raw': {
+                const data = params.get('data') || '';
+                for (let i = 0; i < 40; i++)
+                    this.vfdCells[i] = parseInt(data.slice(i * 4, i * 4 + 4), 16) || 0;
+                break;
+            }
+            case 'clear':
+                this.vfdCells.fill(0); this.cursorPosition = 0; break;
+            case 'move': {
+                const p = parseInt(params.get('pos'), 10);
+                if (p >= 0 && p < 40) this.cursorPosition = p;
+                break;
+            }
+            case 'write': {
+                const posParam = params.get('pos');
+                if (posParam !== null) this.cursorPosition = parseInt(posParam, 10);
+                const text = params.get('text') || '';
+                for (let i = 0; i < text.length && this.cursorPosition < 40; i++) {
+                    const code = text.charCodeAt(i);
+                    let mask = this.ascii2gottlieb[code & 0x7F];
+                    if (code & 0x80) mask |= 0x8000;
+                    this.vfdCells[this.cursorPosition++] = mask;
+                }
+                break;
+            }
+        }
+    }
+
+    _drawSegment(x, y, mask) {
+        const ctx = this.ctx; const w = this.CHAR_WIDTH, h = this.CHAR_HEIGHT, m = h / 2, hw = w / 2;
+        ctx.save(); ctx.translate(x, y); ctx.transform(1, 0, -0.15, 1, 0, 0);
+        ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+        const seg = (bit, fn) => {
+            ctx.strokeStyle = (mask & bit) ? '#00ffff' : '#101a1a';
+            ctx.shadowBlur  = (mask & bit) ? 10 : 0;
+            ctx.shadowColor = '#00ffff';
+            ctx.beginPath(); fn(); ctx.stroke();
+        };
+        seg(0x0001,()=>{ctx.moveTo(2,0);ctx.lineTo(w-2,0)});
+        seg(0x0002,()=>{ctx.moveTo(w,2);ctx.lineTo(w,m-2)});
+        seg(0x0004,()=>{ctx.moveTo(w,m+2);ctx.lineTo(w,h-2)});
+        seg(0x0008,()=>{ctx.moveTo(2,h);ctx.lineTo(w-2,h)});
+        seg(0x0010,()=>{ctx.moveTo(0,m+2);ctx.lineTo(0,h-2)});
+        seg(0x0020,()=>{ctx.moveTo(0,2);ctx.lineTo(0,m-2)});
+        seg(0x0040,()=>{ctx.moveTo(2,m);ctx.lineTo(hw-2,m)});
+        seg(0x0800,()=>{ctx.moveTo(hw+2,m);ctx.lineTo(w-2,m)});
+        seg(0x0100,()=>{ctx.moveTo(2,2);ctx.lineTo(hw-2,m-2)});
+        seg(0x0200,()=>{ctx.moveTo(hw,2);ctx.lineTo(hw,m-3)});
+        seg(0x0400,()=>{ctx.moveTo(w-2,2);ctx.lineTo(hw+2,m-2)});
+        seg(0x4000,()=>{ctx.moveTo(2,h-2);ctx.lineTo(hw-2,m+2)});
+        seg(0x2000,()=>{ctx.moveTo(hw,h-4);ctx.lineTo(hw,m+3)});
+        seg(0x1000,()=>{ctx.moveTo(w-2,h-2);ctx.lineTo(hw+2,m+2)});
+        seg(0x0080,()=>{ctx.moveTo(w+2,h);ctx.lineTo(w+6,h+8)});
+        seg(0x8000,()=>{ctx.arc(w+4,h,2,0,Math.PI*2)});
+        ctx.restore();
+    }
+
+    _render() {
+        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        for (let i = 0; i < 20; i++) {
+            this._drawSegment(30 + i * (this.CHAR_WIDTH + this.SPACING), 40,  this.vfdCells[i]);
+            this._drawSegment(30 + i * (this.CHAR_WIDTH + this.SPACING), 140, this.vfdCells[20 + i]);
+        }
+    }
+
+    _startRenderLoop() {
+        const loop = () => { this._render(); requestAnimationFrame(loop); };
+        requestAnimationFrame(loop);
+    }
+}
+
+// ── Browser UI ────────────────────────────────────────────────────────────────
 
 const SOUND_DICTIONARY = { 1: "STOP", 2: "BGM 1", 3: "BGM 2", 4: "BGM 3", 5: "BGM 4", 61: "BANK CLEAR", 63: "TEST TONE" };
 const SWITCH_DICTIONARY = {

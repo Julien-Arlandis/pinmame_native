@@ -63,9 +63,10 @@ function normalizeRomBytes(customRomBytes) {
 function createEmulator() {
     let pinmameInstance = null;
     let vfdMemoryPointer = 0;
+    let lastVfdCounter  = 0;
     let lastLampCounter = 0;
-    let lastSolCounter = 0;
-    let lastSolState = 0;
+    let lastSolCounter  = 0;
+    let lastSolState    = 0;
 
     const Module = {
         locateFile(path) {
@@ -147,9 +148,21 @@ function createEmulator() {
         function loop() {
             if (pinmameInstance && vfdMemoryPointer) {
 
-                // Drain ASCII display queue from api_pop_ascii_event()
-                // DisplayEvent struct: byte[0]=position, byte[1]=ascii_char, byte[2]=action
-                // action: 0=WRITE, 1=MOVE, 2=CLEAR
+                // Raw segment snapshot — fiable, utilisé par le rendu browser (emulDisplay)
+                const vfdCounter = readU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1080);
+                if (vfdCounter !== lastVfdCounter) {
+                    lastVfdCounter = vfdCounter;
+                    let data = '';
+                    for (let i = 0; i < 40; i++) {
+                        const offset = vfdMemoryPointer + (i * 2);
+                        const mask = pinmameInstance.HEAPU8[offset] | (pinmameInstance.HEAPU8[offset + 1] << 8);
+                        data += mask.toString(16).padStart(4, '0');
+                    }
+                    postToChannel('display', `!display:action=raw&data=${data}`);
+                }
+
+                // ASCII FIFO depuis api_pop_ascii_event() — pour le hardware série
+                // (actif quand api_hook_gottlieb_display_write est câblé dans le driver)
                 let ptr;
                 while ((ptr = pinmameInstance._api_pop_ascii_event()) !== 0) {
                     const pos    = pinmameInstance.HEAPU8[ptr];

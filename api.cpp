@@ -476,8 +476,11 @@ extern "C" {
     };
     // ─────────────────────────────────────────────────────────────────────────
 
+    extern struct GameDriver driver_bonebstr; // TEST DIAGNOSTIC — à retirer après confirmation
+
     struct GameDriver *drivers[] = {
-        &driver_gts80b_generic,
+        &driver_bonebstr,         // index 0 : driver nommé (test)
+        &driver_gts80b_generic,   // index 1 : driver générique
         nullptr
     };
 
@@ -487,10 +490,10 @@ extern "C" {
     void pinmame_web_boot() {
         const char* rom_name = (const char*)&g_shared_corridor[1000];
         int i = 0;
-        // Le driver générique adopte le nom de la ROM → MAME ouvre le bon ZIP
-        driver_gts80b_generic.name = rom_name;
-
-        g_selected_game_index = 0;
+        // TEST : utilise bonebstr (index 0) si ROM=bonebstr, sinon generic (index 1)
+        g_selected_game_index = (strcmp(rom_name, "bonebstr") == 0) ? 0 : 1;
+        if (g_selected_game_index == 1)
+            driver_gts80b_generic.name = rom_name;
         options.samplerate = 44100;
         options.gui_host = 1; // supprime "Press any key to continue"
         bailing = 0;

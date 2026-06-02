@@ -429,7 +429,7 @@ extern "C" {
 
     static core_tGameData gts80b_genericGameData = {
         GEN_GTS80B, gts80b_generic_dispAlpha,
-        {FLIP_SWNO(6,16), 0, 0, 0, SNDBRD_GTS80B, GTS80_DISPALPHA},
+        {FLIP_SWNO(6,16), 0, 0, 0, (20<<8)|0 /* SNDBRD_GTS80B */, GTS80_DISPALPHA},
         NULL, {{0},{0x80}}
     };
 

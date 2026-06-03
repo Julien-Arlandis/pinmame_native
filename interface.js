@@ -33,7 +33,9 @@ function createWorkerPort() {
 
     // sessionStorage n'est pas accessible depuis un Worker — on lit ici et on envoie
     const customRomBytes = sessionStorage.getItem('custom_rom_bytes') || null;
-    const customRomName  = sessionStorage.getItem('custom_rom_filename') || null;
+    const customRomName  = sessionStorage.getItem('custom_rom_filename')
+        || new URLSearchParams(location.search).get('rom')
+        || null;
     worker.postMessage({ type: 'INIT_ENGINE', payload: { customRomBytes, customRomName } });
 
     return {
@@ -278,6 +280,7 @@ const termEl         = document.getElementById('terminal');
 const dipContainer   = document.getElementById('dipContainer');
 const romUploader    = document.getElementById('romUploader');
 const romNameDisplay = document.getElementById('romNameDisplay');
+const romSelector    = document.getElementById('romSelector');
 const clearRomBtn    = document.getElementById('clearRomBtn');
 const rebootBtn      = document.getElementById('rebootBtn');
 const audioLed       = document.getElementById('audio-led');
@@ -452,12 +455,15 @@ function handleStatusLine(line) {
     const p = new URLSearchParams(line.slice(8)), state = p.get('state');
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
-        statusEl.textContent = `🟢 PinMAME Workbench v1.4 — ${rom}`;
+        statusEl.textContent = `🟢 PinMAME Workbench v1.5 — ${rom}`;
         statusEl.style.color = '#00ffcc';
         romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename') || `${rom} (Interne)`;
         if (sessionStorage.getItem('custom_rom_bytes')) {
             romNameDisplay.style.color = 'var(--neon-green)';
             clearRomBtn.style.display = 'inline-block';
+        }
+        if (romSelector && romSelector.querySelector(`option[value="${rom}"]`)) {
+            romSelector.value = rom;
         }
     } else if (state === 'loading') {
         statusEl.textContent = '🟡 Chargement...'; statusEl.style.color = '';
@@ -477,6 +483,10 @@ function connectMaster(master, display) {
             handleDriverLine(line);
         } else if (line.startsWith('@status:')) {
             handleStatusLine(line);
+        } else if (line.startsWith('@roms:list=')) {
+            const names = line.slice(11).split(',').map(decodeURIComponent).filter(Boolean);
+            romSelector.innerHTML = names.map(n => `<option value="${n}">${n}</option>`).join('');
+            if (romSelector.options.length) romSelector.style.display = 'inline-block';
         }
     });
 }
@@ -578,6 +588,25 @@ function setupSystemHandlers(master) {
             romNameDisplay.style.color = '';
         }
     };
+    if (romSelector) {
+        romSelector.onchange = () => {
+            const name = romSelector.value;
+            if (!name) return;
+            if (master.isLocal) {
+                sessionStorage.setItem('custom_rom_filename', name);
+                sessionStorage.removeItem('custom_rom_bytes');
+                // Recharger avec la ROM intégrée sélectionnée via query string
+                const url = new URL(location.href);
+                url.searchParams.set('rom', name);
+                location.href = url.toString();
+            } else {
+                master.send(`@rom:name=${encodeURIComponent(name)}`);
+                romNameDisplay.textContent = name;
+                romNameDisplay.style.color = 'var(--neon-green)';
+                clearRomBtn.style.display = 'inline-block';
+            }
+        };
+    }
     romUploader.onchange = (e) => {
         const file = e.target.files[0]; if (!file) return;
         const reader = new FileReader();
@@ -591,7 +620,7 @@ function setupSystemHandlers(master) {
                 sessionStorage.setItem('custom_rom_filename', file.name);
                 location.reload();
             } else {
-                master.send(`@rom:name=${encodeURIComponent(file.name)}&data=${b64}`);
+                master.send(`@rom:name=${encodeURIComponent(file.name)}&data=${encodeURIComponent(b64)}`);
                 romNameDisplay.textContent = file.name;
                 romNameDisplay.style.color = 'var(--neon-green)';
                 clearRomBtn.style.display = 'inline-block';
@@ -615,7 +644,19 @@ function setupSystemHandlers(master) {
 // BOOTSTRAP
 // ═══════════════════════════════════════════════════════════════════════════════
 
+async function loadRomManifest() {
+    try {
+        const r = await fetch('roms/manifest.json');
+        if (!r.ok) return;
+        const list = await r.json();
+        if (!Array.isArray(list) || !list.length) return;
+        romSelector.innerHTML = list.map(n => `<option value="${n}">${n}</option>`).join('');
+        romSelector.style.display = 'inline-block';
+    } catch (_) {}
+}
+
 async function bootstrap() {
+    await loadRomManifest();
     const masters = await discoverMasters();
     const master  = await selectMaster(masters);
 
@@ -623,9 +664,20 @@ async function bootstrap() {
     updateMasterStatus(master);
 
     master.onDisconnect(() => {
+        if (master.isLocal) {
+            const el = document.getElementById('connectorStatus');
+            if (el) el.innerHTML = '<span style="color:#ff4444">⚡ MAÎTRE DÉCONNECTÉ — rechargez la page</span>';
+            logToTerminal('⚡ Maître déconnecté');
+            return;
+        }
         const el = document.getElementById('connectorStatus');
-        if (el) el.innerHTML = '<span style="color:#ff4444">⚡ MAÎTRE DÉCONNECTÉ — rechargez la page</span>';
-        logToTerminal('⚡ Maître déconnecté');
+        let countdown = 3;
+        const tick = () => {
+            if (el) el.innerHTML = `<span style="color:#ffaa00">🔄 Reconnexion dans ${countdown}s...</span>`;
+            if (countdown-- > 0) setTimeout(tick, 1000); else location.reload();
+        };
+        tick();
+        logToTerminal('⚡ Maître déconnecté — rechargement automatique');
     });
 
     const display = new GottliebDisplayEmulator('vfdCanvas');

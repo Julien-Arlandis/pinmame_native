@@ -46,7 +46,8 @@ function writeU32(heap, base, value) {
 }
 
 function b64ToArrayBuffer(base64) {
-    const binaryStr = typeof atob === 'function' ? atob(base64) : Buffer.from(base64, 'base64').toString('binary');
+    const clean = base64.replace(/ /g, '+');
+    const binaryStr = typeof atob === 'function' ? atob(clean) : Buffer.from(clean, 'base64').toString('binary');
     const bytes = new Uint8Array(binaryStr.length);
     for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
     return bytes.buffer;
@@ -396,6 +397,7 @@ Logs
 
             const emulator  = createEmulator();
             const wsClients = new Set();
+            let lastStatusLine = null;
 
             try {
                 const { WebSocketServer } = require('ws');
@@ -412,14 +414,41 @@ Logs
                             if (p.get('input')   === '1') { ws.connectors.push('INPUT');   info('  [INPUT]   connecté'); }
                             if (p.get('display') === '1') { ws.connectors.push('DISPLAY'); info('  [DISPLAY] connecté'); }
                             if (p.get('driver')  === '1') { ws.connectors.push('DRIVER');  info('  [DRIVER]  connecté'); }
+                            // Envoyer la liste des ROMs disponibles dans roms/
+                            const romsDir = [
+                                path.join(process.cwd(), 'roms'),
+                                path.join(__dirname, 'roms')
+                            ].find(d => { try { return fs.statSync(d).isDirectory(); } catch { return false; } });
+                            if (romsDir) {
+                                const roms = fs.readdirSync(romsDir)
+                                    .filter(f => f.endsWith('.zip'))
+                                    .map(f => f.slice(0, -4))
+                                    .sort();
+                                if (roms.length) ws.send(`@roms:list=${roms.map(encodeURIComponent).join(',')}`);
+                            }
+                            // Renvoyer le statut actuel si l'émulateur est déjà prêt
+                            if (lastStatusLine) ws.send(lastStatusLine);
                             return;
                         }
                         if (line.startsWith('@rom:')) {
                             const p = new URLSearchParams(line.slice(5));
-                            const name = decodeURIComponent(p.get('name') || 'bonebstr');
+                            const name = decodeURIComponent(p.get('name') || 'bonebstr').replace(/\.zip$/i, '');
                             const data = p.get('data') || null;
-                            info(`  ROM      : changement → ${name}`);
-                            emulator.sendMessage('INIT_ENGINE', { customRomBytes: data, customRomName: name });
+                            info(`  ROM      : redémarrage → ${name}`);
+                            if (data) {
+                                const romPath = path.join(process.cwd(), 'roms', `${name}.zip`);
+                                fs.writeFileSync(romPath, Buffer.from(data, 'base64'));
+                                info(`  ROM sauvegardée → ${romPath}`);
+                            }
+                            const newArgs = process.argv.slice(2)
+                                .filter(a => !a.startsWith('--rom=') && !a.startsWith('--custom-rom='));
+                            newArgs.push(`--rom=${name}`);
+                            for (const c of wsClients) try { c.terminate(); } catch {}
+                            wss.close(() => {
+                                spawn(process.execPath, [__filename, ...newArgs], { detached: true, stdio: 'inherit' }).unref();
+                                process.exit(0);
+                            });
+                            setTimeout(() => process.exit(0), 1000);
                             return;
                         }
                         emulator.handleLine(line);
@@ -453,6 +482,7 @@ Logs
                     samplesProduced += left.length;
                     if (audioSink) audioSink.write(floatTo16BitPCM(left, right));
                 } else if (line) {
+                    if (line.startsWith('@status:state=ready')) lastStatusLine = line;
                     log(line);
                     for (const ws of wsClients) {
                         if (ws.readyState === 1) ws.send(line);

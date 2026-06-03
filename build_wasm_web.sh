@@ -72,13 +72,14 @@ LINK_FLAGS=(
     "-s" "USE_ZLIB=1"
     
     # 🎯 CORRECTION : On retire '_main' qui n'existe pas dans notre API
-    "-s" "EXPORTED_RUNTIME_METHODS=['FS','HEAP8','HEAPU8','HEAP16','ccall','cwrap']"
-    "-s" "EXPORTED_FUNCTIONS=['_pinmame_get_version','_pinmame_get_gprom_ptr','_pinmame_get_dsprom_ptr','_pinmame_get_display','_pinmame_web_entry','_pinmame_web_boot','_pinmame_web_tick','_api_pop_ascii_event','_api_hook_gottlieb_display_write']"
+    "-s" "EXPORTED_RUNTIME_METHODS=['FS','HEAP8','HEAPU8','HEAP16','HEAP32','ccall','cwrap']"
+    "-s" "EXPORTED_FUNCTIONS=['_pinmame_get_version','_pinmame_get_gprom_ptr','_pinmame_get_dsprom_ptr','_pinmame_get_display','_pinmame_web_entry','_pinmame_web_boot','_pinmame_web_tick','_api_pop_ascii_event','_api_hook_gottlieb_display_write','_api_get_dac_count','_api_get_dac_buffer','_api_reset_dac_buffer']"
 )
 
 echo "[*] [V93.4] Liaison des archives et injection des symboles modulaire..."
 emcc "$WASM_TEMP_OBJ_DIR/api.o" libpinmame_wasm.a "${LINK_FLAGS[@]}" \
     -Wl,--wrap=run_machine \
+    -Wl,--wrap=DAC_DC_offset_correction_data_16_w \
     -o pinmame_web.js
 
 # 📊 RAPPORT DE BUILD : Afficher la taille des fichiers générés

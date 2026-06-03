@@ -83,15 +83,62 @@ function createEmulator() {
         noExitRuntime: true
     };
 
+    // Intégrateur DC-offset pour le DAC push (persistant entre frames)
+    // Réplique la logique de dac.c mais exécuté en JS avec bon timing
+    const dacInteg = [0.0, 0.0];
+    const dacPrev  = [-1, -1];   // -1 = non initialisé (warm-up premier appel)
+
     globalThis.pushWasmAudio = function(ptr, count) {
         if (!pinmameInstance) return;
-        const ptr16 = ptr >> 1;
-        const left  = new Float32Array(count / 2);
-        const right = new Float32Array(count / 2);
+        const ptr16  = ptr >> 1;
+        const frames = count / 2;
+        const left   = new Float32Array(frames);
+        const right  = new Float32Array(frames);
+
         for (let i = 0, idx = 0; i < count; i += 2, idx++) {
             left[idx]  = pinmameInstance.HEAP16[ptr16 + i]     / 32768.0;
             right[idx] = pinmameInstance.HEAP16[ptr16 + i + 1] / 32768.0;
         }
+
+        // Mixer la contribution DAC (jeux sans YM2151 : Robowars, b2…)
+        for (let chip = 0; chip < 2; chip++) {
+            const n = pinmameInstance._api_get_dac_count(chip);
+            if (n === 0) continue;
+
+            const dacPtr32 = pinmameInstance._api_get_dac_buffer(chip) >>> 2;
+
+            // Passer chaque écriture DAC par l'intégrateur DC-offset
+            const processed = new Float32Array(n);
+            for (let i = 0; i < n; i++) {
+                const raw = pinmameInstance.HEAP32[dacPtr32 + i];   // 0..65025
+                if (dacPrev[chip] < 0) {
+                    // Warm-up : initialiser sans spike
+                    dacPrev[chip]  = raw;
+                    dacInteg[chip] = 0.0;
+                    processed[i]   = 0.0;
+                    continue;
+                }
+                dacInteg[chip] = dacInteg[chip] * 0.995 + (raw - dacPrev[chip]);
+                dacPrev[chip]  = raw;
+                // Gain 50% → mixing_level du DACinterface, normalisé [-1,+1]
+                processed[i] = Math.max(-0.5, Math.min(0.5, dacInteg[chip] / 65025.0));
+            }
+
+            // Redistribuer les N valeurs sur frames samples (interpolation linéaire)
+            const scale = (n - 1) / (frames - 1);
+            for (let s = 0; s < frames; s++) {
+                const pos  = s * scale;
+                const i0   = pos | 0;
+                const i1   = i0 + 1 < n ? i0 + 1 : i0;
+                const frac = pos - i0;
+                const dac  = processed[i0] * (1 - frac) + processed[i1] * frac;
+                left[s]    = Math.max(-1, Math.min(1, left[s]  + dac));
+                right[s]   = Math.max(-1, Math.min(1, right[s] + dac));
+            }
+
+            pinmameInstance._api_reset_dac_buffer(chip);
+        }
+
         postAudio(left, right);
     };
 

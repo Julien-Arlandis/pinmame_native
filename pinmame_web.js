@@ -424,7 +424,7 @@ function updateMemoryViews() {
   Module['HEAP16'] = HEAP16 = new Int16Array(b);
   Module['HEAPU8'] = HEAPU8 = new Uint8Array(b);
   HEAPU16 = new Uint16Array(b);
-  HEAP32 = new Int32Array(b);
+  Module['HEAP32'] = HEAP32 = new Int32Array(b);
   HEAPU32 = new Uint32Array(b);
   HEAPF32 = new Float32Array(b);
   HEAPF64 = new Float64Array(b);
@@ -4533,6 +4533,7 @@ var stringToUTF8Array = (str, heap, outIdx, maxBytesToWrite) => {
 
 
 
+
   var getCFunc = (ident) => {
       var func = Module['_' + ident]; // closure exported function
       assert(func, `Cannot call unknown function ${ident}, make sure it is exported`);
@@ -4890,7 +4891,6 @@ missingLibrarySymbols.forEach(missingLibrarySymbol)
   'INT53_MIN',
   'bigintToI53Checked',
   'HEAPU16',
-  'HEAP32',
   'HEAPU32',
   'HEAPF32',
   'HEAPF64',
@@ -5148,6 +5148,9 @@ var _pinmame_get_version = Module['_pinmame_get_version'] = makeInvalidEarlyAcce
 var _pinmame_web_entry = Module['_pinmame_web_entry'] = makeInvalidEarlyAccess('_pinmame_web_entry');
 var _pinmame_web_tick = Module['_pinmame_web_tick'] = makeInvalidEarlyAccess('_pinmame_web_tick');
 var _pinmame_web_boot = Module['_pinmame_web_boot'] = makeInvalidEarlyAccess('_pinmame_web_boot');
+var _api_get_dac_count = Module['_api_get_dac_count'] = makeInvalidEarlyAccess('_api_get_dac_count');
+var _api_get_dac_buffer = Module['_api_get_dac_buffer'] = makeInvalidEarlyAccess('_api_get_dac_buffer');
+var _api_reset_dac_buffer = Module['_api_reset_dac_buffer'] = makeInvalidEarlyAccess('_api_reset_dac_buffer');
 var _malloc = makeInvalidEarlyAccess('_malloc');
 var _free = makeInvalidEarlyAccess('_free');
 var _fflush = makeInvalidEarlyAccess('_fflush');
@@ -5191,6 +5194,9 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['pinmame_web_entry'] != 'undefined', 'missing Wasm export: pinmame_web_entry');
   assert(typeof wasmExports['pinmame_web_tick'] != 'undefined', 'missing Wasm export: pinmame_web_tick');
   assert(typeof wasmExports['pinmame_web_boot'] != 'undefined', 'missing Wasm export: pinmame_web_boot');
+  assert(typeof wasmExports['api_get_dac_count'] != 'undefined', 'missing Wasm export: api_get_dac_count');
+  assert(typeof wasmExports['api_get_dac_buffer'] != 'undefined', 'missing Wasm export: api_get_dac_buffer');
+  assert(typeof wasmExports['api_reset_dac_buffer'] != 'undefined', 'missing Wasm export: api_reset_dac_buffer');
   assert(typeof wasmExports['malloc'] != 'undefined', 'missing Wasm export: malloc');
   assert(typeof wasmExports['free'] != 'undefined', 'missing Wasm export: free');
   assert(typeof wasmExports['fflush'] != 'undefined', 'missing Wasm export: fflush');
@@ -5231,6 +5237,9 @@ function assignWasmExports(wasmExports) {
   _pinmame_web_entry = Module['_pinmame_web_entry'] = createExportWrapper('pinmame_web_entry', 2);
   _pinmame_web_tick = Module['_pinmame_web_tick'] = createExportWrapper('pinmame_web_tick', 1);
   _pinmame_web_boot = Module['_pinmame_web_boot'] = createExportWrapper('pinmame_web_boot', 0);
+  _api_get_dac_count = Module['_api_get_dac_count'] = createExportWrapper('api_get_dac_count', 1);
+  _api_get_dac_buffer = Module['_api_get_dac_buffer'] = createExportWrapper('api_get_dac_buffer', 1);
+  _api_reset_dac_buffer = Module['_api_reset_dac_buffer'] = createExportWrapper('api_reset_dac_buffer', 1);
   _malloc = createExportWrapper('malloc', 1);
   _free = createExportWrapper('free', 1);
   _fflush = createExportWrapper('fflush', 1);

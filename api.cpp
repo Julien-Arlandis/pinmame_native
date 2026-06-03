@@ -40,7 +40,17 @@ static int g_selected_game_index = 0;
 // 🎵 TAMPONS AUDIO MAME -> WEBASSEMBLY
 // =========================================================================
 #define C_AUDIO_BUFFER_MAX 131072
-#define SAMPLES_PER_FRAME 735 
+#define SAMPLES_PER_FRAME 735
+
+
+// ── DAC push buffer ───────────────────────────────────────────────────────────
+// Intercepté via --wrap=DAC_DC_offset_correction_data_16_w.
+// Les valeurs brutes (volume×data, 0..65025) sont accumulées ici chaque frame.
+// JS lit via api_get_dac_buffer/count/reset, applique l'intégrateur DC-offset
+// en JS et mélange dans pushWasmAudio — sans toucher au stream MAME.
+#define DAC_BUF_MAX 4096
+static int g_dac_buf[2][DAC_BUF_MAX];
+static int g_dac_n[2] = {0, 0};
 
 static INT16 g_audio_ring_buffer[C_AUDIO_BUFFER_MAX];
 static int g_audio_write_idx = 0;
@@ -216,14 +226,14 @@ extern "C" {
     int osd_display_loading_rom_message(const char *name, struct rom_load_data *romdata) { return 0; }
     
     int osd_start_audio_stream(int stereo) { return SAMPLES_PER_FRAME; }
-    
-    int osd_update_audio_stream(INT16 *buffer) { 
-        int shorts_to_copy = SAMPLES_PER_FRAME * 2; 
+
+    int osd_update_audio_stream(INT16 *buffer) {
+        int shorts_to_copy = SAMPLES_PER_FRAME * 2;
         for (int i = 0; i < shorts_to_copy; i++) {
             g_audio_ring_buffer[g_audio_write_idx] = buffer[i];
             g_audio_write_idx = (g_audio_write_idx + 1) % C_AUDIO_BUFFER_MAX;
         }
-        return SAMPLES_PER_FRAME; 
+        return SAMPLES_PER_FRAME;
     }
 
     void osd_stop_audio_stream(void) {}
@@ -708,4 +718,24 @@ extern "C" {
         bailing = 0;
         run_game(game_index);
     }
+
+    // ── Exports DAC push buffer ───────────────────────────────────────────────
+    EMSCRIPTEN_KEEPALIVE
+    int api_get_dac_count(int chip) { return (unsigned)chip < 2 ? g_dac_n[chip] : 0; }
+
+    EMSCRIPTEN_KEEPALIVE
+    int* api_get_dac_buffer(int chip) { return (unsigned)chip < 2 ? g_dac_buf[chip] : nullptr; }
+
+    EMSCRIPTEN_KEEPALIVE
+    void api_reset_dac_buffer(int chip) { if ((unsigned)chip < 2) g_dac_n[chip] = 0; }
 }
+
+// ── Wrapper --wrap=DAC_DC_offset_correction_data_16_w ────────────────────────
+extern "C" void __real_DAC_DC_offset_correction_data_16_w(int num, int data);
+extern "C" void __wrap_DAC_DC_offset_correction_data_16_w(int num, int data) {
+    if ((unsigned)num < 2 && g_dac_n[num] < DAC_BUF_MAX)
+        g_dac_buf[num][g_dac_n[num]++] = data;
+    // __real_ NON appelé : le stream DAC MAME reste à 0.
+    // JS reconstruit l'audio DAC dans pushWasmAudio via api_get_dac_buffer.
+}
+

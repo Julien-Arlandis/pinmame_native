@@ -77,6 +77,24 @@ static void push_display_event(uint8_t pos, uint8_t ascii, uint8_t action) {
 }
 
 extern "C" void emscripten_sleep(unsigned int ms);
+
+// NOP handlers for WASM table indices 29-31 that fall in the "unknown static" range
+// (> STATIC_BANKMAX=24 but not RAM/ROM/RAMROM/NOP). These are needed because
+// init_static() never initializes rmemhandler8[29] or wmemhandler8[30-31].
+extern "C" data8_t api_nop_read8(offs_t address) { return 0; }
+extern "C" void api_nop_write8(offs_t address, data8_t data) {}
+
+// __wrap_run_machine is called instead of run_machine() via --wrap=run_machine.
+// It installs safe handler stubs for entries 29-31 (which are "unused" in MAME
+// but get populated by populate_memory with WASM table indices that land there)
+// AFTER init_machine() has set up the tables, BEFORE the CPU starts executing.
+extern "C" int __real_run_machine(void);
+extern "C" int __wrap_run_machine(void) {
+    memory_set_bankhandler_r(29, 0, api_nop_read8);
+    memory_set_bankhandler_w(29, 0, api_nop_write8);
+    memory_set_bankhandler_w(30, 0, api_nop_write8);
+    return __real_run_machine();
+}
 extern "C" void sndbrd_0_data_w(int offset, int data);
 
 extern "C" void libpinmame_log_error(const char* format, ...) {
@@ -85,6 +103,16 @@ extern "C" void libpinmame_log_error(const char* format, ...) {
     vfprintf(stderr, format, args);
     va_end(args);
     std::cerr << std::endl;
+}
+
+// Override logerror so MAME's init errors appear in the console
+extern "C" void logerror(const char* text, ...) {
+    char buf[512];
+    va_list args;
+    va_start(args, text);
+    vsnprintf(buf, sizeof(buf), text, args);
+    va_end(args);
+    fprintf(stderr, "[MAME] %s", buf);
 }
 
 // =========================================================================
@@ -168,7 +196,12 @@ extern "C" {
     cycles_t osd_cycles_per_second(void) { return (cycles_t)1000000000; }
     
     int osd_init(void) { return 0; }
-    void osd_exit(void) { while(1) { emscripten_sleep(1000); } }
+    void osd_exit(void) {
+        // Do NOT use emscripten_sleep here: if init_machine fails, ASYNCIFY would
+        // save state here, then rewind through memory_init again causing abort.
+        EM_ASM({ if (window.postWasmLog) window.postWasmLog("osd_exit called"); });
+        EM_ASM({ throw new Error("PinMAME: emulation stopped"); });
+    }
     void osd_pause(int paused) {}
     int osd_skip_this_frame(void) { return 0; }
     int osd_init_video(void) { return 0; }
@@ -416,13 +449,240 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     void pinmame_web_tick(int cycles) {}
 
-    // Driver bonebstr utilisé comme base générique System 80B :
-    // même hardware, mêmes noms de fichiers ROM, même init.
-    // On change juste le nom pour ouvrir le bon ZIP au boot.
+    // ── Drivers Gottlieb System 80B ─────────────────────────────────────────
+    // Chicago Cubs Triple Play (#696)
+    extern struct GameDriver driver_triplay;
+    extern struct GameDriver driver_triplyfp;
+    extern struct GameDriver driver_triplaya;
+    extern struct GameDriver driver_triplyf1;
+    extern struct GameDriver driver_triplayg;
+    extern struct GameDriver driver_triplgfp;
+    // Bounty Hunter (#694)
+    extern struct GameDriver driver_bountyh;
+    extern struct GameDriver driver_bounthfp;
+    extern struct GameDriver driver_bountyhg;
+    extern struct GameDriver driver_bountgfp;
+    // Tag-Team Pinball (#698)
+    extern struct GameDriver driver_tagteam;
+    extern struct GameDriver driver_tagtemfp;
+    extern struct GameDriver driver_tagteamg;
+    extern struct GameDriver driver_tagtmgfp;
+    extern struct GameDriver driver_tagteam2;
+    extern struct GameDriver driver_tagtem2f;
+    // Rock (#697)
+    extern struct GameDriver driver_rock;
+    extern struct GameDriver driver_rockfp;
+    extern struct GameDriver driver_rockg;
+    extern struct GameDriver driver_rockgfp;
+    // S80B Test Fixture
+    extern struct GameDriver driver_s80btest;
+    // Raven (#702)
+    extern struct GameDriver driver_raven;
+    extern struct GameDriver driver_ravenfp;
+    extern struct GameDriver driver_raveng;
+    extern struct GameDriver driver_ravengfp;
+    extern struct GameDriver driver_ravena;
+    extern struct GameDriver driver_ravenafp;
+    extern struct GameDriver driver_rambo;
+    // Rock Encore (#704)
+    extern struct GameDriver driver_rock_enc;
+    extern struct GameDriver driver_rock_efp;
+    extern struct GameDriver driver_rock_eg;
+    extern struct GameDriver driver_rockegfp;
+    extern struct GameDriver driver_clash;
+    // Hollywood Heat (#703)
+    extern struct GameDriver driver_hlywoodh;
+    extern struct GameDriver driver_hlywdhfp;
+    extern struct GameDriver driver_hlywodhg;
+    extern struct GameDriver driver_hlywhgfp;
+    extern struct GameDriver driver_hlywodhf;
+    extern struct GameDriver driver_hlywhffp;
+    extern struct GameDriver driver_bubba;
+    extern struct GameDriver driver_beachbms;
+    extern struct GameDriver driver_tomjerry;
+    // Genesis (#705)
+    extern struct GameDriver driver_genesis;
+    extern struct GameDriver driver_genesifp;
+    extern struct GameDriver driver_genesisg;
+    extern struct GameDriver driver_genesgfp;
+    extern struct GameDriver driver_genesisf;
+    extern struct GameDriver driver_genesffp;
+    // Gold Wings (#707)
+    extern struct GameDriver driver_goldwing;
+    extern struct GameDriver driver_goldwgfp;
+    extern struct GameDriver driver_gldwingg;
+    extern struct GameDriver driver_gldwggfp;
+    extern struct GameDriver driver_gldwingf;
+    extern struct GameDriver driver_gldwgffp;
+    // Monte Carlo (#708)
+    extern struct GameDriver driver_mntecrlo;
+    extern struct GameDriver driver_mntecrfp;
+    extern struct GameDriver driver_mntecrlga;
+    extern struct GameDriver driver_mntecrlg;
+    extern struct GameDriver driver_mntcrgfp;
+    extern struct GameDriver driver_mntcrgmfp;
+    extern struct GameDriver driver_mntecrlf;
+    extern struct GameDriver driver_mntcrffp;
+    extern struct GameDriver driver_mntcrfmfp;
+    extern struct GameDriver driver_mntecrla;
+    extern struct GameDriver driver_mntcrafp;
+    extern struct GameDriver driver_mntecrl2;
+    extern struct GameDriver driver_mntcr2fp;
+    extern struct GameDriver driver_mntcrmfp;
+    // Spring Break (#706)
+    extern struct GameDriver driver_sprbreak;
+    extern struct GameDriver driver_sprbrkfp;
+    extern struct GameDriver driver_sprbrkg;
+    extern struct GameDriver driver_sprbrgfp;
+    extern struct GameDriver driver_sprbrkf;
+    extern struct GameDriver driver_sprbrffp;
+    extern struct GameDriver driver_sprbrka;
+    extern struct GameDriver driver_sprbrafp;
+    extern struct GameDriver driver_sprbrks;
+    extern struct GameDriver driver_sprbrsfp;
+    // Amazon Hunt II (#684C)
+    extern struct GameDriver driver_amazonh2;
+    extern struct GameDriver driver_amazn2fp;
+    // Arena (#709)
+    extern struct GameDriver driver_arena;
+    extern struct GameDriver driver_arena_fp;
+    extern struct GameDriver driver_arenag;
+    extern struct GameDriver driver_arenagfp;
+    extern struct GameDriver driver_arenaf;
+    extern struct GameDriver driver_arenaffp;
+    extern struct GameDriver driver_arenaa;
+    extern struct GameDriver driver_arenaafp;
+    extern struct GameDriver driver_arena2;
+    // Victory (#710)
+    extern struct GameDriver driver_victory;
+    extern struct GameDriver driver_victryfp;
+    extern struct GameDriver driver_victoryg;
+    extern struct GameDriver driver_victrgfp;
+    extern struct GameDriver driver_victoryf;
+    extern struct GameDriver driver_victrffp;
+    extern struct GameDriver driver_victr101;
+    extern struct GameDriver driver_victr11;
+    extern struct GameDriver driver_victr12;
+    extern struct GameDriver driver_victr13;
+    // Diamond Lady (#711)
+    extern struct GameDriver driver_diamond;
+    extern struct GameDriver driver_diamonfp;
+    extern struct GameDriver driver_diamondg;
+    extern struct GameDriver driver_diamngfp;
+    extern struct GameDriver driver_diamondf;
+    extern struct GameDriver driver_diamnffp;
+    // TX-Sector (#712)
+    extern struct GameDriver driver_txsector;
+    extern struct GameDriver driver_txsectfp;
+    extern struct GameDriver driver_txsectrg;
+    extern struct GameDriver driver_txsecgfp;
+    extern struct GameDriver driver_txsectrf;
+    extern struct GameDriver driver_txsecffp;
+    // Robo-War (#714)
+    extern struct GameDriver driver_robowars;
+    extern struct GameDriver driver_robowrfp;
+    extern struct GameDriver driver_robowarf;
+    extern struct GameDriver driver_robowffp;
+    // Bad Girls (#717)
+    extern struct GameDriver driver_badgirls;
+    extern struct GameDriver driver_badgirl2;
+    extern struct GameDriver driver_badgrlfp;
+    extern struct GameDriver driver_badgirlg;
+    extern struct GameDriver driver_badgrgfp;
+    extern struct GameDriver driver_badgirlf;
+    extern struct GameDriver driver_badgrffp;
+    // Excalibur (#715)
+    extern struct GameDriver driver_excaliba;
+    extern struct GameDriver driver_excalbfp;
+    extern struct GameDriver driver_excalibg;
+    extern struct GameDriver driver_excalgfp;
+    extern struct GameDriver driver_excalibr;
+    extern struct GameDriver driver_excalffp;
+    // Big House (#713)
+    extern struct GameDriver driver_bighouse;
+    extern struct GameDriver driver_bighosfp;
+    extern struct GameDriver driver_bighousg;
+    extern struct GameDriver driver_bighsgfp;
+    extern struct GameDriver driver_bighousf;
+    extern struct GameDriver driver_bighsffp;
+    // Hot Shots (#718)
+    extern struct GameDriver driver_hotshots;
+    extern struct GameDriver driver_hotshtfp;
+    extern struct GameDriver driver_hotshotg;
+    extern struct GameDriver driver_hotshgfp;
+    extern struct GameDriver driver_hotshotf;
+    extern struct GameDriver driver_hotshffp;
+    // Bone Busters Inc. (#719)
     extern struct GameDriver driver_bonebstr;
+    extern struct GameDriver driver_bonebsfp;
+    extern struct GameDriver driver_bonebstg;
+    extern struct GameDriver driver_bonebgfp;
+    extern struct GameDriver driver_bonebstf;
+    extern struct GameDriver driver_bonebffp;
+    // Night Moves (C-101)
+    extern struct GameDriver driver_nmoves;
+    extern struct GameDriver driver_nmovesfp;
+    // Amazon Hunt III (#684D)
+    extern struct GameDriver driver_amazonh3;
+    extern struct GameDriver driver_amazn3fp;
+    extern struct GameDriver driver_amazon3a;
+    extern struct GameDriver driver_amaz3afp;
+    // ManilaMatic (GTS80B hardware)
+    extern struct GameDriver driver_topsound;
+    extern struct GameDriver driver_mmmaster;
+    // ────────────────────────────────────────────────────────────────────────
 
     struct GameDriver *drivers[] = {
-        &driver_bonebstr,
+        &driver_triplay,   &driver_triplyfp,  &driver_triplaya,  &driver_triplyf1,
+        &driver_triplayg,  &driver_triplgfp,
+        &driver_bountyh,   &driver_bounthfp,  &driver_bountyhg,  &driver_bountgfp,
+        &driver_tagteam,   &driver_tagtemfp,  &driver_tagteamg,  &driver_tagtmgfp,
+        &driver_tagteam2,  &driver_tagtem2f,
+        &driver_rock,      &driver_rockfp,    &driver_rockg,     &driver_rockgfp,
+        &driver_s80btest,
+        &driver_raven,     &driver_ravenfp,   &driver_raveng,    &driver_ravengfp,
+        &driver_ravena,    &driver_ravenafp,  &driver_rambo,
+        &driver_rock_enc,  &driver_rock_efp,  &driver_rock_eg,   &driver_rockegfp,
+        &driver_clash,
+        &driver_hlywoodh,  &driver_hlywdhfp,  &driver_hlywodhg,  &driver_hlywhgfp,
+        &driver_hlywodhf,  &driver_hlywhffp,  &driver_bubba,     &driver_beachbms,
+        &driver_tomjerry,
+        &driver_genesis,   &driver_genesifp,  &driver_genesisg,  &driver_genesgfp,
+        &driver_genesisf,  &driver_genesffp,
+        &driver_goldwing,  &driver_goldwgfp,  &driver_gldwingg,  &driver_gldwggfp,
+        &driver_gldwingf,  &driver_gldwgffp,
+        &driver_mntecrlo,  &driver_mntecrfp,  &driver_mntecrlga, &driver_mntecrlg,
+        &driver_mntcrgfp,  &driver_mntcrgmfp, &driver_mntecrlf,  &driver_mntcrffp,
+        &driver_mntcrfmfp, &driver_mntecrla,  &driver_mntcrafp,  &driver_mntecrl2,
+        &driver_mntcr2fp,  &driver_mntcrmfp,
+        &driver_sprbreak,  &driver_sprbrkfp,  &driver_sprbrkg,   &driver_sprbrgfp,
+        &driver_sprbrkf,   &driver_sprbrffp,  &driver_sprbrka,   &driver_sprbrafp,
+        &driver_sprbrks,   &driver_sprbrsfp,
+        &driver_amazonh2,  &driver_amazn2fp,
+        &driver_arena,     &driver_arena_fp,  &driver_arenag,    &driver_arenagfp,
+        &driver_arenaf,    &driver_arenaffp,  &driver_arenaa,    &driver_arenaafp,
+        &driver_arena2,
+        &driver_victory,   &driver_victryfp,  &driver_victoryg,  &driver_victrgfp,
+        &driver_victoryf,  &driver_victrffp,  &driver_victr101,  &driver_victr11,
+        &driver_victr12,   &driver_victr13,
+        &driver_diamond,   &driver_diamonfp,  &driver_diamondg,  &driver_diamngfp,
+        &driver_diamondf,  &driver_diamnffp,
+        &driver_txsector,  &driver_txsectfp,  &driver_txsectrg,  &driver_txsecgfp,
+        &driver_txsectrf,  &driver_txsecffp,
+        &driver_robowars,  &driver_robowrfp,  &driver_robowarf,  &driver_robowffp,
+        &driver_badgirls,  &driver_badgirl2,  &driver_badgrlfp,  &driver_badgirlg,
+        &driver_badgrgfp,  &driver_badgirlf,  &driver_badgrffp,
+        &driver_excaliba,  &driver_excalbfp,  &driver_excalibg,  &driver_excalgfp,
+        &driver_excalibr,  &driver_excalffp,
+        &driver_bighouse,  &driver_bighosfp,  &driver_bighousg,  &driver_bighsgfp,
+        &driver_bighousf,  &driver_bighsffp,
+        &driver_hotshots,  &driver_hotshtfp,  &driver_hotshotg,  &driver_hotshgfp,
+        &driver_hotshotf,  &driver_hotshffp,
+        &driver_bonebstr,  &driver_bonebsfp,  &driver_bonebstg,  &driver_bonebgfp,
+        &driver_bonebstf,  &driver_bonebffp,
+        &driver_nmoves,    &driver_nmovesfp,
+        &driver_amazonh3,  &driver_amazn3fp,  &driver_amazon3a,  &driver_amaz3afp,
+        &driver_topsound,  &driver_mmmaster,
         nullptr
     };
 
@@ -431,10 +691,21 @@ extern "C" {
     EMSCRIPTEN_KEEPALIVE
     void pinmame_web_boot() {
         const char* rom_name = (const char*)&g_shared_corridor[1000];
-        driver_bonebstr.name = rom_name;
+        int game_index = -1;
+        for (int i = 0; drivers[i] != nullptr; i++) {
+            if (strcmp(drivers[i]->name, rom_name) == 0) {
+                game_index = i;
+                break;
+            }
+        }
+        if (game_index < 0) return;
+        // Pre-call driver_init pour que core_gameData soit valide avant
+        // memory_init (appelé par run_game avant driver_init).
+        if (drivers[game_index]->driver_init)
+            drivers[game_index]->driver_init();
         options.samplerate = 44100;
         options.gui_host = 1;
         bailing = 0;
-        run_game(0);
+        run_game(game_index);
     }
 }

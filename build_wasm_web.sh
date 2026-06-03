@@ -77,7 +77,9 @@ LINK_FLAGS=(
 )
 
 echo "[*] [V93.4] Liaison des archives et injection des symboles modulaire..."
-emcc "$WASM_TEMP_OBJ_DIR/api.o" libpinmame_wasm.a "${LINK_FLAGS[@]}" -o pinmame_web.js
+emcc "$WASM_TEMP_OBJ_DIR/api.o" libpinmame_wasm.a "${LINK_FLAGS[@]}" \
+    -Wl,--wrap=run_machine \
+    -o pinmame_web.js
 
 # 📊 RAPPORT DE BUILD : Afficher la taille des fichiers générés
 if [ -f "pinmame_web.js" ] && [ -f "pinmame_web.wasm" ]; then

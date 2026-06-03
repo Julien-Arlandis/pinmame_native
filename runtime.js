@@ -61,6 +61,7 @@ function normalizeRomBytes(customRomBytes) {
     throw new Error('Unsupported customRomBytes format');
 }
 
+
 function createEmulator() {
     let pinmameInstance = null;
     let vfdMemoryPointer = 0;
@@ -405,24 +406,27 @@ Logs
             const wsPort = parseInt(options.port) || 8765;
 
             // ── DISPLAY SÉRIE ─────────────────────────────────────────────────
-            // Table inverse segments PinMAME → ASCII.
-            // Bits canvas : a=1,b=2,c=4,d=8,e=10,f=20,g1=40,g2=800,
-            //               i=100,j=200,k=400,l=1000,m=2000,n=4000
-            const _g2a = new Map([
-                [0x0000,' '],[0x003F,'0'],[0x0006,'1'],[0x085B,'2'],[0x084F,'3'],
-                [0x0866,'4'],[0x086D,'5'],[0x087D,'6'],[0x0007,'7'],[0x087F,'8'],
-                [0x086F,'9'],[0x0877,'A'],[0x2A2F,'B'],[0x0039,'C'],[0x220F,'D'],
-                [0x0079,'E'],[0x0071,'F'],[0x083D,'G'],[0x0876,'H'],[0x2209,'I'],
-                [0x001E,'J'],[0x1470,'K'],[0x0038,'L'],[0x0536,'M'],[0x1136,'N'],
-                [0x0873,'P'],[0x103F,'Q'],[0x1873,'R'],[0x2201,'T'],[0x003E,'U'],
-                [0x4430,'V'],[0x5036,'W'],[0x5500,'X'],[0x2500,'Y'],[0x4409,'Z'],
-                [0x0840,'-'],[0x2200,':'],[0x0200,'\''],[0x4400,'/'],[0x0080,'.'],
-            ]);
+            const _a2s = {
+                ' ':0x0000,'0':0x003F,'1':0x0006,'2':0x085B,'3':0x084F,
+                '4':0x0866,'5':0x086D,'6':0x087D,'7':0x0007,'8':0x087F,'9':0x086F,
+                'A':0x0877,'B':0x2A2F,'C':0x0039,'D':0x220F,'E':0x0079,'F':0x0071,
+                'G':0x083D,'H':0x0876,'I':0x2209,'J':0x001E,'K':0x1470,'L':0x0038,
+                'M':0x0536,'N':0x1136,'O':0x003F,'P':0x0873,'Q':0x103F,'R':0x1873,
+                'S':0x086D,'T':0x2201,'U':0x003E,'V':0x4430,'W':0x5036,'X':0x5500,
+                'Y':0x2500,'Z':0x4409,'-':0x0840,':':0x2200,'.':0x0080,'/':0x4400,
+            };
+            // Inverse : segments → ASCII (minuscules aliasées vers majuscules)
+            const _g2a = new Map();
+            for (const [ch, mask] of Object.entries(_a2s)) {
+                if (!_g2a.has(mask)) _g2a.set(mask, ch);
+            }
             function decodeDisplay(hexData) {
                 let s = '';
                 for (let i = 0; i < 40; i++) {
                     const mask = parseInt(hexData.slice(i * 4, i * 4 + 4), 16) || 0;
-                    s += _g2a.get(mask) ?? '?';
+                    if (mask === 0) { s += ' '; continue; }
+                    const ch = _g2a.get(mask);
+                    s += ch !== undefined ? ch : `[${mask.toString(16)}]`;
                 }
                 return s;
             }

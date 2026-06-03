@@ -161,11 +161,7 @@ class GottliebDisplayEmulator {
         this.vfdCells = new Uint16Array(40);
         this.cursorPosition = 0;
         this._dirty = false;
-        // ASCII → masque segment PinMAME
-        // Bits : a=0x0001 b=0x0002 c=0x0004 d=0x0008 e=0x0010 f=0x0020
-        //        g1=0x0040 g2=0x0800 i=0x0100 j=0x0200 k=0x0400
-        //        l=0x1000 m=0x2000 n=0x4000
-        this.ascii2gottlieb = new Uint16Array(128);
+        // Source de vérité unique — ASCII → segments PinMAME
         const _a2s = {
             ' ':0x0000,'0':0x003F,'1':0x0006,'2':0x085B,'3':0x084F,
             '4':0x0866,'5':0x086D,'6':0x087D,'7':0x0007,'8':0x087F,'9':0x086F,
@@ -175,22 +171,14 @@ class GottliebDisplayEmulator {
             'S':0x086D,'T':0x2201,'U':0x003E,'V':0x4430,'W':0x5036,'X':0x5500,
             'Y':0x2500,'Z':0x4409,'-':0x0840,':':0x2200,'.':0x0080,'/':0x4400,
         };
+        this.ascii2gottlieb = new Uint16Array(128);
+        this.gottlieb2ascii = new Map();
         for (const [ch, mask] of Object.entries(_a2s)) {
             const c = ch.charCodeAt(0);
             this.ascii2gottlieb[c] = mask;
-            if (c >= 0x41 && c <= 0x5A) this.ascii2gottlieb[c + 32] = mask; // lowercase
+            if (c >= 0x41 && c <= 0x5A) this.ascii2gottlieb[c + 32] = mask;
+            if (!this.gottlieb2ascii.has(mask)) this.gottlieb2ascii.set(mask, ch);
         }
-        // Table inverse PinMAME segments → ASCII (bits canvas : a=1,b=2,...,n=4000)
-        this.gottlieb2ascii = new Map([
-            [0x0000,' '],[0x003F,'0'],[0x0006,'1'],[0x085B,'2'],[0x084F,'3'],
-            [0x0866,'4'],[0x086D,'5'],[0x087D,'6'],[0x0007,'7'],[0x087F,'8'],
-            [0x086F,'9'],[0x0877,'A'],[0x2A2F,'B'],[0x0039,'C'],[0x220F,'D'],
-            [0x0079,'E'],[0x0071,'F'],[0x083D,'G'],[0x0876,'H'],[0x2209,'I'],
-            [0x001E,'J'],[0x1470,'K'],[0x0038,'L'],[0x0536,'M'],[0x1136,'N'],
-            [0x0873,'P'],[0x103F,'Q'],[0x1873,'R'],
-            [0x2201,'T'],[0x003E,'U'],[0x4430,'V'],[0x5036,'W'],[0x5500,'X'],
-            [0x2500,'Y'],[0x4409,'Z'],[0x0840,'-'],[0x2200,':'],[0x0080,'.'],
-        ]);
         this._startRenderLoop();
     }
 
@@ -198,7 +186,9 @@ class GottliebDisplayEmulator {
         let s = '';
         for (let i = 0; i < 40; i++) {
             const mask = parseInt(hex.slice(i * 4, i * 4 + 4), 16) || 0;
-            s += this.gottlieb2ascii.get(mask) ?? '?';
+            if (mask === 0) { s += ' '; continue; }
+            const ch = this.gottlieb2ascii.get(mask);
+            s += ch !== undefined ? ch : `[${mask.toString(16)}]`;
         }
         return s;
     }

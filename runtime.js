@@ -65,8 +65,10 @@ function createEmulator() {
     let pinmameInstance = null;
     let vfdMemoryPointer = 0;
     let lastVfdCounter  = 0;
-    let lastLampCounter = 0;
-    let lastSolCounter  = 0;
+    let lastLampCounter    = 0;
+    let lastLampBroadcast  = 0;
+    let lastVfdBroadcast   = 0;
+    let lastSolCounter     = 0;
     let lastSolState    = 0;
 
     const Module = {
@@ -153,13 +155,17 @@ function createEmulator() {
                 const vfdCounter = readU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1080);
                 if (vfdCounter !== lastVfdCounter) {
                     lastVfdCounter = vfdCounter;
-                    let data = '';
-                    for (let i = 0; i < 40; i++) {
-                        const offset = vfdMemoryPointer + (i * 2);
-                        const mask = pinmameInstance.HEAPU8[offset] | (pinmameInstance.HEAPU8[offset + 1] << 8);
-                        data += mask.toString(16).padStart(4, '0');
+                    const now = Date.now();
+                    if (now - lastVfdBroadcast >= 50) {
+                        lastVfdBroadcast = now;
+                        let data = '';
+                        for (let i = 0; i < 40; i++) {
+                            const offset = vfdMemoryPointer + (i * 2);
+                            const mask = pinmameInstance.HEAPU8[offset] | (pinmameInstance.HEAPU8[offset + 1] << 8);
+                            data += mask.toString(16).padStart(4, '0');
+                        }
+                        postToChannel('display', `!display:action=raw&data=${data}`);
                     }
-                    postToChannel('display', `!display:action=raw&data=${data}`);
                 }
 
                 // ASCII FIFO depuis api_pop_ascii_event() — pour le hardware série
@@ -182,10 +188,14 @@ function createEmulator() {
                 const lampCounter = readU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1084);
                 if (lampCounter !== lastLampCounter) {
                     lastLampCounter = lampCounter;
-                    let lampHex = '';
-                    for (let col = 0; col < 12; col++)
-                        lampHex += pinmameInstance.HEAPU8[vfdMemoryPointer + 300 + col].toString(16).padStart(2, '0');
-                    postToChannel('driver', `!lamp:${lampHex}`);
+                    const now = Date.now();
+                    if (now - lastLampBroadcast >= 50) {
+                        lastLampBroadcast = now;
+                        let lampHex = '';
+                        for (let col = 0; col < 12; col++)
+                            lampHex += pinmameInstance.HEAPU8[vfdMemoryPointer + 300 + col].toString(16).padStart(2, '0');
+                        postToChannel('driver', `!lamp:${lampHex}`);
+                    }
                 }
 
                 // Solenoids: emit one line per changed bit
@@ -279,6 +289,10 @@ Audio (détection automatique dans l'ordre : speaker → play → ffplay → apl
   --no-speaker           Désactiver toute sortie audio
   --audio-out=<file>     Écrire le PCM 16-bit LE stéréo dans un fichier
 
+Display série
+  --display-serial=<dev> Port série pour la carte display (ex: /dev/ttyUSB0)
+                         Protocole : D:<40 chars ASCII>\\n  (ligne1=0-19, ligne2=20-39)
+
 Logs
   --verbose, -v          Afficher les événements de l'émulateur
   --help,    -h          Afficher cette aide
@@ -294,7 +308,8 @@ Logs
                 else if (arg.startsWith('--rom='))             options.rom       = arg.split('=')[1];
                 else if (arg.startsWith('--custom-rom='))      options.customRom = arg.split('=')[1];
                 else if (arg.startsWith('--port='))            options.port      = arg.split('=')[1];
-                else if (arg.startsWith('--audio-out='))       options.audioOut  = arg.split('=')[1];
+                else if (arg.startsWith('--audio-out='))        options.audioOut      = arg.split('=')[1];
+                else if (arg.startsWith('--display-serial='))  options.displaySerial = arg.split('=').slice(1).join('=');
             }
 
             const log  = (...a) => { if (options.verbose) console.log(...a); };
@@ -342,7 +357,7 @@ Logs
                     const Speaker = require('speaker');
                     let spk = null;
                     // Queue max ~100ms (4 chunks de ~22ms chacun)
-                    const queue = [], QUEUE_MAX = 4;
+                    const queue = [], QUEUE_MAX = 16;
                     let draining = false;
 
                     const flush = () => {
@@ -389,10 +404,52 @@ Logs
 
             const wsPort = parseInt(options.port) || 8765;
 
+            // ── DISPLAY SÉRIE ─────────────────────────────────────────────────
+            // Table ascii2gottlieb → inverse : mask 16 bits → char ASCII
+            const _a2g = [
+                0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,
+                0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,
+                0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,
+                0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,
+                0x0000,0x000c,0x0202,0x12bc,0x298d,0x1248,0x2af5,0x0400,
+                0x2400,0x0900,0x3f3f,0x0b0b,0x0000,0x0909,0x0000,0x2100,
+                0x003f,0x0006,0x09db,0x09cf,0x0966,0x09ed,0x09fd,0x0007,
+                0x09ff,0x09ef,0x0000,0x0000,0x2400,0x0909,0x0900,0x2203,
+                0x003f,0x09f7,0x2a0f,0x0039,0x220f,0x0979,0x0971,0x01bd,
+                0x09f6,0x2209,0x001e,0x2470,0x0038,0x0536,0x1136,0x003f,
+                0x09f3,0x103f,0x19f3,0x09ed,0x2201,0x003e,0x4430,0x5036,
+                0x5500,0x2500,0x4409,0x0039,0x4400,0x000f,0x0000,0x0008,
+            ];
+            const _g2a = new Map();
+            for (let i = 0x20; i < _a2g.length; i++) {
+                if (_a2g[i] && !_g2a.has(_a2g[i])) _g2a.set(_a2g[i], String.fromCharCode(i));
+            }
+            function decodeDisplay(hexData) {
+                let s = '';
+                for (let i = 0; i < 40; i++) {
+                    const mask = parseInt(hexData.slice(i * 4, i * 4 + 4), 16) || 0;
+                    s += mask === 0 ? ' ' : (_g2a.get(mask) || '?');
+                }
+                return s;
+            }
+
+            let displaySerial = null, lastDisplayStr = null;
+            if (options.displaySerial) {
+                if (options.displaySerial === '-') {
+                    displaySerial = process.stdout;
+                } else {
+                    try {
+                        displaySerial = fs.createWriteStream(options.displaySerial, { flags: 'w' });
+                        displaySerial.on('error', e => info(`  Display série erreur: ${e.message}`));
+                    } catch (e) { info(`  Display série: ERREUR — ${e.message}`); }
+                }
+            }
+
             info('PinMAME Node Runtime');
             info(`  ROM      : ${customRomName}${customRomBytes ? ' (custom)' : ''}`);
             info(`  WS port  : ${wsPort}`);
             info(`  Audio    : ${audioLabel}`);
+            if (options.displaySerial) info(`  Display  : ${options.displaySerial}`);
             info(`  Verbosité: ${options.verbose ? 'activée' : 'désactivée  (--verbose pour les événements)'}`);
 
             const emulator  = createEmulator();
@@ -483,6 +540,13 @@ Logs
                     if (audioSink) audioSink.write(floatTo16BitPCM(left, right));
                 } else if (line) {
                     if (line.startsWith('@status:state=ready')) lastStatusLine = line;
+                    if (displaySerial && line.startsWith('!display:action=raw&data=')) {
+                        const str = decodeDisplay(line.slice(25));
+                        if (str !== lastDisplayStr) {
+                            lastDisplayStr = str;
+                            displaySerial.write(`D:${str}\n`);
+                        }
+                    }
                     log(line);
                     for (const ws of wsClients) {
                         if (ws.readyState === 1) ws.send(line);

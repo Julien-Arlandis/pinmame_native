@@ -179,7 +179,21 @@ class GottliebDisplayEmulator {
             0x09f3,0x103f,0x19f3,0x09ed,0x2201,0x003e,0x4430,0x5036,
             0x5500,0x2500,0x4409,0x0000,0x0000,0x0000,0x0000
         ]);
+        this.gottlieb2ascii = new Map();
+        for (let i = 0x20; i < this.ascii2gottlieb.length; i++) {
+            const m = this.ascii2gottlieb[i];
+            if (m && !this.gottlieb2ascii.has(m)) this.gottlieb2ascii.set(m, String.fromCharCode(i));
+        }
         this._startRenderLoop();
+    }
+
+    decodeRaw(hex) {
+        let s = '';
+        for (let i = 0; i < 40; i++) {
+            const mask = parseInt(hex.slice(i * 4, i * 4 + 4), 16) || 0;
+            s += mask === 0 ? ' ' : (this.gottlieb2ascii.get(mask) || '?');
+        }
+        return s;
     }
 
     parseCommand(cmd) {
@@ -339,7 +353,7 @@ function unlockAudio(master) {
             const outL = e.outputBuffer.getChannelData(0);
             const outR = e.outputBuffer.getChannelData(1);
             const distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
-            if (master) master.send(`@audio:distance=${distance}`);
+            if (master) master.send(`@audio:distance=${Math.max(0, distance - 4096)}`);
             if (isBufferWarming) {
                 if (distance >= 4096) isBufferWarming = false;
                 for (let i = 0; i < outL.length; i++) outL[i] = outR[i] = 0;
@@ -365,11 +379,18 @@ function unlockAudio(master) {
 
 const MAX_LOG_LINES = 200;
 const _logLines = [];
+let _termRafPending = false;
 function logToTerminal(msg) {
     _logLines.push(msg);
     if (_logLines.length > MAX_LOG_LINES) _logLines.splice(0, _logLines.length - MAX_LOG_LINES);
-    termEl.textContent = _logLines.join('\n');
-    termEl.scrollTop = termEl.scrollHeight;
+    if (!_termRafPending) {
+        _termRafPending = true;
+        requestAnimationFrame(() => {
+            _termRafPending = false;
+            termEl.textContent = _logLines.join('\n');
+            termEl.scrollTop = termEl.scrollHeight;
+        });
+    }
 }
 
 const chkInput = document.getElementById('chkInput');
@@ -406,11 +427,19 @@ function updateMasterStatus(master) {
 const _pendingLamp = new Uint8Array(96);   // nouvel état
 const _dirtyLamp   = new Uint8Array(96);   // 1 = à mettre à jour
 const _pendingSol  = new Int8Array(32);    // -1=rien, 0/1=état
-let   _driverRaf   = false;
+let   _driverRaf      = false;
+let   _lastLampFlush  = 0;
 _pendingSol.fill(-1);
 
 function _flushDriver() {
     _driverRaf = false;
+    const now = performance.now();
+    const remaining = 50 - (now - _lastLampFlush);
+    if (remaining > 0) {
+        if (!_driverRaf) { _driverRaf = true; setTimeout(() => requestAnimationFrame(_flushDriver), remaining); }
+        return;
+    }
+    _lastLampFlush = now;
     for (let i = 0; i < 96; i++) {
         if (!_dirtyLamp[i]) continue;
         _dirtyLamp[i] = 0;
@@ -478,7 +507,12 @@ function connectMaster(master, display) {
         if (typeof line !== 'string') return;
         if (line.startsWith('!display:')) {
             display.parseCommand(line);
-            logHardwareTraffic('MASTER', 'DISPLAY', line, 'DISPLAY');
+            if (line.startsWith('!display:action=raw&data=')) {
+                const s = display.decodeRaw(line.slice(25));
+                logHardwareTraffic('MASTER', 'DISPLAY', `!display:ascii=[${s.slice(0,20)}|${s.slice(20)}]`, 'DISPLAY');
+            } else {
+                logHardwareTraffic('MASTER', 'DISPLAY', line, 'DISPLAY');
+            }
         } else if (line.startsWith('!set:') || line.startsWith('!lamp:')) {
             handleDriverLine(line);
         } else if (line.startsWith('@status:')) {
@@ -566,7 +600,13 @@ function buildDipSwitches(master) {
 
 function buildLampGrid() {
     const grid = document.getElementById('lampGrid');
-    for (let i = 0; i < 96; i++) { const c = document.createElement('div'); c.className='cell'; c.textContent='L'+String(i+1).padStart(2,'0'); grid.appendChild(c); lampCells.push(c); }
+    for (let i = 0; i < 96; i++) {
+        const c = document.createElement('div');
+        c.className = 'cell';
+        c.textContent = 'L' + String(i + 1).padStart(2, '0');
+        grid.appendChild(c);
+        lampCells.push(c);
+    }
 }
 
 function buildSolGrid() {

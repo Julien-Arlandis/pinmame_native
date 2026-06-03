@@ -340,12 +340,8 @@
         }
         @keyframes pulse-sol { 0% { transform: scale(1); } 100% { transform: scale(0.97); } }
 
-        .cell.lamp-on {
-            background: rgba(0, 255, 68, 0.2) !important;
-            border-color: var(--neon-green) !important;
-            color: #fff !important;
-            box-shadow: 0 0 6px rgba(0, 255, 68, 0.2);
-        }
+        .cell.lamp-on { background: #1a4d26; }
+        .grid-container-lamp { contain: layout paint; }
 
         .cell-cmd {
             background: #141419;
@@ -462,8 +458,8 @@
             width: 100%;
         }
         .terminal-content {
-            flex: 1;
             height: 300px;
+            min-height: 300px;
             max-height: 300px;
             overflow-y: auto;
             white-space: pre-wrap; 

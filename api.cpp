@@ -363,48 +363,50 @@ extern "C" {
     }
 
     void artwork_update_video_and_audio(struct mame_display *display) {
+        static uint16_t prev_segments[40] = {};
+        static uint8_t  prev_lamps[12]    = {};
+        static uint32_t prev_solenoids    = 0xFFFFFFFF;
+
         uint16_t* vfd_export = (uint16_t*)g_shared_corridor;
         for (int i = 0; i < 20; i++) {
             vfd_export[i]      = coreGlobals.segments[i].w & 0xFFFF;
             vfd_export[20 + i] = coreGlobals.segments[20 + i].w & 0xFFFF;
         }
-        
-        // 🔔 NOTIFICATION : Incrémenter le counter VFD pour signaler les changements
-        uint32_t* vfd_counter = (uint32_t*)&g_shared_corridor[1080];
-        (*vfd_counter)++;
-        
+        if (memcmp(prev_segments, vfd_export, 40 * sizeof(uint16_t)) != 0) {
+            memcpy(prev_segments, vfd_export, 40 * sizeof(uint16_t));
+            EM_ASM({ if (window.pushWasmDisplay) window.pushWasmDisplay($0); },
+                   (uint32_t)g_shared_corridor);
+        }
+
         for (int sw = 0; sw < 80; sw++) { core_setSw(sw, g_shared_corridor[100 + sw]); }
 
         if (Machine && Machine->input_ports) {
             struct InputPort *port = Machine->input_ports;
             int current_dip_index = 0;
-            
             while (port->type != IPT_END && current_dip_index < 32) {
                 if (port->type == IPT_DIPSWITCH_NAME) {
-                    if (g_shared_corridor[400 + current_dip_index]) {
-                        port->default_value = port->mask; 
-                    } else {
-                        port->default_value = 0; 
-                    }
+                    port->default_value = g_shared_corridor[400 + current_dip_index]
+                                          ? port->mask : 0;
                     current_dip_index++;
                 }
                 port++;
             }
         }
-        
+
         for (int b = 0; b < 10; b++) { g_shared_corridor[200 + b] = coreGlobals.swMatrix[b]; }
         for (int l = 0; l < 12; l++) { g_shared_corridor[300 + l] = coreGlobals.lampMatrix[l]; }
-        
-        // 🔔 NOTIFICATION : Incrémenter le counter LAMPES pour signaler les changements
-        uint32_t* lamp_counter = (uint32_t*)&g_shared_corridor[1084];
-        (*lamp_counter)++;
-        
+        if (memcmp(prev_lamps, coreGlobals.lampMatrix, 12) != 0) {
+            memcpy(prev_lamps, coreGlobals.lampMatrix, 12);
+            EM_ASM({ if (window.pushWasmLamps) window.pushWasmLamps($0); },
+                   (uint32_t)(g_shared_corridor + 300));
+        }
+
         uint32_t solenoids_state = coreGlobals.solenoids;
-        memcpy(&g_shared_corridor[320], &solenoids_state, 4);
-        
-        // 🔔 NOTIFICATION : Incrémenter le counter SOLENOIDS pour signaler les changements
-        uint32_t* sol_counter = (uint32_t*)&g_shared_corridor[1088];
-        (*sol_counter)++;
+        if (solenoids_state != prev_solenoids) {
+            prev_solenoids = solenoids_state;
+            EM_ASM({ if (window.pushWasmSolens) window.pushWasmSolens($0); },
+                   solenoids_state);
+        }
 
         uint8_t sound_user_cmd = g_shared_corridor[1060];
         if (sound_user_cmd > 0) {

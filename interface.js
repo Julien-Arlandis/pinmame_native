@@ -448,6 +448,7 @@ let isBufferWarming = false;
 let _audioMaster = null; // Référence mutable — mise à jour à chaque changement de master
 let _pacingTimer  = null; // Fallback pacing quand AudioContext pas encore débloqué
 let _totalSamplesWritten = 0; // Compteur cumulatif pour le fallback pacing
+let _audioDriver = null;     // Référence persistante — empêche le GC de tuer le ConstantSourceNode
 
 function feedAudioRingBuffer(left, right) {
     _totalSamplesWritten += left.length;
@@ -497,10 +498,10 @@ function unlockAudio(master) {
         }
 
         audioNode = audioCtx.createScriptProcessor(4096, 1, 2);
-        // ConstantSourceNode : maintient onaudioprocess actif indéfiniment (pas de stop)
-        const src = audioCtx.createConstantSource();
-        src.connect(audioNode);
-        src.start();
+        // ConstantSourceNode stocké en variable de module — évite le GC qui couperait onaudioprocess
+        _audioDriver = audioCtx.createConstantSource();
+        _audioDriver.connect(audioNode);
+        _audioDriver.start();
 
         audioNode.onaudioprocess = function(e) {
             const outL = e.outputBuffer.getChannelData(0);
@@ -651,7 +652,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.2';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.3';
         statusEl.style.color = '#00ffcc';
         applyCurrentRom();
     } else if (state === 'loading') {

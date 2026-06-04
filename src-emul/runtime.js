@@ -7,6 +7,7 @@ const isWorker = typeof importScripts === 'function' && typeof self !== 'undefin
 const isNode = typeof process !== 'undefined' && process.versions?.node && !(typeof window !== 'undefined');
 
 let createPinMAMEFactory = null;
+let _emulatorGeneration = 0;
 
 const _bundled = typeof __PINMAME_WASM_BINARY__ !== 'undefined';
 
@@ -66,6 +67,7 @@ function normalizeRomBytes(customRomBytes) {
 
 
 function createEmulator() {
+    const generation = ++_emulatorGeneration;
     let pinmameInstance = null;
     let vfdMemoryPointer = 0;
     let lastSolState = 0;
@@ -89,6 +91,7 @@ function createEmulator() {
     const dacPrev  = [-1, -1];   // -1 = non initialisé (warm-up premier appel)
 
     globalThis.pushWasmAudio = function(ptr, count) {
+        if (generation !== _emulatorGeneration) return;
         if (!pinmameInstance) return;
         const ptr16  = ptr >> 1;
         const frames = count / 2;
@@ -143,6 +146,7 @@ function createEmulator() {
     };
 
     globalThis.pushWasmDisplay = function(ptr) {
+        if (generation !== _emulatorGeneration) return;
         if (!pinmameInstance) return;
         let data = '';
         for (let i = 0; i < 40; i++) {
@@ -154,6 +158,7 @@ function createEmulator() {
     };
 
     globalThis.pushWasmLamps = function(ptr) {
+        if (generation !== _emulatorGeneration) return;
         if (!pinmameInstance) return;
         let lampHex = '';
         for (let col = 0; col < 12; col++)
@@ -162,6 +167,7 @@ function createEmulator() {
     };
 
     globalThis.pushWasmSolens = function(solState) {
+        if (generation !== _emulatorGeneration) return;
         for (let s = 0; s < 32; s++) {
             if (((solState >> s) & 1) !== ((lastSolState >> s) & 1))
                 postToChannel('driver', `!set:id=${s}&state=${(solState >> s) & 1}`);
@@ -170,6 +176,7 @@ function createEmulator() {
     };
 
     globalThis.postWasmLog = function(cmdId) {
+        if (generation !== _emulatorGeneration) return;
         postToChannel('status', `@audio:cmd=0x${cmdId.toString(16).toUpperCase()}`);
     };
 

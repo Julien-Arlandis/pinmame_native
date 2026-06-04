@@ -173,7 +173,9 @@ async function trySerialMaster(url) {
             const line = e.data.trim();
             if (line.startsWith('@master:')) {
                 const name = new URLSearchParams(line.slice(8)).get('name') || url;
-                done(new SerialMaster(createWebSocketPort(ws, name)));
+                const m = new SerialMaster(createWebSocketPort(ws, name));
+                m._reconnectUrl = url;
+                done(m);
             }
         };
         ws.onerror = () => done(null);
@@ -736,10 +738,7 @@ function buildSolGrid() {
 }
 
 function setupSystemHandlers(master) {
-    rebootBtn.onclick = () => {
-        if (master.isLocal) { location.reload(); }
-        else { sessionStorage.setItem('autoReconnect', '1'); master.send('@reboot:'); }
-    };
+    rebootBtn.onclick = () => master.isLocal ? location.reload() : master.send('@reboot:');
     clearRomBtn.onclick = () => {
         if (master.isLocal) {
             sessionStorage.removeItem('custom_rom_bytes');
@@ -766,7 +765,6 @@ function setupSystemHandlers(master) {
             } else {
                 sessionStorage.removeItem('custom_rom_bytes');
                 sessionStorage.removeItem('custom_rom_filename');
-                sessionStorage.setItem('autoReconnect', '1');
                 master.send(`@rom:name=${encodeURIComponent(name)}`);
                 romNameDisplay.textContent = name;
                 romNameDisplay.style.color = '';
@@ -830,21 +828,38 @@ async function bootstrap() {
 
     updateMasterStatus(master);
 
-    master.onDisconnect(() => {
+    master.onDisconnect(async () => {
+        const el = document.getElementById('connectorStatus');
         if (master.isLocal) {
-            const el = document.getElementById('connectorStatus');
             if (el) el.innerHTML = '<span style="color:#ff4444">⚡ MAÎTRE DÉCONNECTÉ — rechargez la page</span>';
             logToTerminal('⚡ Maître déconnecté');
             return;
         }
-        const el = document.getElementById('connectorStatus');
-        let countdown = 3;
-        const tick = () => {
-            if (el) el.innerHTML = `<span style="color:#ffaa00">🔄 Reconnexion dans ${countdown}s...</span>`;
-            if (countdown-- > 0) setTimeout(tick, 1000); else location.reload();
-        };
-        tick();
-        logToTerminal('⚡ Maître déconnecté — rechargement automatique');
+        logToTerminal('⚡ Maître déconnecté — reconnexion en cours...');
+        if (el) el.innerHTML = '<span style="color:#ffaa00">🔄 Reconnexion...</span>';
+        // Afficher SERVER DOWN sur le VFD
+        display.parseCommand('!display:action=clear');
+        display.parseCommand('!display:action=write&pos=4&text=' + encodeURIComponent('SERVER DOWN'));
+        display._dirty = true;
+        // Boucle de reconnexion sans rechargement de page
+        const url = master._reconnectUrl;
+        if (url) {
+            while (true) {
+                await new Promise(r => setTimeout(r, 2000));
+                const newMaster = await trySerialMaster(url);
+                if (newMaster) {
+                    newMaster._reconnectUrl = url;
+                    connectMaster(newMaster, display);
+                    newMaster.send('@connect:input=1&display=1&driver=1');
+                    setupSystemHandlers(newMaster);
+                    buildSwitchGrid(newMaster);
+                    buildSoundGrid(newMaster);
+                    buildDipSwitches(newMaster);
+                    if (el) el.innerHTML = '';
+                    return;
+                }
+            }
+        }
     });
 
     const display = new GottliebDisplayEmulator('vfdCanvas');

@@ -904,12 +904,16 @@ async function bootstrap() {
     // ── Bouton NODE ──────────────────────────────────────────────────────────
     async function probeWs(url) {
         return new Promise(resolve => {
-            let ws;
-            const done = ok => { clearTimeout(t); try { ws?.close(); } catch {} resolve(ok); };
+            let ws, resolved = false;
+            const done = ok => {
+                if (resolved) return; resolved = true;
+                clearTimeout(t); try { ws?.close(); } catch {} resolve(ok);
+            };
             const t = setTimeout(() => done(false), 1500);
             try { ws = new WebSocket(url); } catch { done(false); return; }
             ws.onmessage = e => { if (e.data.trim().startsWith('@master:')) done(true); };
-            ws.onerror = () => done(false);
+            ws.onerror   = () => done(false);
+            ws.onclose   = () => done(false);
         });
     }
 
@@ -945,7 +949,7 @@ async function bootstrap() {
             if (!connected) btnNode.disabled = false;
         };
 
-        // Sonde périodique — active/désactive le bouton Node selon disponibilité
+        // Sonde périodique — affiche/masque le bouton WS selon disponibilité du serveur
         (async () => {
             while (true) {
                 if (currentMode !== 'node') {
@@ -953,9 +957,9 @@ async function bootstrap() {
                     for (const url of WS_CANDIDATES) {
                         if (await probeWs(url)) { found = true; break; }
                     }
-                    btnNode.disabled = !found;
+                    btnNode.style.display = found ? '' : 'none';
                 }
-                await new Promise(r => setTimeout(r, 4000));
+                await new Promise(r => setTimeout(r, 2000));
             }
         })();
     }

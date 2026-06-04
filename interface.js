@@ -781,7 +781,7 @@ function setupSystemHandlers(master, restartFn) {
             if (master.isLocal) {
                 sessionStorage.setItem('custom_rom_bytes', b64);
                 sessionStorage.setItem('custom_rom_filename', file.name);
-                location.reload();
+                localRestart();
             } else {
                 master.send(`@rom:name=${encodeURIComponent(file.name)}&data=${encodeURIComponent(b64)}`);
                 romNameDisplay.textContent = file.name;

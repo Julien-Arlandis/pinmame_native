@@ -178,7 +178,7 @@ function createEmulator() {
         postToChannel('status', `@audio:cmd=0x${cmdId.toString(16).toUpperCase()}`);
     };
 
-    async function initialiserMoteur(customRomBytes, customRomName) {
+    async function initialiserMoteur(customRomBytes, customRomName, baseUrl) {
         postToChannel('status', '@status:state=loading');
         if (isNode) globalThis.window = globalThis;
 
@@ -202,7 +202,8 @@ function createEmulator() {
                 if (!romPath) throw new Error(`Pack introuvable: ${candidates.join(', ')}`);
                 romBuffer = fs.readFileSync(romPath).buffer;
             } else {
-                const response = await fetch(`roms/${romName}.zip`);
+                const romUrl = baseUrl ? new URL(`roms/${romName}.zip`, baseUrl).href : `roms/${romName}.zip`;
+                const response = await fetch(romUrl);
                 if (!response.ok) throw new Error(`Pack introuvable (${response.status})`);
                 romBuffer = await response.arrayBuffer();
             }
@@ -248,7 +249,7 @@ function createEmulator() {
     }
 
     function handleMessage(type, payload) {
-        if (type === 'INIT_ENGINE') return initialiserMoteur(payload.customRomBytes, payload.customRomName);
+        if (type === 'INIT_ENGINE') return initialiserMoteur(payload.customRomBytes, payload.customRomName, payload.baseUrl);
     }
 
     return { sendMessage: handleMessage, handleLine };

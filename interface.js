@@ -38,7 +38,7 @@ async function createWorkerPort() {
     const customRomName  = sessionStorage.getItem('custom_rom_filename')
         || new URLSearchParams(location.search).get('rom')
         || null;
-    worker.postMessage({ type: 'INIT_ENGINE', payload: { customRomBytes, customRomName } });
+    worker.postMessage({ type: 'INIT_ENGINE', payload: { customRomBytes, customRomName, baseUrl: location.href } });
 
     return {
         readable, writable,

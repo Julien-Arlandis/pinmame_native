@@ -737,13 +737,14 @@ function buildSolGrid() {
     for (let i = 0; i < 32; i++) { const c = document.createElement('div'); c.className='cell'; c.textContent='S'+String(i+1).padStart(2,'0'); grid.appendChild(c); solCells.push(c); }
 }
 
-function setupSystemHandlers(master) {
-    rebootBtn.onclick = () => master.isLocal ? location.reload() : master.send('@reboot:');
+function setupSystemHandlers(master, restartFn) {
+    const localRestart = restartFn || (() => location.reload());
+    rebootBtn.onclick = () => master.isLocal ? localRestart() : master.send('@reboot:');
     clearRomBtn.onclick = () => {
         if (master.isLocal) {
             sessionStorage.removeItem('custom_rom_bytes');
             sessionStorage.removeItem('custom_rom_filename');
-            location.reload();
+            localRestart();
         } else {
             master.send('@rom:name=bonebstr');
             clearRomBtn.style.display = 'none';
@@ -758,10 +759,7 @@ function setupSystemHandlers(master) {
             if (master.isLocal) {
                 sessionStorage.setItem('custom_rom_filename', name);
                 sessionStorage.removeItem('custom_rom_bytes');
-                // Recharger avec la ROM intégrée sélectionnée via query string
-                const url = new URL(location.href);
-                url.searchParams.set('rom', name);
-                location.href = url.toString();
+                localRestart();
             } else {
                 sessionStorage.removeItem('custom_rom_bytes');
                 sessionStorage.removeItem('custom_rom_filename');
@@ -881,7 +879,6 @@ async function bootstrap() {
     buildDipSwitches(master);
     buildLampGrid();
     buildSolGrid();
-    setupSystemHandlers(master);
 
     async function restartLocalEmulator() {
         master._port?.terminate?.();
@@ -889,14 +886,13 @@ async function bootstrap() {
         const newMaster = new SerialMaster(newPort);
         master = newMaster;
         connectMaster(newMaster, display);
-        setupSystemHandlers(newMaster);
+        setupSystemHandlers(newMaster, restartLocalEmulator);
         buildSwitchGrid(newMaster);
         buildSoundGrid(newMaster);
         buildDipSwitches(newMaster);
-        rebootBtn.onclick = restartLocalEmulator;
     }
 
-    if (master.isLocal) rebootBtn.onclick = restartLocalEmulator;
+    setupSystemHandlers(master, master.isLocal ? restartLocalEmulator : null);
 
     // Bouton BLE — visible uniquement si le navigateur supporte Web Bluetooth
     const bleBtn = document.getElementById('bleConnectBtn');

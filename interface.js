@@ -447,8 +447,10 @@ let audioCtx = null, audioNode = null;
 let isBufferWarming = false;
 let _audioMaster = null; // Référence mutable — mise à jour à chaque changement de master
 let _pacingTimer  = null; // Fallback pacing quand AudioContext pas encore débloqué
+let _totalSamplesWritten = 0; // Compteur cumulatif pour le fallback pacing
 
 function feedAudioRingBuffer(left, right) {
+    _totalSamplesWritten += left.length;
     for (let i = 0; i < left.length; i++) {
         ringBufferL[audioWritePtr] = left[i];
         ringBufferR[audioWritePtr] = right[i];
@@ -462,15 +464,15 @@ function resetAudioRead() {
 }
 
 function startFallbackPacing() {
-    if (_pacingTimer) return;
+    stopFallbackPacing();
     const SAMPLE_RATE = 44100;
-    let samplesProduced = 0, paceStart = Date.now();
-    // Réinitialise la référence à chaque appel (nouveau master local)
+    const paceStart = Date.now();
+    const baseWritten = _totalSamplesWritten;
     _pacingTimer = setInterval(() => {
         if (audioCtx && audioCtx.state === 'running') { stopFallbackPacing(); return; }
-        samplesProduced = (audioWritePtr - 0 + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
-        const samplesConsumed = Math.floor((Date.now() - paceStart) / 1000 * SAMPLE_RATE);
-        const distance = Math.max(0, samplesProduced - samplesConsumed);
+        const produced = _totalSamplesWritten - baseWritten;
+        const consumed = Math.floor((Date.now() - paceStart) / 1000 * SAMPLE_RATE);
+        const distance = Math.max(0, produced - consumed);
         _audioMaster?.send(`@audio:distance=${distance}`);
     }, 32);
 }
@@ -488,13 +490,17 @@ function unlockAudio(master) {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
         logToTerminal(`📊 Audio: ${audioCtx.sampleRate}Hz, état: ${audioCtx.state}`);
         resetAudioRead();
-        if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
-        else stopFallbackPacing();
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume().then(stopFallbackPacing).catch(() => {});
+        } else {
+            stopFallbackPacing();
+        }
 
         audioNode = audioCtx.createScriptProcessor(4096, 1, 2);
-        const kick = audioCtx.createOscillator(); kick.frequency.value = 0;
-        kick.connect(audioNode); kick.start(0);
-        setTimeout(() => { try { kick.stop(); } catch (_) {} }, 500);
+        // ConstantSourceNode : maintient onaudioprocess actif indéfiniment (pas de stop)
+        const src = audioCtx.createConstantSource();
+        src.connect(audioNode);
+        src.start();
 
         audioNode.onaudioprocess = function(e) {
             const outL = e.outputBuffer.getChannelData(0);
@@ -645,7 +651,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.1';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.2';
         statusEl.style.color = '#00ffcc';
         applyCurrentRom();
     } else if (state === 'loading') {
@@ -858,8 +864,10 @@ async function bootstrap() {
     // Audio local uniquement si le maître tourne dans la page (Worker)
     if (master.isLocal) {
         const audioUnlock = () => unlockAudio(master);
-        document.body.addEventListener('click',      audioUnlock, { passive: true });
-        document.body.addEventListener('touchstart', audioUnlock, { passive: true });
+        // touchend + pointerdown + click pour couvrir iOS Safari, Android Chrome et desktop
+        document.addEventListener('touchend',    audioUnlock, { passive: true, once: false });
+        document.addEventListener('pointerdown', audioUnlock, { passive: true, once: false });
+        document.addEventListener('click',       audioUnlock, { passive: true, once: false });
         // Pacing fallback : pace l'émulateur par l'horloge mur tant qu'AudioContext
         // n'est pas débloqué (obligatoire sur mobile où resume() exige un geste)
         startFallbackPacing();

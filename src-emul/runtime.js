@@ -549,11 +549,12 @@ Logs
                 }
             }
 
-            const emulator  = createEmulator();
+            let emulator    = createEmulator();
             const wsClients = new Set();
             let lastStatusLine  = null;
             let lastDisplayLine = null;
             let lastLampLine    = null;
+            let currentRomArgs  = process.argv.slice(2);
 
             // Logique commune WS + BLE : retourne true si la ligne a été traitée
             function handleClientLine(line, replyCb) {
@@ -579,26 +580,37 @@ Logs
                     return true;
                 }
                 if (line === '@reboot:') {
-                    const newArgs = process.argv.slice(2);
-                    spawn(process.execPath, [__filename, ...newArgs], { detached: true, stdio: 'inherit' }).unref();
-                    process.exit(0);
+                    info('  [REBOOT]  redémarrage émulateur en place');
+                    lastStatusLine = lastDisplayLine = lastLampLine = null;
+                    resetPacing();
+                    emulator = createEmulator();
+                    const romArg = currentRomArgs.find(a => a.startsWith('--rom='));
+                    const romName = romArg ? romArg.slice(6) : null;
+                    emulator.sendMessage('INIT_ENGINE', { customRomBytes: null, customRomName: romName });
+                    const notif = '@status:state=loading';
+                    for (const ws of wsClients) if (ws.readyState === 1) ws.send(notif);
+                    if (bleConnected) bleSend(notif);
                     return true;
                 }
                 if (line.startsWith('@rom:')) {
                     const p = new URLSearchParams(line.slice(5));
                     const name = decodeURIComponent(p.get('name') || 'bonebstr').replace(/\.zip$/i, '');
                     const data = p.get('data') || null;
-                    info(`  ROM      : redémarrage → ${name}`);
+                    info(`  ROM      : changement → ${name}`);
                     if (data) {
                         const romPath = path.join(process.cwd(), 'roms', `${name}.zip`);
                         fs.writeFileSync(romPath, Buffer.from(data, 'base64'));
                         info(`  ROM sauvegardée → ${romPath}`);
                     }
-                    const newArgs = process.argv.slice(2)
-                        .filter(a => !a.startsWith('--rom=') && !a.startsWith('--custom-rom='));
-                    newArgs.push(`--rom=${name}`);
-                    spawn(process.execPath, [__filename, ...newArgs], { detached: true, stdio: 'inherit' }).unref();
-                    process.exit(0);
+                    currentRomArgs = currentRomArgs.filter(a => !a.startsWith('--rom=') && !a.startsWith('--custom-rom='));
+                    currentRomArgs.push(`--rom=${name}`);
+                    lastStatusLine = lastDisplayLine = lastLampLine = null;
+                    resetPacing();
+                    emulator = createEmulator();
+                    emulator.sendMessage('INIT_ENGINE', { customRomBytes: null, customRomName: name });
+                    const notif = '@status:state=loading';
+                    for (const ws of wsClients) if (ws.readyState === 1) ws.send(notif);
+                    if (bleConnected) bleSend(notif);
                     return true;
                 }
                 return false;
@@ -632,8 +644,10 @@ Logs
             // Pacing : simule le feedback @audio:distance du navigateur
             // Sans ça l'émulateur tourne en roue libre (trop rapide, son haché)
             let samplesProduced = 0;
-            const paceStart = Date.now();
+            let paceStart = Date.now();
             const SAMPLE_RATE = 44100;
+
+            function resetPacing() { samplesProduced = 0; paceStart = Date.now(); }
 
             setInterval(() => {
                 const samplesConsumed = Math.floor((Date.now() - paceStart) / 1000 * SAMPLE_RATE);

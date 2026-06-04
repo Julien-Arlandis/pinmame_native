@@ -209,6 +209,12 @@ async function resolveMaster(m) {
 async function selectMaster(masters) {
     const hasExternal = masters.some(m => !m.isLocal);
     if (!hasExternal) return resolveMaster(masters[0]);
+    // Auto-reconnexion après reboot/ROM change : pas de menu
+    if (sessionStorage.getItem('autoReconnect') === '1') {
+        sessionStorage.removeItem('autoReconnect');
+        const ws = masters.find(m => !m.isLocal && !m._ble && !m._local);
+        if (ws) return ws;
+    }
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:9999;';
@@ -730,7 +736,10 @@ function buildSolGrid() {
 }
 
 function setupSystemHandlers(master) {
-    rebootBtn.onclick = () => master.isLocal ? location.reload() : master.send('@reboot:');
+    rebootBtn.onclick = () => {
+        if (master.isLocal) { location.reload(); }
+        else { sessionStorage.setItem('autoReconnect', '1'); master.send('@reboot:'); }
+    };
     clearRomBtn.onclick = () => {
         if (master.isLocal) {
             sessionStorage.removeItem('custom_rom_bytes');
@@ -757,6 +766,7 @@ function setupSystemHandlers(master) {
             } else {
                 sessionStorage.removeItem('custom_rom_bytes');
                 sessionStorage.removeItem('custom_rom_filename');
+                sessionStorage.setItem('autoReconnect', '1');
                 master.send(`@rom:name=${encodeURIComponent(name)}`);
                 romNameDisplay.textContent = name;
                 romNameDisplay.style.color = '';

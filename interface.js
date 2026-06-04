@@ -192,10 +192,7 @@ const BLE_STUB   = { _ble: true,   name: 'Bluetooth — PinMAME' };
 const LOCAL_STUB = { _local: true, name: 'Exécution locale (navigateur)', isLocal: true };
 
 async function discoverMasters() {
-    const results = await Promise.all(WS_CANDIDATES.map(trySerialMaster));
-    const list = results.filter(Boolean);
-    list.push(LOCAL_STUB);
-    return list;
+    return [LOCAL_STUB];
 }
 
 // Crée le master effectif à partir d'un stub ou retourne le master déjà résolu
@@ -826,45 +823,15 @@ async function bootstrap() {
 
     updateMasterStatus(master);
 
-    master.onDisconnect(async () => {
+    master.onDisconnect(() => {
         const el = document.getElementById('connectorStatus');
-        if (master.isLocal) {
-            if (el) el.innerHTML = '<span style="color:#ff4444">⚡ MAÎTRE DÉCONNECTÉ — rechargez la page</span>';
-            logToTerminal('⚡ Maître déconnecté');
-            return;
-        }
-        logToTerminal('⚡ Maître déconnecté — reconnexion en cours...');
-        if (el) el.innerHTML = '<span style="color:#ffaa00">🔄 Reconnexion...</span>';
-        // Afficher SERVER DOWN sur le VFD
-        display.parseCommand('!display:action=clear');
-        display.parseCommand('!display:action=write&pos=4&text=' + encodeURIComponent('SERVER DOWN'));
-        display._dirty = true;
-        // Boucle de reconnexion sans rechargement de page
-        const url = master._reconnectUrl;
-        if (url) {
-            while (true) {
-                await new Promise(r => setTimeout(r, 2000));
-                const newMaster = await trySerialMaster(url);
-                if (newMaster) {
-                    newMaster._reconnectUrl = url;
-                    connectMaster(newMaster, display);
-                    newMaster.send('@connect:input=1&display=1&driver=1');
-                    setupSystemHandlers(newMaster);
-                    buildSwitchGrid(newMaster);
-                    buildSoundGrid(newMaster);
-                    buildDipSwitches(newMaster);
-                    if (el) el.innerHTML = '';
-                    return;
-                }
-            }
-        }
+        if (el) el.innerHTML = '<span style="color:#ff4444">⚡ MAÎTRE DÉCONNECTÉ — rechargez la page</span>';
+        logToTerminal('⚡ Maître déconnecté');
     });
 
     const display = new GottliebDisplayEmulator('vfdCanvas');
     connectMaster(master, display);
 
-    // Annonce les 3 connecteurs au maître distant
-    if (!master.isLocal) master.send('@connect:input=1&display=1&driver=1');
 
     // Audio local uniquement si le maître tourne dans la page (Worker)
     if (master.isLocal) {
@@ -893,6 +860,50 @@ async function bootstrap() {
     }
 
     setupSystemHandlers(master, master.isLocal ? restartLocalEmulator : null);
+
+    // Sonde WS en arrière-plan — affiche le bouton Runtime Node dès détection
+    const nodeBtn = document.getElementById('nodeConnectBtn');
+    if (nodeBtn) {
+        async function switchToNode(wsMaster) {
+            master._port?.terminate?.();
+            master = wsMaster;
+            connectMaster(wsMaster, display);
+            wsMaster.send('@connect:input=1&display=1&driver=1');
+            setupSystemHandlers(wsMaster);
+            buildSwitchGrid(wsMaster);
+            buildSoundGrid(wsMaster);
+            buildDipSwitches(wsMaster);
+            nodeBtn.textContent = '🖥️ Connecté';
+            wsMaster.onDisconnect(async () => {
+                nodeBtn.textContent = '🖥️ Runtime Node';
+                const el = document.getElementById('connectorStatus');
+                if (el) el.innerHTML = '<span style="color:#ffaa00">🔄 Reconnexion...</span>';
+                display.parseCommand('!display:action=clear');
+                display.parseCommand('!display:action=write&pos=4&text=' + encodeURIComponent('SERVER DOWN'));
+                display._dirty = true;
+                const url = wsMaster._reconnectUrl;
+                while (url) {
+                    await new Promise(r => setTimeout(r, 2000));
+                    const m = await trySerialMaster(url);
+                    if (m) { m._reconnectUrl = url; await switchToNode(m); return; }
+                }
+            });
+        }
+        (async () => {
+            while (true) {
+                for (const url of WS_CANDIDATES) {
+                    const m = await trySerialMaster(url);
+                    if (m) {
+                        m._reconnectUrl = url;
+                        nodeBtn.style.display = 'inline-block';
+                        nodeBtn.onclick = () => switchToNode(m);
+                        return;
+                    }
+                }
+                await new Promise(r => setTimeout(r, 3000));
+            }
+        })();
+    }
 
     // Bouton BLE — visible uniquement si le navigateur supporte Web Bluetooth
     const bleBtn = document.getElementById('bleConnectBtn');

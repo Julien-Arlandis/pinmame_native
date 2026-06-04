@@ -6113,12 +6113,8 @@ Logs
                 }
                 if (line === '@reboot:') {
                     const newArgs = process.argv.slice(2);
-                    for (const c of wsClients) try { c.terminate(); } catch {}
-                    if (wss) wss.close(() => {
-                        spawn(process.execPath, [__filename, ...newArgs], { detached: true, stdio: 'inherit' }).unref();
-                        process.exit(0);
-                    });
-                    setTimeout(() => process.exit(0), 1000);
+                    spawn(process.execPath, [__filename, ...newArgs], { detached: true, stdio: 'inherit' }).unref();
+                    process.exit(0);
                     return true;
                 }
                 if (line.startsWith('@rom:')) {
@@ -6134,12 +6130,8 @@ Logs
                     const newArgs = process.argv.slice(2)
                         .filter(a => !a.startsWith('--rom=') && !a.startsWith('--custom-rom='));
                     newArgs.push(`--rom=${name}`);
-                    for (const c of wsClients) try { c.terminate(); } catch {}
-                    if (wss) wss.close(() => {
-                        spawn(process.execPath, [__filename, ...newArgs], { detached: true, stdio: 'inherit' }).unref();
-                        process.exit(0);
-                    });
-                    setTimeout(() => process.exit(0), 1000);
+                    spawn(process.execPath, [__filename, ...newArgs], { detached: true, stdio: 'inherit' }).unref();
+                    process.exit(0);
                     return true;
                 }
                 return false;

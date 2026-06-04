@@ -709,7 +709,7 @@ function buildSolGrid() {
 }
 
 function setupSystemHandlers(master) {
-    rebootBtn.onclick = () => location.reload();
+    rebootBtn.onclick = () => master.isLocal ? location.reload() : master.send('@reboot:');
     clearRomBtn.onclick = () => {
         if (master.isLocal) {
             sessionStorage.removeItem('custom_rom_bytes');

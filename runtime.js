@@ -507,7 +507,9 @@ Logs
                         uuid: BLE_IN,
                         properties: ['write', 'writeWithoutResponse'],
                         onWriteRequest(data, offset, withoutResponse, cb) {
-                            emulator.handleLine(data.toString().trim());
+                            const line = data.toString().trim();
+                            if (!handleClientLine(line, bleSend))
+                                emulator.handleLine(line);
                             cb(bleno.Characteristic.RESULT_SUCCESS);
                         }
                     });
@@ -539,66 +541,80 @@ Logs
             let lastDisplayLine = null;
             let lastLampLine    = null;
 
+            // Logique commune WS + BLE : retourne true si la ligne a été traitée
+            function handleClientLine(line, replyCb) {
+                if (line.startsWith('@connect:')) {
+                    const p = new URLSearchParams(line.slice(9));
+                    if (p.get('input')   === '1') info('  [INPUT]   connecté');
+                    if (p.get('display') === '1') info('  [DISPLAY] connecté');
+                    if (p.get('driver')  === '1') info('  [DRIVER]  connecté');
+                    const romsDir = [
+                        path.join(process.cwd(), 'roms'),
+                        path.join(__dirname, 'roms')
+                    ].find(d => { try { return fs.statSync(d).isDirectory(); } catch { return false; } });
+                    if (romsDir) {
+                        const roms = fs.readdirSync(romsDir)
+                            .filter(f => f.endsWith('.zip'))
+                            .map(f => f.slice(0, -4))
+                            .sort();
+                        if (roms.length) replyCb(`@roms:list=${roms.map(encodeURIComponent).join(',')}`);
+                    }
+                    if (lastDisplayLine) replyCb(lastDisplayLine);
+                    if (lastLampLine)    replyCb(lastLampLine);
+                    if (lastStatusLine)  replyCb(lastStatusLine);
+                    return true;
+                }
+                if (line === '@reboot:') {
+                    const newArgs = process.argv.slice(2);
+                    for (const c of wsClients) try { c.terminate(); } catch {}
+                    if (wss) wss.close(() => {
+                        spawn(process.execPath, [__filename, ...newArgs], { detached: true, stdio: 'inherit' }).unref();
+                        process.exit(0);
+                    });
+                    setTimeout(() => process.exit(0), 1000);
+                    return true;
+                }
+                if (line.startsWith('@rom:')) {
+                    const p = new URLSearchParams(line.slice(5));
+                    const name = decodeURIComponent(p.get('name') || 'bonebstr').replace(/\.zip$/i, '');
+                    const data = p.get('data') || null;
+                    info(`  ROM      : redémarrage → ${name}`);
+                    if (data) {
+                        const romPath = path.join(process.cwd(), 'roms', `${name}.zip`);
+                        fs.writeFileSync(romPath, Buffer.from(data, 'base64'));
+                        info(`  ROM sauvegardée → ${romPath}`);
+                    }
+                    const newArgs = process.argv.slice(2)
+                        .filter(a => !a.startsWith('--rom=') && !a.startsWith('--custom-rom='));
+                    newArgs.push(`--rom=${name}`);
+                    for (const c of wsClients) try { c.terminate(); } catch {}
+                    if (wss) wss.close(() => {
+                        spawn(process.execPath, [__filename, ...newArgs], { detached: true, stdio: 'inherit' }).unref();
+                        process.exit(0);
+                    });
+                    setTimeout(() => process.exit(0), 1000);
+                    return true;
+                }
+                return false;
+            }
+
+            let wss = null;
             try {
                 const { WebSocketServer } = require('ws');
-                const wss = new WebSocketServer({ port: wsPort });
+                wss = new WebSocketServer({ port: wsPort });
                 info(`  WebSocket: ws://localhost:${wsPort}`);
                 wss.on('connection', (ws) => {
                     wsClients.add(ws);
-                    ws.connectors = [];
                     ws.send(`@master:name=runtime-node&version=1`);
                     ws.on('message', (data) => {
                         const line = data.toString().trim();
-                        if (line.startsWith('@connect:')) {
-                            const p = new URLSearchParams(line.slice(9));
-                            if (p.get('input')   === '1') { ws.connectors.push('INPUT');   info('  [INPUT]   connecté'); }
-                            if (p.get('display') === '1') { ws.connectors.push('DISPLAY'); info('  [DISPLAY] connecté'); }
-                            if (p.get('driver')  === '1') { ws.connectors.push('DRIVER');  info('  [DRIVER]  connecté'); }
-                            // Envoyer la liste des ROMs disponibles dans roms/
-                            const romsDir = [
-                                path.join(process.cwd(), 'roms'),
-                                path.join(__dirname, 'roms')
-                            ].find(d => { try { return fs.statSync(d).isDirectory(); } catch { return false; } });
-                            if (romsDir) {
-                                const roms = fs.readdirSync(romsDir)
-                                    .filter(f => f.endsWith('.zip'))
-                                    .map(f => f.slice(0, -4))
-                                    .sort();
-                                if (roms.length) ws.send(`@roms:list=${roms.map(encodeURIComponent).join(',')}`);
-                            }
-                            // Renvoyer l'état courant au nouveau client
-                            if (lastDisplayLine) ws.send(lastDisplayLine);
-                            if (lastLampLine)    ws.send(lastLampLine);
-                            if (lastStatusLine)  ws.send(lastStatusLine);
-                            return;
-                        }
-                        if (line.startsWith('@rom:')) {
-                            const p = new URLSearchParams(line.slice(5));
-                            const name = decodeURIComponent(p.get('name') || 'bonebstr').replace(/\.zip$/i, '');
-                            const data = p.get('data') || null;
-                            info(`  ROM      : redémarrage → ${name}`);
-                            if (data) {
-                                const romPath = path.join(process.cwd(), 'roms', `${name}.zip`);
-                                fs.writeFileSync(romPath, Buffer.from(data, 'base64'));
-                                info(`  ROM sauvegardée → ${romPath}`);
-                            }
-                            const newArgs = process.argv.slice(2)
-                                .filter(a => !a.startsWith('--rom=') && !a.startsWith('--custom-rom='));
-                            newArgs.push(`--rom=${name}`);
-                            for (const c of wsClients) try { c.terminate(); } catch {}
-                            wss.close(() => {
-                                spawn(process.execPath, [__filename, ...newArgs], { detached: true, stdio: 'inherit' }).unref();
-                                process.exit(0);
-                            });
-                            setTimeout(() => process.exit(0), 1000);
-                            return;
-                        }
-                        emulator.handleLine(line);
+                        if (!handleClientLine(line, l => ws.send(l)))
+                            emulator.handleLine(line);
                     });
                     const disconnect = () => {
                         if (!wsClients.has(ws)) return;
                         wsClients.delete(ws);
-                        for (const c of ws.connectors) info(`  [${c.padEnd(7)}] déconnecté`);
+                        info('  [WS]      déconnecté');
                     };
                     ws.on('close', disconnect);
                     ws.on('error', disconnect);

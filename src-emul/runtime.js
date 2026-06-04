@@ -500,8 +500,9 @@ Logs
                             bleNotify   = cb;
                             bleConnected = true;
                             info('  [BLE] client connecté');
-                            // Envoyer statut courant immédiatement
-                            if (lastStatusLine) bleSend(lastStatusLine);
+                            if (lastDisplayLine) bleSend(lastDisplayLine);
+                            if (lastLampLine)    bleSend(lastLampLine);
+                            if (lastStatusLine)  bleSend(lastStatusLine);
                         },
                         onUnsubscribe() {
                             bleNotify    = null;
@@ -510,13 +511,19 @@ Logs
                         }
                     });
 
+                    let bleInBuf = '';
                     const inChar = new bleno.Characteristic({
                         uuid: BLE_IN,
                         properties: ['write', 'writeWithoutResponse'],
                         onWriteRequest(data, offset, withoutResponse, cb) {
-                            const line = data.toString().trim();
-                            if (!handleClientLine(line, bleSend))
-                                emulator.handleLine(line);
+                            const isLast = data[0] === 0x01;
+                            bleInBuf += data.slice(1).toString('utf8');
+                            if (isLast) {
+                                const line = bleInBuf.trim();
+                                bleInBuf = '';
+                                if (line && !handleClientLine(line, bleSend))
+                                    emulator.handleLine(line);
+                            }
                             cb(bleno.Characteristic.RESULT_SUCCESS);
                         }
                     });
@@ -573,12 +580,8 @@ Logs
                 }
                 if (line === '@reboot:') {
                     const newArgs = process.argv.slice(2);
-                    for (const c of wsClients) try { c.terminate(); } catch {}
-                    if (wss) wss.close(() => {
-                        spawn(process.execPath, [__filename, ...newArgs], { detached: true, stdio: 'inherit' }).unref();
-                        process.exit(0);
-                    });
-                    setTimeout(() => process.exit(0), 1000);
+                    spawn(process.execPath, [__filename, ...newArgs], { detached: true, stdio: 'inherit' }).unref();
+                    process.exit(0);
                     return true;
                 }
                 if (line.startsWith('@rom:')) {
@@ -594,12 +597,8 @@ Logs
                     const newArgs = process.argv.slice(2)
                         .filter(a => !a.startsWith('--rom=') && !a.startsWith('--custom-rom='));
                     newArgs.push(`--rom=${name}`);
-                    for (const c of wsClients) try { c.terminate(); } catch {}
-                    if (wss) wss.close(() => {
-                        spawn(process.execPath, [__filename, ...newArgs], { detached: true, stdio: 'inherit' }).unref();
-                        process.exit(0);
-                    });
-                    setTimeout(() => process.exit(0), 1000);
+                    spawn(process.execPath, [__filename, ...newArgs], { detached: true, stdio: 'inherit' }).unref();
+                    process.exit(0);
                     return true;
                 }
                 return false;

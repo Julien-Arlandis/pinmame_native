@@ -173,7 +173,7 @@ class SerialMaster {
         finally { reader.releaseLock(); this._disconnectCallback?.(); }
     }
 
-    send(line)         { if (line.startsWith('@set:') || line.startsWith('@sound:')) console.error('[SEND]', line, new Error().stack.split('\n')[2]?.trim()); this._writer.write(line).catch(() => {}); }
+    send(line)         { this._writer.write(line).catch(() => {}); }
     onMessage(cb)      { this._callbacks.push(cb); }
     onAudio(cb)        { this._audioCallback = cb; }
     onDisconnect(cb)   { this._disconnectCallback = cb; }
@@ -651,7 +651,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.4-dbg';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.5-dbg';
         statusEl.style.color = '#00ffcc';
         applyCurrentRom();
     } else if (state === 'loading') {
@@ -820,8 +820,21 @@ function setupSystemHandlers(restartFn) {
     };
     const attachMacro = (btnId, id) => {
         const btn = document.getElementById(btnId); if (!btn) return;
-        const down = (e) => { if (e.type.startsWith('touch')) e.preventDefault(); swCells[id]?.classList.add('sw-user');    _masterRef.current?.send(`@set:id=${id}&state=1`); };
-        const up   = (e) => { if (e.type.startsWith('touch')) e.preventDefault(); swCells[id]?.classList.remove('sw-user'); _masterRef.current?.send(`@set:id=${id}&state=0`); };
+        let pressed = false;
+        const down = (e) => {
+            if (e.type.startsWith('touch')) e.preventDefault();
+            if (pressed) return;
+            pressed = true;
+            swCells[id]?.classList.add('sw-user');
+            _masterRef.current?.send(`@set:id=${id}&state=1`);
+        };
+        const up = (e) => {
+            if (e.type.startsWith('touch')) e.preventDefault();
+            if (!pressed) return;
+            pressed = false;
+            swCells[id]?.classList.remove('sw-user');
+            _masterRef.current?.send(`@set:id=${id}&state=0`);
+        };
         btn.addEventListener('mousedown', down); btn.addEventListener('touchstart', down, { passive:false });
         btn.addEventListener('mouseup',   up);   btn.addEventListener('touchend',   up,   { passive:false });
         btn.addEventListener('mouseleave', up);  btn.addEventListener('touchcancel', up,  { passive:false });

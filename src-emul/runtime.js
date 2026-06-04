@@ -633,6 +633,8 @@ Logs
                     ws.send(`@master:name=runtime-node&version=1`);
                     ws.on('message', (data) => {
                         const line = data.toString().trim();
+                        if (line.startsWith('@set:') || line.startsWith('@sound:'))
+                            process.stderr.write(`[WS-RCV] ${line}\n`);
                         if (!handleClientLine(line, l => ws.send(l)))
                             emulator.handleLine(line);
                     });

@@ -281,6 +281,7 @@ ROM
 
 Réseau
   --port=<n>             Port WebSocket             (défaut: 8765)
+  --no-ble               Désactiver le périphérique BLE
 
 Audio (détection automatique dans l'ordre : speaker → play → ffplay → aplay)
   --speaker              Forcer le module npm speaker (erreur si absent)
@@ -306,6 +307,7 @@ Logs
                 else if (arg.startsWith('--rom='))             options.rom       = arg.split('=')[1];
                 else if (arg.startsWith('--custom-rom='))      options.customRom = arg.split('=')[1];
                 else if (arg.startsWith('--port='))            options.port      = arg.split('=')[1];
+                else if (arg === '--no-ble')                    options.noBle     = true;
                 else if (arg.startsWith('--audio-out='))        options.audioOut      = arg.split('=')[1];
                 else if (arg.startsWith('--display-serial='))  options.displaySerial = arg.split('=').slice(1).join('=');
             }
@@ -455,6 +457,82 @@ Logs
             if (options.displaySerial) info(`  Display  : ${options.displaySerial}`);
             info(`  Verbosité: ${options.verbose ? 'activée' : 'désactivée  (--verbose pour les événements)'}`);
 
+            // ── BLE PERIPHERAL ───────────────────────────────────────────────
+            // UUIDs custom PinMAME (128-bit)
+            const BLE_SVC  = 'ab120001b5a3f393e0a9e50e24dcca9e';
+            const BLE_OUT  = 'ab120002b5a3f393e0a9e50e24dcca9e'; // NOTIFY  → browser
+            const BLE_IN   = 'ab120003b5a3f393e0a9e50e24dcca9e'; // WRITE   ← browser
+
+            let bleNotify   = null;  // updateValueCallback quand un client est subscribé
+            let bleMtu      = 20;    // MTU négocié (mis à jour dans onSubscribe)
+            let bleConnected = false;
+
+            function bleSend(line) {
+                if (!bleNotify) return;
+                const buf = Buffer.from(line + '\n');
+                // Fragmentation : 0x00=suite, 0x01=dernier fragment
+                for (let off = 0; off < buf.length; off += bleMtu - 1) {
+                    const chunk  = buf.slice(off, off + bleMtu - 1);
+                    const isLast = off + bleMtu - 1 >= buf.length;
+                    const packet = Buffer.alloc(1 + chunk.length);
+                    packet[0] = isLast ? 0x01 : 0x00;
+                    chunk.copy(packet, 1);
+                    bleNotify(packet);
+                }
+            }
+
+            if (!options.noBle) {
+                try {
+                    const bleno = require('@abandonware/bleno');
+
+                    const outChar = new bleno.Characteristic({
+                        uuid: BLE_OUT,
+                        properties: ['notify'],
+                        onSubscribe(maxValueSize, cb) {
+                            bleMtu      = maxValueSize;
+                            bleNotify   = cb;
+                            bleConnected = true;
+                            info('  [BLE] client connecté');
+                            // Envoyer statut courant immédiatement
+                            if (lastStatusLine) bleSend(lastStatusLine);
+                        },
+                        onUnsubscribe() {
+                            bleNotify    = null;
+                            bleConnected = false;
+                            info('  [BLE] client déconnecté');
+                        }
+                    });
+
+                    const inChar = new bleno.Characteristic({
+                        uuid: BLE_IN,
+                        properties: ['write', 'writeWithoutResponse'],
+                        onWriteRequest(data, offset, withoutResponse, cb) {
+                            emulator.handleLine(data.toString().trim());
+                            cb(bleno.Characteristic.RESULT_SUCCESS);
+                        }
+                    });
+
+                    const service = new bleno.PrimaryService({ uuid: BLE_SVC, characteristics: [outChar, inChar] });
+
+                    bleno.on('stateChange', state => {
+                        if (state === 'poweredOn') {
+                            bleno.startAdvertising('PinMAME', [BLE_SVC]);
+                        } else {
+                            bleno.stopAdvertising();
+                        }
+                    });
+
+                    bleno.on('advertisingStart', err => {
+                        if (!err) {
+                            bleno.setServices([service]);
+                            info('  BLE      : advertising PinMAME');
+                        }
+                    });
+                } catch {
+                    info('⚠️  BLE indisponible — npm install @abandonware/bleno  (ou --no-ble)');
+                }
+            }
+
             const emulator  = createEmulator();
             const wsClients = new Set();
             let lastStatusLine = null;
@@ -554,6 +632,7 @@ Logs
                     for (const ws of wsClients) {
                         if (ws.readyState === 1) ws.send(line);
                     }
+                    if (bleConnected) bleSend(line);
                 }
             };
 

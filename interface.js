@@ -59,6 +59,53 @@ function createWebSocketPort(ws, name) {
     return { readable, writable, name };
 }
 
+// UUIDs doivent correspondre à ceux de runtime.js (bleno)
+const BLE_SVC_UUID = 'ab120001-b5a3-f393-e0a9-e50e24dcca9e';
+const BLE_OUT_UUID = 'ab120002-b5a3-f393-e0a9-e50e24dcca9e'; // notify → browser
+const BLE_IN_UUID  = 'ab120003-b5a3-f393-e0a9-e50e24dcca9e'; // write  ← browser
+
+async function createBluetoothPort() {
+    const device  = await navigator.bluetooth.requestDevice({
+        filters: [{ name: 'PinMAME' }],
+        optionalServices: [BLE_SVC_UUID]
+    });
+    const server  = await device.gatt.connect();
+    const service = await server.getPrimaryService(BLE_SVC_UUID);
+    const outChar = await service.getCharacteristic(BLE_OUT_UUID);
+    const inChar  = await service.getCharacteristic(BLE_IN_UUID);
+
+    const { readable, writable: innerWritable } = new TransformStream();
+    const lineWriter = innerWritable.getWriter();
+
+    // Réassemblage des fragments (protocole : 1er octet 0x00=suite, 0x01=dernier)
+    let fragBuf = '';
+    outChar.addEventListener('characteristicvaluechanged', (e) => {
+        const data   = new Uint8Array(e.target.value.buffer);
+        const isLast = data[0] === 0x01;
+        fragBuf += new TextDecoder().decode(data.slice(1));
+        if (isLast) {
+            for (const line of fragBuf.split('\n')) {
+                const l = line.trim();
+                if (l) lineWriter.write(l).catch(() => {});
+            }
+            fragBuf = '';
+        }
+    });
+    await outChar.startNotifications();
+
+    device.addEventListener('gattserverdisconnected', () => {
+        lineWriter.close().catch(() => {});
+    });
+
+    const writable = new WritableStream({
+        write(line) {
+            return inChar.writeValueWithoutResponse(new TextEncoder().encode(line));
+        }
+    });
+
+    return { readable, writable, name: device.name || 'PinMAME BLE' };
+}
+
 // ─── MAÎTRE ──────────────────────────────────────────────────────────────────
 // Transport agnostique — même classe pour Worker, WebSocket, ou futur WebSerial
 
@@ -117,17 +164,20 @@ const WS_CANDIDATES = [
     'ws://192.168.7.2:8765',
 ];
 
+const BLE_STUB = { _ble: true, name: 'Bluetooth — PinMAME' };
+
 async function discoverMasters() {
     const results = await Promise.all(WS_CANDIDATES.map(trySerialMaster));
     const remote = results.filter(Boolean);
-    // Worker local créé uniquement en l'absence de maître distant
     if (remote.length === 0) remote.push(new SerialMaster(createWorkerPort()));
+    if (navigator.bluetooth) remote.push(BLE_STUB);
     return remote;
 }
 
-// Sélection : auto si 1 maître, overlay si plusieurs
+// Sélection : auto si 1 maître (non-BLE), overlay sinon
 function selectMaster(masters) {
-    if (masters.length <= 1) return Promise.resolve(masters[0]);
+    const nonBle = masters.filter(m => !m._ble);
+    if (masters.length <= 1 && nonBle.length === masters.length) return Promise.resolve(masters[0]);
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:9999;';
@@ -141,7 +191,22 @@ function selectMaster(masters) {
             btn.textContent = m.name;
             btn.onmouseenter = () => btn.style.borderColor = '#00ffff';
             btn.onmouseleave = () => btn.style.borderColor = '#444';
-            btn.onclick = () => { overlay.remove(); resolve(m); };
+            btn.onclick = async () => {
+                if (m._ble) {
+                    try {
+                        const port = await createBluetoothPort();
+                        overlay.remove();
+                        resolve(new SerialMaster(port));
+                    } catch (e) {
+                        btn.textContent = 'Erreur — réessayer';
+                        btn.style.borderColor = '#ff4444';
+                        setTimeout(() => { btn.textContent = m.name; btn.style.borderColor = '#444'; }, 2000);
+                    }
+                } else {
+                    overlay.remove();
+                    resolve(m);
+                }
+            };
             overlay.appendChild(btn);
         }
         document.body.appendChild(overlay);
@@ -490,11 +555,25 @@ function handleDriverLine(line) {
     if (!_driverRaf) { _driverRaf = true; requestAnimationFrame(_flushDriver); }
 }
 
+let _currentRom = null;
+
+function applyCurrentRom() {
+    if (!_currentRom || !romSelector) return;
+    if (!romSelector.querySelector(`option[value="${_currentRom}"]`)) {
+        const opt = document.createElement('option');
+        opt.value = opt.textContent = _currentRom;
+        romSelector.appendChild(opt);
+        romSelector.style.display = 'inline-block';
+    }
+    romSelector.value = _currentRom;
+}
+
 function handleStatusLine(line) {
     if (!line.startsWith('@status:')) return;
     const p = new URLSearchParams(line.slice(8)), state = p.get('state');
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
+        _currentRom = rom;
         statusEl.textContent = `🟢 PinMAME Workbench v2.2 — ${rom}`;
         statusEl.style.color = '#00ffcc';
         romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename') || `${rom} (Interne)`;
@@ -502,9 +581,7 @@ function handleStatusLine(line) {
             romNameDisplay.style.color = 'var(--neon-green)';
             clearRomBtn.style.display = 'inline-block';
         }
-        if (romSelector && romSelector.querySelector(`option[value="${rom}"]`)) {
-            romSelector.value = rom;
-        }
+        applyCurrentRom();
     } else if (state === 'loading') {
         statusEl.textContent = '🟡 Chargement...'; statusEl.style.color = '';
     }
@@ -532,6 +609,7 @@ function connectMaster(master, display) {
             const names = line.slice(11).split(',').map(decodeURIComponent).filter(Boolean);
             romSelector.innerHTML = names.map(n => `<option value="${n}">${n}</option>`).join('');
             if (romSelector.options.length) romSelector.style.display = 'inline-block';
+            applyCurrentRom();
         }
     });
 }

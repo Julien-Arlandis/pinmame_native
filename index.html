@@ -127,6 +127,16 @@
             opacity: 0.35;
             cursor: not-allowed;
         }
+        .mode-selector { display:flex; gap:0; border:1px solid #333; border-radius:4px; overflow:hidden; }
+        .mode-btn {
+            background:#1c1c1c; border:none; border-right:1px solid #333;
+            color:#555; padding:5px 12px; font-family:monospace; font-size:0.8rem;
+            cursor:pointer; transition: background 0.15s, color 0.15s;
+        }
+        .mode-btn:last-child { border-right:none; }
+        .mode-btn:hover:not(:disabled):not(.active) { background:#252525; color:#aaa; }
+        .mode-btn.active { background:#0d2b1f; color:#00ffcc; border-bottom:2px solid #00ffcc; }
+        .mode-btn:disabled { opacity:0.3; cursor:not-allowed; }
         .btn-danger {
             border-color: rgba(255,51,0,0.4);
             color: #ffaa99;
@@ -568,9 +578,11 @@
             </div>
             <input type="file" id="romUploader" accept=".zip" style="display: none;">
             <button onclick="document.getElementById('romUploader').click()" class="rom-upload-btn">📁 Injecter pack ROM (.zip)</button>
-<button id="nodeConnectBtn" class="btn-system" style="display:none;">🖥️ Runtime Node</button>
-<button id="bleConnectBtn"  class="btn-system" style="display:none;">🔵 Bluetooth</button>
-<button id="goLocalBtn"    class="btn-system" style="display:none;">↩ Local</button>
+<div class="mode-selector">
+    <button id="modeLocal" class="mode-btn active">⚙ Local</button>
+    <button id="modeNode"  class="mode-btn" disabled>🖥 Node</button>
+    <button id="modeBle"   class="mode-btn" disabled>🔵 BLE</button>
+</div>
 <button id="rebootBtn" class="btn-system">🔄 Hard Reboot</button>
         </div>
     </div>

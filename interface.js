@@ -876,10 +876,13 @@ async function bootstrap() {
                 nodeBtn.style.color = '#00ff44';
                 nodeBtn.disabled = true; // ↩ Local gère la déconnexion
             } else if (nodeAvailable !== undefined) {
-                nodeBtn.style.display = 'inline-block';
-                nodeBtn.textContent = '🖥️ Runtime Node';
-                nodeBtn.style.color = '';
-                nodeBtn.disabled = !nodeAvailable;
+                // N'affiche le bouton qu'une fois node détecté au moins une fois
+                if (nodeAvailable || nodeBtn.style.display === 'inline-block') {
+                    nodeBtn.style.display = 'inline-block';
+                    nodeBtn.textContent = '🖥️ Runtime Node';
+                    nodeBtn.style.color = '';
+                    nodeBtn.disabled = !nodeAvailable;
+                }
             }
         }
         // Bouton BLE

@@ -3,8 +3,9 @@
 // Protocol: { channel, line } for all I/O except audio ({ channel:'audio', left, right })
 
 // Supprime les logs NSLog/CoreBluetooth (bleno) sur macOS avant tout require natif
+// Utiliser --ble-log pour les réactiver (diagnostic bleno)
 if (typeof process !== 'undefined' && process.platform === 'darwin') {
-    process.env.OS_ACTIVITY_MODE = 'disable';
+    if (!process.argv.includes('--ble-log')) process.env.OS_ACTIVITY_MODE = 'disable';
 }
 
 const isWorker = typeof importScripts === 'function' && typeof self !== 'undefined' && typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope;
@@ -291,6 +292,7 @@ ROM
 Réseau
   --port=<n>             Port WebSocket             (défaut: 8765)
   --no-ble               Désactiver le périphérique BLE
+  --ble-log              Réactiver les logs CoreBluetooth natifs (macOS)
 
 Audio (détection automatique dans l'ordre : speaker → play → ffplay → aplay)
   --speaker              Forcer le module npm speaker (erreur si absent)

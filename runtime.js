@@ -535,7 +535,9 @@ Logs
 
             const emulator  = createEmulator();
             const wsClients = new Set();
-            let lastStatusLine = null;
+            let lastStatusLine  = null;
+            let lastDisplayLine = null;
+            let lastLampLine    = null;
 
             try {
                 const { WebSocketServer } = require('ws');
@@ -564,8 +566,10 @@ Logs
                                     .sort();
                                 if (roms.length) ws.send(`@roms:list=${roms.map(encodeURIComponent).join(',')}`);
                             }
-                            // Renvoyer le statut actuel si l'émulateur est déjà prêt
-                            if (lastStatusLine) ws.send(lastStatusLine);
+                            // Renvoyer l'état courant au nouveau client
+                            if (lastDisplayLine) ws.send(lastDisplayLine);
+                            if (lastLampLine)    ws.send(lastLampLine);
+                            if (lastStatusLine)  ws.send(lastStatusLine);
                             return;
                         }
                         if (line.startsWith('@rom:')) {
@@ -620,7 +624,9 @@ Logs
                     samplesProduced += left.length;
                     if (audioSink) audioSink.write(floatTo16BitPCM(left, right));
                 } else if (line) {
-                    if (line.startsWith('@status:state=ready')) lastStatusLine = line;
+                    if (line.startsWith('@status:state=ready'))        lastStatusLine  = line;
+                    if (line.startsWith('!display:action=raw&data='))  lastDisplayLine = line;
+                    if (line.startsWith('!lamp:'))                     lastLampLine    = line;
                     if (displaySerial && line.startsWith('!display:action=raw&data=')) {
                         const str = decodeDisplay(line.slice(25));
                         if (str !== lastDisplayStr) {

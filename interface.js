@@ -41,6 +41,7 @@ function createWorkerPort() {
     return {
         readable, writable,
         name: 'Exécution locale (navigateur)', isLocal: true,
+        terminate() { worker.terminate(); },
         onAudio(cb) { audioCallback = cb; }
     };
 }
@@ -164,21 +165,29 @@ const WS_CANDIDATES = [
     'ws://192.168.7.2:8765',
 ];
 
-const BLE_STUB = { _ble: true, name: 'Bluetooth — PinMAME' };
+const BLE_STUB   = { _ble: true,   name: 'Bluetooth — PinMAME' };
+const LOCAL_STUB = { _local: true, name: 'Exécution locale (navigateur)', isLocal: true };
 
 async function discoverMasters() {
     const results = await Promise.all(WS_CANDIDATES.map(trySerialMaster));
     const list = results.filter(Boolean);
-    list.push(new SerialMaster(createWorkerPort()));
-    if (navigator.bluetooth) list.push(BLE_STUB);
+    list.push(LOCAL_STUB);
     return list;
 }
 
-// Sélection : auto sur local si aucune connexion externe disponible, overlay sinon
-function selectMaster(masters) {
-    // Auto-local si aucune connexion externe (WS ou BLE) disponible
+// Crée le master effectif à partir d'un stub ou retourne le master déjà résolu
+async function resolveMaster(m) {
+    if (m._local) return new SerialMaster(createWorkerPort());
+    if (m._ble)   return new SerialMaster(await createBluetoothPort());
+    return m;
+}
+
+// Sélection : auto-local si aucune connexion externe disponible, overlay sinon
+// Le Worker n'est créé QU'APRÈS la sélection pour éviter la race condition
+// où @status:state=ready arrive avant que connectMaster ait câblé onMessage.
+async function selectMaster(masters) {
     const hasExternal = masters.some(m => !m.isLocal);
-    if (!hasExternal) return Promise.resolve(masters[0]);
+    if (!hasExternal) return resolveMaster(masters[0]);
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:9999;';
@@ -193,19 +202,14 @@ function selectMaster(masters) {
             btn.onmouseenter = () => btn.style.borderColor = '#00ffff';
             btn.onmouseleave = () => btn.style.borderColor = '#444';
             btn.onclick = async () => {
-                if (m._ble) {
-                    try {
-                        const port = await createBluetoothPort();
-                        overlay.remove();
-                        resolve(new SerialMaster(port));
-                    } catch (e) {
-                        btn.textContent = 'Erreur — réessayer';
-                        btn.style.borderColor = '#ff4444';
-                        setTimeout(() => { btn.textContent = m.name; btn.style.borderColor = '#444'; }, 2000);
-                    }
-                } else {
+                try {
+                    const resolved = await resolveMaster(m);
                     overlay.remove();
-                    resolve(m);
+                    resolve(resolved);
+                } catch (e) {
+                    btn.textContent = 'Erreur — réessayer';
+                    btn.style.borderColor = '#ff4444';
+                    setTimeout(() => { btn.textContent = m.name; btn.style.borderColor = '#444'; }, 2000);
                 }
             };
             overlay.appendChild(btn);
@@ -575,7 +579,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = `🟢 PinMAME Workbench v2.2 — ${rom}`;
+        statusEl.textContent = `🟢 PinMAME Workbench v2.3 — ${rom}`;
         statusEl.style.color = '#00ffcc';
         romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename') || `${rom} (Interne)`;
         if (sessionStorage.getItem('custom_rom_bytes')) {
@@ -730,10 +734,12 @@ function setupSystemHandlers(master) {
                 url.searchParams.set('rom', name);
                 location.href = url.toString();
             } else {
+                sessionStorage.removeItem('custom_rom_bytes');
+                sessionStorage.removeItem('custom_rom_filename');
                 master.send(`@rom:name=${encodeURIComponent(name)}`);
                 romNameDisplay.textContent = name;
-                romNameDisplay.style.color = 'var(--neon-green)';
-                clearRomBtn.style.display = 'inline-block';
+                romNameDisplay.style.color = '';
+                clearRomBtn.style.display = 'none';
             }
         };
     }
@@ -830,6 +836,37 @@ async function bootstrap() {
     buildLampGrid();
     buildSolGrid();
     setupSystemHandlers(master);
+
+    // Bouton BLE — visible uniquement si le navigateur supporte Web Bluetooth
+    const bleBtn = document.getElementById('bleConnectBtn');
+    if (bleBtn && navigator.bluetooth) {
+        bleBtn.style.display = 'inline-block';
+        bleBtn.onclick = async () => {
+            try {
+                bleBtn.textContent = '🔵 Connexion...';
+                bleBtn.disabled = true;
+                const port = await createBluetoothPort();
+                const bleM = new SerialMaster(port);
+                // Stopper l'ancien master si possible (Worker local)
+                master._port?.terminate?.();
+                // Rebrancher UI sur le nouveau master
+                connectMaster(bleM, display);
+                bleM.send('@connect:input=1&display=1&driver=1');
+                setupSystemHandlers(bleM);
+                buildSwitchGrid(bleM);
+                buildSoundGrid(bleM);
+                buildDipSwitches(bleM);
+                bleBtn.textContent = '🔵 BLE connecté';
+                bleM.onDisconnect(() => {
+                    bleBtn.textContent = '🔵 Bluetooth';
+                    bleBtn.disabled = false;
+                });
+            } catch {
+                bleBtn.textContent = '🔵 Bluetooth';
+                bleBtn.disabled = false;
+            }
+        };
+    }
 }
 
 bootstrap();

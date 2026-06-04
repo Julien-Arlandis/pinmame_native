@@ -43,7 +43,8 @@ async function createWorkerPort() {
     return {
         readable, writable,
         name: 'Exécution locale (navigateur)', isLocal: true,
-        terminate() { worker.terminate(); },
+        terminate()   { worker.terminate(); },
+        disconnect()  { worker.terminate(); },
         onAudio(cb) { audioCallback = cb; }
     };
 }
@@ -59,7 +60,10 @@ function createWebSocketPort(ws, name) {
         write(line) { if (ws.readyState === WebSocket.OPEN) ws.send(line); }
     });
 
-    return { readable, writable, name };
+    return {
+        readable, writable, name,
+        disconnect() { try { ws.close(); } catch {} }
+    };
 }
 
 // UUIDs doivent correspondre à ceux de runtime.js (bleno)
@@ -125,7 +129,10 @@ async function createBluetoothPort() {
         }
     });
 
-    return { readable, writable, name: device.name || 'PinMAME BLE' };
+    return {
+        readable, writable, name: device.name || 'PinMAME BLE',
+        disconnect() { try { device.gatt.disconnect(); } catch {} }
+    };
 }
 
 // ─── MAÎTRE ──────────────────────────────────────────────────────────────────
@@ -848,59 +855,119 @@ async function bootstrap() {
     buildLampGrid();
     buildSolGrid();
 
-    async function restartLocalEmulator() {
-        master._port?.terminate?.();
-        const newPort = await createWorkerPort();
-        const newMaster = new SerialMaster(newPort);
+    // Défini après switchToMaster — passé lazily via wrapper
+    let restartLocalEmulator = null;
+    setupSystemHandlers(master, master.isLocal ? () => restartLocalEmulator?.() : null);
+
+    // ── Gestion des connexions ────────────────────────────────────────────────
+    let currentMode = 'local'; // 'local' | 'node' | 'ble'
+    let detectedWsMaster = null;
+    const nodeBtn = document.getElementById('nodeConnectBtn');
+    const bleBtn  = document.getElementById('bleConnectBtn');
+
+    function updateConnectionButtons() {
+        if (nodeBtn) {
+            if (currentMode === 'node') {
+                nodeBtn.textContent = '🖥️ Connecté ✕';
+                nodeBtn.style.color = '#00ff44';
+                nodeBtn.disabled = false;
+            } else {
+                nodeBtn.textContent = '🖥️ Runtime Node';
+                nodeBtn.style.color = '';
+                nodeBtn.disabled = !detectedWsMaster;
+            }
+        }
+        if (bleBtn && navigator.bluetooth) {
+            bleBtn.style.display = 'inline-block';
+            if (currentMode === 'ble') {
+                bleBtn.textContent = '🔵 Connecté ✕';
+                bleBtn.style.color = '#00ffff';
+                bleBtn.disabled = false;
+            } else {
+                bleBtn.textContent = '🔵 Bluetooth';
+                bleBtn.style.color = '';
+                bleBtn.disabled = false;
+            }
+        }
+    }
+
+    async function switchToMaster(newMaster, type, rebuildUI = true) {
+        master._port?.disconnect?.();
         master = newMaster;
         _audioMaster = newMaster;
         connectMaster(newMaster, display);
-        setupSystemHandlers(newMaster, restartLocalEmulator);
-        buildSwitchGrid(newMaster);
-        buildSoundGrid(newMaster);
-        buildDipSwitches(newMaster);
+        if (!newMaster.isLocal) newMaster.send('@connect:input=1&display=1&driver=1');
+        setupSystemHandlers(newMaster, type === 'local' ? () => restartLocalEmulator?.() : null);
+        if (rebuildUI) {
+            buildSwitchGrid(newMaster);
+            buildSoundGrid(newMaster);
+            buildDipSwitches(newMaster);
+        }
+        currentMode = type;
+        updateMasterStatus(newMaster);
+        updateConnectionButtons();
     }
 
-    setupSystemHandlers(master, master.isLocal ? restartLocalEmulator : null);
+    async function goLocal() {
+        const newPort = await createWorkerPort();
+        await switchToMaster(new SerialMaster(newPort), 'local');
+    }
 
-    // Sonde WS en arrière-plan — affiche le bouton Runtime Node dès détection
-    const nodeBtn = document.getElementById('nodeConnectBtn');
+    // Remplace restartLocalEmulator pour utiliser switchToMaster
+    restartLocalEmulator = async () => {
+        const newPort = await createWorkerPort();
+        await switchToMaster(new SerialMaster(newPort), 'local', false);
+        buildSwitchGrid(master);
+        buildSoundGrid(master);
+        buildDipSwitches(master);
+    };
+
+    // ── Bouton Runtime Node ───────────────────────────────────────────────────
     if (nodeBtn) {
-        async function switchToNode(wsMaster) {
-            master._port?.terminate?.();
-            master = wsMaster;
-            _audioMaster = wsMaster;
-            connectMaster(wsMaster, display);
-            wsMaster.send('@connect:input=1&display=1&driver=1');
-            setupSystemHandlers(wsMaster);
-            buildSwitchGrid(wsMaster);
-            buildSoundGrid(wsMaster);
-            buildDipSwitches(wsMaster);
-            nodeBtn.textContent = '🖥️ Connecté';
-            wsMaster.onDisconnect(async () => {
-                nodeBtn.textContent = '🖥️ Runtime Node';
-                const el = document.getElementById('connectorStatus');
-                if (el) el.innerHTML = '<span style="color:#ffaa00">🔄 Reconnexion...</span>';
+        nodeBtn.style.display = 'inline-block';
+        nodeBtn.disabled = true;
+        updateConnectionButtons();
+
+        nodeBtn.onclick = async () => {
+            if (currentMode === 'node') { await goLocal(); return; }
+            if (!detectedWsMaster) return;
+            const m = detectedWsMaster;
+            detectedWsMaster = null;
+            updateConnectionButtons();
+            await switchToMaster(m, 'node');
+            // Auto-reconnexion si le serveur redémarre
+            m.onDisconnect(async () => {
+                if (currentMode !== 'node') return;
                 display.parseCommand('!display:action=clear');
                 display.parseCommand('!display:action=write&pos=4&text=' + encodeURIComponent('SERVER DOWN'));
                 display._dirty = true;
-                const url = wsMaster._reconnectUrl;
-                while (url) {
+                const el = document.getElementById('connectorStatus');
+                if (el) el.innerHTML = '<span style="color:#ffaa00">🔄 Reconnexion...</span>';
+                const url = m._reconnectUrl;
+                while (currentMode === 'node' && url) {
                     await new Promise(r => setTimeout(r, 2000));
-                    const m = await trySerialMaster(url);
-                    if (m) { m._reconnectUrl = url; await switchToNode(m); return; }
+                    const nm = await trySerialMaster(url);
+                    if (nm) { nm._reconnectUrl = url; await switchToMaster(nm, 'node', false); return; }
                 }
             });
-        }
+        };
+
+        // Sonde WS en arrière-plan — met à jour la disponibilité du bouton
         (async () => {
             while (true) {
                 for (const url of WS_CANDIDATES) {
                     const m = await trySerialMaster(url);
                     if (m) {
                         m._reconnectUrl = url;
-                        nodeBtn.style.display = 'inline-block';
-                        nodeBtn.onclick = () => switchToNode(m);
-                        return;
+                        detectedWsMaster = m;
+                        updateConnectionButtons();
+                        // Attendre que ce master ne soit plus utilisable puis resonder
+                        await new Promise(r => setTimeout(r, 10000));
+                        if (detectedWsMaster === m && currentMode !== 'node') {
+                            detectedWsMaster = null;
+                            updateConnectionButtons();
+                        }
+                        break;
                     }
                 }
                 await new Promise(r => setTimeout(r, 3000));
@@ -908,33 +975,25 @@ async function bootstrap() {
         })();
     }
 
-    // Bouton BLE — visible uniquement si le navigateur supporte Web Bluetooth
-    const bleBtn = document.getElementById('bleConnectBtn');
+    // ── Bouton BLE ────────────────────────────────────────────────────────────
     if (bleBtn && navigator.bluetooth) {
-        bleBtn.style.display = 'inline-block';
+        updateConnectionButtons();
         bleBtn.onclick = async () => {
+            if (currentMode === 'ble') { await goLocal(); return; }
             try {
                 bleBtn.textContent = '🔵 Connexion...';
                 bleBtn.disabled = true;
                 const port = await createBluetoothPort();
                 const bleM = new SerialMaster(port);
-                // Stopper l'ancien master si possible (Worker local)
-                master._port?.terminate?.();
-                // Rebrancher UI sur le nouveau master
-                connectMaster(bleM, display);
-                bleM.send('@connect:input=1&display=1&driver=1');
-                setupSystemHandlers(bleM);
-                buildSwitchGrid(bleM);
-                buildSoundGrid(bleM);
-                buildDipSwitches(bleM);
-                bleBtn.textContent = '🔵 BLE connecté';
+                await switchToMaster(bleM, 'ble');
                 bleM.onDisconnect(() => {
-                    bleBtn.textContent = '🔵 Bluetooth';
-                    bleBtn.disabled = false;
+                    if (currentMode === 'ble') {
+                        currentMode = 'local';
+                        updateConnectionButtons();
+                    }
                 });
             } catch {
-                bleBtn.textContent = '🔵 Bluetooth';
-                bleBtn.disabled = false;
+                updateConnectionButtons();
             }
         };
     }

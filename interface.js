@@ -40,7 +40,7 @@ function createWorkerPort() {
 
     return {
         readable, writable,
-        name: 'runtime (local)', isLocal: true,
+        name: 'Exécution locale (navigateur)', isLocal: true,
         onAudio(cb) { audioCallback = cb; }
     };
 }
@@ -168,16 +168,17 @@ const BLE_STUB = { _ble: true, name: 'Bluetooth — PinMAME' };
 
 async function discoverMasters() {
     const results = await Promise.all(WS_CANDIDATES.map(trySerialMaster));
-    const remote = results.filter(Boolean);
-    if (remote.length === 0) remote.push(new SerialMaster(createWorkerPort()));
-    if (navigator.bluetooth) remote.push(BLE_STUB);
-    return remote;
+    const list = results.filter(Boolean);
+    list.push(new SerialMaster(createWorkerPort()));
+    if (navigator.bluetooth) list.push(BLE_STUB);
+    return list;
 }
 
-// Sélection : auto si 1 maître (non-BLE), overlay sinon
+// Sélection : auto sur local si aucune connexion externe disponible, overlay sinon
 function selectMaster(masters) {
-    const nonBle = masters.filter(m => !m._ble);
-    if (masters.length <= 1 && nonBle.length === masters.length) return Promise.resolve(masters[0]);
+    // Auto-local si aucune connexion externe (WS ou BLE) disponible
+    const hasExternal = masters.some(m => !m.isLocal);
+    if (!hasExternal) return Promise.resolve(masters[0]);
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:9999;';

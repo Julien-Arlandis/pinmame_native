@@ -97,6 +97,7 @@ async function createBluetoothPort() {
     }
 
     async function gattConnect() {
+        fragBuf       = '';
         const server  = await device.gatt.connect();
         const service = await server.getPrimaryService(BLE_SVC_UUID);
         const out     = await service.getCharacteristic(BLE_OUT_UUID);
@@ -973,8 +974,8 @@ async function bootstrap() {
                 await switchToMaster(bleM, 'ble');
                 btnBle.disabled = false;
                 bleM.onDisconnect(() => {
-                    if (currentMode === 'ble') { currentMode = 'local'; updateModeSelector(); }
                     btnBle.disabled = false;
+                    if (currentMode === 'ble') goLocal();
                 });
             } catch {
                 btnBle.disabled = false;

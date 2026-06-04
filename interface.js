@@ -68,24 +68,21 @@ const BLE_OUT_UUID = 'ab120002-b5a3-f393-e0a9-e50e24dcca9e'; // notify → brows
 const BLE_IN_UUID  = 'ab120003-b5a3-f393-e0a9-e50e24dcca9e'; // write  ← browser
 
 async function createBluetoothPort() {
-    const device  = await navigator.bluetooth.requestDevice({
+    const device = await navigator.bluetooth.requestDevice({
         filters: [{ name: 'PinMAME' }],
         optionalServices: [BLE_SVC_UUID]
     });
-    const server  = await device.gatt.connect();
-    const service = await server.getPrimaryService(BLE_SVC_UUID);
-    const outChar = await service.getCharacteristic(BLE_OUT_UUID);
-    const inChar  = await service.getCharacteristic(BLE_IN_UUID);
 
     const { readable, writable: innerWritable } = new TransformStream();
     const lineWriter = innerWritable.getWriter();
-
-    // Réassemblage des fragments (protocole : 1er octet 0x00=suite, 0x01=dernier)
+    const decoder = new TextDecoder();
     let fragBuf = '';
-    outChar.addEventListener('characteristicvaluechanged', (e) => {
+    let inChar  = null;
+
+    function onNotification(e) {
         const data   = new Uint8Array(e.target.value.buffer);
         const isLast = data[0] === 0x01;
-        fragBuf += new TextDecoder().decode(data.slice(1));
+        fragBuf += decoder.decode(data.slice(1));
         if (isLast) {
             for (const line of fragBuf.split('\n')) {
                 const l = line.trim();
@@ -93,12 +90,34 @@ async function createBluetoothPort() {
             }
             fragBuf = '';
         }
-    });
-    await outChar.startNotifications();
+    }
 
-    device.addEventListener('gattserverdisconnected', () => {
+    async function gattConnect() {
+        const server  = await device.gatt.connect();
+        const service = await server.getPrimaryService(BLE_SVC_UUID);
+        const out     = await service.getCharacteristic(BLE_OUT_UUID);
+        inChar        = await service.getCharacteristic(BLE_IN_UUID);
+        out.addEventListener('characteristicvaluechanged', onNotification);
+        await out.startNotifications();
+    }
+
+    device.addEventListener('gattserverdisconnected', async () => {
+        // Reconnexion automatique après reboot/changement de ROM
+        for (let i = 0; i < 10; i++) {
+            await new Promise(r => setTimeout(r, 1000));
+            try {
+                await gattConnect();
+                // Redemande l'état courant au serveur
+                await inChar.writeValueWithoutResponse(
+                    new TextEncoder().encode('@connect:input=1&display=1&driver=1')
+                );
+                return;
+            } catch {}
+        }
         lineWriter.close().catch(() => {});
     });
+
+    await gattConnect();
 
     const writable = new WritableStream({
         write(line) {

@@ -407,11 +407,11 @@ const statusEl       = document.getElementById('status');
 const termEl         = document.getElementById('terminal');
 const dipContainer   = document.getElementById('dipContainer');
 const romUploader    = document.getElementById('romUploader');
-const romNameDisplay = document.getElementById('romNameDisplay');
 const romSelector    = document.getElementById('romSelector');
-const clearRomBtn    = document.getElementById('clearRomBtn');
 const rebootBtn      = document.getElementById('rebootBtn');
-const audioLed       = document.getElementById('audio-led');
+
+
+const _masterRef = { current: null, isLocal: true }; // référence partagée, toujours à jour
 
 // ── État ──────────────────────────────────────────────────────────────────────
 
@@ -483,7 +483,6 @@ function unlockAudio(master) {
                 outL[i] = lastSampleL; outR[i] = lastSampleR;
             }
             if (distance > 24576) audioReadPtr = (audioWritePtr - 8192 + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
-            audioLed.classList.toggle('active', distance > 512);
         };
         audioNode.connect(audioCtx.destination);
         logToTerminal('🔊 Flux audio connecté.');
@@ -526,15 +525,6 @@ function logHardwareTraffic(from, to, line, cat) {
     logToTerminal(`[${from} ➔ ${to}] ${line}`);
 }
 
-// ── Statut maître ─────────────────────────────────────────────────────────────
-
-function updateMasterStatus(master) {
-    const el = document.getElementById('connectorStatus');
-    if (!el) return;
-    el.innerHTML = master.isLocal
-        ? '<span style="color:#9d4edd">⚙ ÉMULATION LOCALE</span>'
-        : `<span style="color:#00ff44">🔌 ${master.name}</span>`;
-}
 
 // ── Handlers messages maître ──────────────────────────────────────────────────
 
@@ -596,15 +586,25 @@ function handleDriverLine(line) {
 
 let _currentRom = null;
 
+const stripExt = name => name.replace(/\.[^.]+$/, '');
+
 function applyCurrentRom() {
-    if (!_currentRom || !romSelector) return;
-    if (!romSelector.querySelector(`option[value="${_currentRom}"]`)) {
-        const opt = document.createElement('option');
-        opt.value = opt.textContent = _currentRom;
-        romSelector.appendChild(opt);
-        romSelector.style.display = 'inline-block';
+    if (!romSelector || !_currentRom) return;
+    if (sessionStorage.getItem('custom_rom_bytes')) {
+        const label = stripExt(sessionStorage.getItem('custom_rom_filename') || _currentRom);
+        let opt = romSelector.querySelector(`option[value="${_currentRom}"]`);
+        if (!opt) {
+            opt = document.createElement('option');
+            opt.value = _currentRom; opt.textContent = label;
+            opt.dataset.injected = '1';
+            romSelector.appendChild(opt);
+            romSelector.style.display = 'inline-block';
+        }
+        romSelector.value = _currentRom;
+        return;
     }
-    romSelector.value = _currentRom;
+    romSelector.querySelectorAll('option[data-injected]').forEach(o => o.remove());
+    romSelector.value = romSelector.querySelector(`option[value="${_currentRom}"]`) ? _currentRom : '';
 }
 
 function handleStatusLine(line) {
@@ -613,13 +613,8 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = `🟢 PinMAME Workbench v2.3 — ${rom}`;
+        statusEl.textContent = '🟢 PinMAME Workbench v2.3';
         statusEl.style.color = '#00ffcc';
-        romNameDisplay.textContent = sessionStorage.getItem('custom_rom_filename') || `${rom} (Interne)`;
-        if (sessionStorage.getItem('custom_rom_bytes')) {
-            romNameDisplay.style.color = 'var(--neon-green)';
-            clearRomBtn.style.display = 'inline-block';
-        }
         applyCurrentRom();
     } else if (state === 'loading') {
         statusEl.textContent = '🟡 Chargement...'; statusEl.style.color = '';
@@ -646,17 +641,17 @@ function connectMaster(master, display) {
             handleStatusLine(line);
         } else if (line.startsWith('@roms:list=')) {
             const names = line.slice(11).split(',').map(decodeURIComponent).filter(Boolean);
-            romSelector.innerHTML = names.map(n => `<option value="${n}">${n}</option>`).join('');
-            if (romSelector.options.length) romSelector.style.display = 'inline-block';
-            applyCurrentRom();
+            romSelector.innerHTML = '<option value=""></option>' + names.map(n => `<option value="${n}">${stripExt(n)}</option>`).join('');
+            if (romSelector.options.length > 1) { romSelector.style.display = 'inline-block'; applyCurrentRom(); }
         }
     });
 }
 
 // ── Grilles ───────────────────────────────────────────────────────────────────
 
-function buildSwitchGrid(master) {
+function buildSwitchGrid() {
     const grid = document.getElementById('swGrid');
+    grid.innerHTML = ''; swCells.length = 0;
     for (let i = 0; i < 80; i++) {
         const cell = document.createElement('div'); cell.className = 'cell';
         cell.title = SWITCH_DICTIONARY[i] || `Contact ${String(i).padStart(2,'0')}`;
@@ -665,7 +660,7 @@ function buildSwitchGrid(master) {
         const notify = (state) => {
             userSwitchStates[i] = state === 1;
             logHardwareTraffic('INPUT', 'MASTER', `@set:id=${i}&state=${state}`, 'INPUT');
-            master.send(`@set:id=${i}&state=${state}`);
+            _masterRef.current?.send(`@set:id=${i}&state=${state}`);
         };
         const down = (e) => {
             if (e.type.startsWith('touch')) e.preventDefault();
@@ -688,22 +683,24 @@ function buildSwitchGrid(master) {
     }
 }
 
-function buildSoundGrid(master) {
+function buildSoundGrid() {
     const grid = document.getElementById('cmd-grid');
+    grid.innerHTML = '';
     for (let i = 1; i <= 64; i++) {
         const cell = document.createElement('div'); cell.className = 'cell cell-cmd';
         cell.innerHTML = `<div class="cell-cmd-num">${String(i).padStart(2,'0')}</div><div class="cell-cmd-desc">${SOUND_DICTIONARY[i]||'SFX'}</div>`;
         const trigger = (e) => {
             if (e.type.startsWith('touch')) e.preventDefault();
             cell.classList.add('cmd-active'); setTimeout(() => cell.classList.remove('cmd-active'), 120);
-            master.send(`@sound:cmd=${i}`);
+            _masterRef.current?.send(`@sound:cmd=${i}`);
         };
         cell.addEventListener('mousedown', trigger); cell.addEventListener('touchstart', trigger, { passive:false });
         grid.appendChild(cell);
     }
 }
 
-function buildDipSwitches(master) {
+function buildDipSwitches() {
+    dipContainer.innerHTML = ''; dipToggles.length = 0;
     for (let bank = 0; bank < 4; bank++) {
         const bankEl = document.createElement('div'); bankEl.className = 'dip-bank';
         for (let bit = 0; bit < 8; bit++) {
@@ -716,7 +713,7 @@ function buildDipSwitches(master) {
                 if (e.type.startsWith('touch')) e.preventDefault();
                 userDipStates[dipId] = !userDipStates[dipId];
                 toggle.classList.toggle('dip-on', userDipStates[dipId]);
-                master.send(`@dip:id=${dipId}&state=${userDipStates[dipId]?1:0}`);
+                _masterRef.current?.send(`@dip:id=${dipId}&state=${userDipStates[dipId]?1:0}`);
                 localStorage.setItem('pinmame_dips', JSON.stringify(userDipStates));
             };
             toggle.addEventListener('mousedown', toggleDip); toggle.addEventListener('touchstart', toggleDip, { passive:false });
@@ -742,64 +739,51 @@ function buildSolGrid() {
     for (let i = 0; i < 32; i++) { const c = document.createElement('div'); c.className='cell'; c.textContent='S'+String(i+1).padStart(2,'0'); grid.appendChild(c); solCells.push(c); }
 }
 
-function setupSystemHandlers(master, restartFn) {
-    const localRestart = restartFn || (() => location.reload());
-    rebootBtn.onclick = () => master.isLocal ? localRestart() : master.send('@reboot:');
-    clearRomBtn.onclick = () => {
-        if (master.isLocal) {
-            sessionStorage.removeItem('custom_rom_bytes');
-            sessionStorage.removeItem('custom_rom_filename');
-            localRestart();
-        } else {
-            master.send('@rom:name=bonebstr');
-            clearRomBtn.style.display = 'none';
-            romNameDisplay.textContent = 'bonebstr (Interne)';
-            romNameDisplay.style.color = '';
-        }
-    };
+function setupSystemHandlers(restartFn) {
+    const localRestart = restartFn || (() => {});
+    const wsActive = () => !!_masterRef.current?._reconnectUrl;
+    rebootBtn.onclick = () => wsActive() ? _masterRef.current.send('@reboot:') : localRestart();
     if (romSelector) {
         romSelector.onchange = () => {
             const name = romSelector.value;
             if (!name) return;
-            if (master.isLocal) {
-                sessionStorage.setItem('custom_rom_filename', name);
-                sessionStorage.removeItem('custom_rom_bytes');
-                localRestart();
-            } else {
+            romSelector.value = '';
+            if (wsActive()) {
                 sessionStorage.removeItem('custom_rom_bytes');
                 sessionStorage.removeItem('custom_rom_filename');
-                master.send(`@rom:name=${encodeURIComponent(name)}`);
-                romNameDisplay.textContent = name;
-                romNameDisplay.style.color = '';
-                clearRomBtn.style.display = 'none';
+                _masterRef.current.send(`@rom:name=${encodeURIComponent(name)}`);
+            } else {
+                if (name !== sessionStorage.getItem('custom_rom_filename')) {
+                    sessionStorage.removeItem('custom_rom_bytes');
+                }
+                sessionStorage.setItem('custom_rom_filename', name);
+                localRestart();
             }
         };
     }
     romUploader.onchange = (e) => {
         const file = e.target.files[0]; if (!file) return;
+        e.target.value = '';
         const reader = new FileReader();
         reader.onload = (evt) => {
             const bytes = new Uint8Array(evt.target.result);
             let bin = '';
             for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
             const b64 = btoa(bin);
-            if (master.isLocal) {
+            if (wsActive()) {
+                _masterRef.current.send(`@rom:name=${encodeURIComponent(file.name)}&data=${encodeURIComponent(b64)}`);
+            } else {
                 sessionStorage.setItem('custom_rom_bytes', b64);
                 sessionStorage.setItem('custom_rom_filename', file.name);
                 localRestart();
-            } else {
-                master.send(`@rom:name=${encodeURIComponent(file.name)}&data=${encodeURIComponent(b64)}`);
-                romNameDisplay.textContent = file.name;
-                romNameDisplay.style.color = 'var(--neon-green)';
-                clearRomBtn.style.display = 'inline-block';
             }
         };
         reader.readAsArrayBuffer(file);
     };
     const attachMacro = (btnId, id) => {
         const btn = document.getElementById(btnId); if (!btn) return;
-        const down = (e) => { if (e.type.startsWith('touch')) e.preventDefault(); swCells[id]?.classList.add('sw-user');    master.send(`@set:id=${id}&state=1`); };
-        const up   = (e) => { if (e.type.startsWith('touch')) e.preventDefault(); swCells[id]?.classList.remove('sw-user'); master.send(`@set:id=${id}&state=0`); };
+        const down = (e) => { if (e.type.startsWith('touch')) e.preventDefault(); swCells[id]?.classList.add('sw-user');    _masterRef.current?.send(`@set:id=${id}&state=1`); };
+        const up   = (e) => { if (e.type.startsWith('touch')) e.preventDefault(); swCells[id]?.classList.remove('sw-user'); _masterRef.current?.send(`@set:id=${id}&state=0`); };
         btn.addEventListener('mousedown', down); btn.addEventListener('touchstart', down, { passive:false });
         btn.addEventListener('mouseup',   up);   btn.addEventListener('touchend',   up,   { passive:false });
         btn.addEventListener('mouseleave', up);  btn.addEventListener('touchcancel', up,  { passive:false });
@@ -818,7 +802,7 @@ async function loadRomManifest() {
         if (!r.ok) return;
         const list = await r.json();
         if (!Array.isArray(list) || !list.length) return;
-        romSelector.innerHTML = list.map(n => `<option value="${n}">${n}</option>`).join('');
+        romSelector.innerHTML = '<option value=""></option>' + list.map(n => `<option value="${n}">${stripExt(n)}</option>`).join('');
         romSelector.style.display = 'inline-block';
     } catch (_) {}
 }
@@ -829,15 +813,13 @@ async function bootstrap() {
     let master  = await selectMaster(masters);
 
 
-    updateMasterStatus(master);
-
     master.onDisconnect(() => {
-        const el = document.getElementById('connectorStatus');
-        if (el) el.innerHTML = '<span style="color:#ff4444">⚡ MAÎTRE DÉCONNECTÉ — rechargez la page</span>';
         logToTerminal('⚡ Maître déconnecté');
     });
 
     const display = new GottliebDisplayEmulator('vfdCanvas');
+    _masterRef.current = master;
+    _masterRef.isLocal = master.isLocal;
     _audioMaster = master;
     connectMaster(master, display);
 
@@ -857,7 +839,7 @@ async function bootstrap() {
 
     // Défini après switchToMaster — passé lazily via wrapper
     let restartLocalEmulator = null;
-    setupSystemHandlers(master, master.isLocal ? () => restartLocalEmulator?.() : null);
+    setupSystemHandlers(master.isLocal ? () => restartLocalEmulator?.() : null);
 
     // ── Sélecteur de mode ─────────────────────────────────────────────────────
     let currentMode = 'local'; // 'local' | 'node' | 'ble'
@@ -873,29 +855,45 @@ async function bootstrap() {
     async function switchToMaster(newMaster, type, rebuildUI = true) {
         master._port?.disconnect?.();
         master = newMaster;
+        _masterRef.current = newMaster;
+        _masterRef.isLocal = (type === 'local');
         _audioMaster = newMaster;
         connectMaster(newMaster, display);
         if (!newMaster.isLocal) newMaster.send('@connect:input=1&display=1&driver=1');
-        setupSystemHandlers(newMaster, type === 'local' ? () => restartLocalEmulator?.() : null);
+        setupSystemHandlers(type === 'local' ? () => restartLocalEmulator?.() : null);
+        if (type === 'node') {
+            const url = newMaster._reconnectUrl;
+            newMaster.onDisconnect(async () => {
+                while (currentMode === 'node') {
+                    await new Promise(r => setTimeout(r, 2000));
+                    if (currentMode !== 'node') return;
+                    const nm = await trySerialMaster(url);
+                    if (nm) { nm._reconnectUrl = url; await switchToMaster(nm, 'node', false); return; }
+                }
+            });
+        }
         if (rebuildUI) {
-            buildSwitchGrid(newMaster);
-            buildSoundGrid(newMaster);
-            buildDipSwitches(newMaster);
+            buildSwitchGrid();
+            buildSoundGrid();
+            buildDipSwitches();
         }
         currentMode = type;
-        updateMasterStatus(newMaster);
         updateModeSelector();
     }
 
     async function goLocal() {
         const newPort = await createWorkerPort();
         await switchToMaster(new SerialMaster(newPort), 'local');
+        romSelector.style.display = 'none';
+        romSelector.innerHTML = '';
+        await loadRomManifest();
     }
 
     restartLocalEmulator = async () => {
+        if (_masterRef.current?._reconnectUrl) return;
         const newPort = await createWorkerPort();
         await switchToMaster(new SerialMaster(newPort), 'local', false);
-        buildSwitchGrid(master); buildSoundGrid(master); buildDipSwitches(master);
+        buildSwitchGrid(); buildSoundGrid(); buildDipSwitches();
     };
 
     // Bouton LOCAL — revenir en émulation locale
@@ -930,19 +928,7 @@ async function bootstrap() {
                 if (m) {
                     m._reconnectUrl = url;
                     await switchToMaster(m, 'node');
-                    m.onDisconnect(async () => {
-                        if (currentMode !== 'node') return;
-                        display.parseCommand('!display:action=clear');
-                        display.parseCommand('!display:action=write&pos=4&text=' + encodeURIComponent('SERVER DOWN'));
-                        display._dirty = true;
-                        const el = document.getElementById('connectorStatus');
-                        if (el) el.innerHTML = '<span style="color:#ffaa00">🔄 Reconnexion...</span>';
-                        while (currentMode === 'node') {
-                            await new Promise(r => setTimeout(r, 2000));
-                            const nm = await trySerialMaster(url);
-                            if (nm) { nm._reconnectUrl = url; await switchToMaster(nm, 'node', false); return; }
-                        }
-                    });
+                    btnNode.disabled = false;
                     connected = true; break;
                 }
             }
@@ -974,6 +960,7 @@ async function bootstrap() {
                 const port = await createBluetoothPort();
                 const bleM = new SerialMaster(port);
                 await switchToMaster(bleM, 'ble');
+                btnBle.disabled = false;
                 bleM.onDisconnect(() => {
                     if (currentMode === 'ble') { currentMode = 'local'; updateModeSelector(); }
                     btnBle.disabled = false;

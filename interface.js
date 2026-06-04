@@ -448,7 +448,6 @@ let isBufferWarming = false;
 let _audioMaster = null; // Référence mutable — mise à jour à chaque changement de master
 let _pacingTimer  = null; // Fallback pacing quand AudioContext pas encore débloqué
 let _totalSamplesWritten = 0; // Compteur cumulatif pour le fallback pacing
-let _audioDriver = null;     // Référence persistante — empêche le GC de tuer le ConstantSourceNode
 
 function feedAudioRingBuffer(left, right) {
     _totalSamplesWritten += left.length;
@@ -488,7 +487,7 @@ function unlockAudio(master) {
         return;
     }
     try {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)(); // pas de sampleRate forcé — Android choisit sa fréquence native
         logToTerminal(`📊 Audio: ${audioCtx.sampleRate}Hz, état: ${audioCtx.state}`);
         resetAudioRead();
         if (audioCtx.state === 'suspended') {
@@ -498,10 +497,10 @@ function unlockAudio(master) {
         }
 
         audioNode = audioCtx.createScriptProcessor(4096, 1, 2);
-        // ConstantSourceNode stocké en variable de module — évite le GC qui couperait onaudioprocess
-        _audioDriver = audioCtx.createConstantSource();
-        _audioDriver.connect(audioNode);
-        _audioDriver.start();
+        // Oscillateur silencieux : force Android à activer le ScriptProcessor (sans entrée active il reste muet)
+        const dummyOsc = audioCtx.createOscillator();
+        dummyOsc.connect(audioNode);
+        dummyOsc.start();
 
         audioNode.onaudioprocess = function(e) {
             const outL = e.outputBuffer.getChannelData(0);
@@ -652,7 +651,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.3';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.4';
         statusEl.style.color = '#00ffcc';
         applyCurrentRom();
     } else if (state === 'loading') {
@@ -905,7 +904,6 @@ async function bootstrap() {
         else startFallbackPacing();
         connectMaster(newMaster, display);
         if (!newMaster.isLocal) newMaster.send('@connect:input=1&display=1&driver=1');
-        setupSystemHandlers(type === 'local' ? () => restartLocalEmulator?.() : null);
         if (type === 'node') {
             const url = newMaster._reconnectUrl;
             newMaster.onDisconnect(async () => {

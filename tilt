@@ -6033,8 +6033,9 @@ Logs
                             bleNotify   = cb;
                             bleConnected = true;
                             info('  [BLE] client connecté');
-                            // Envoyer statut courant immédiatement
-                            if (lastStatusLine) bleSend(lastStatusLine);
+                            if (lastDisplayLine) bleSend(lastDisplayLine);
+                            if (lastLampLine)    bleSend(lastLampLine);
+                            if (lastStatusLine)  bleSend(lastStatusLine);
                         },
                         onUnsubscribe() {
                             bleNotify    = null;

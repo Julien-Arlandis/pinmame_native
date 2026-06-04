@@ -173,7 +173,7 @@ class SerialMaster {
         finally { reader.releaseLock(); this._disconnectCallback?.(); }
     }
 
-    send(line)         { this._writer.write(line).catch(() => {}); }
+    send(line)         { if (line.startsWith('@set:') || line.startsWith('@sound:')) console.error('[SEND]', line, new Error().stack.split('\n')[2]?.trim()); this._writer.write(line).catch(() => {}); }
     onMessage(cb)      { this._callbacks.push(cb); }
     onAudio(cb)        { this._audioCallback = cb; }
     onDisconnect(cb)   { this._disconnectCallback = cb; }
@@ -651,7 +651,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.4';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.4-dbg';
         statusEl.style.color = '#00ffcc';
         applyCurrentRom();
     } else if (state === 'loading') {

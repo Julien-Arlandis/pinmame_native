@@ -112,21 +112,32 @@ async function createBluetoothPort() {
             try {
                 await gattConnect();
                 // Redemande l'état courant au serveur
-                await inChar.writeValueWithoutResponse(
-                    new TextEncoder().encode('@connect:input=1&display=1&driver=1')
-                );
+                await bleWrite('@connect:input=1&display=1&driver=1');
                 return;
             } catch {}
         }
         lineWriter.close().catch(() => {});
     });
 
+    // Fragmentation browser → serveur : même protocole que serveur → browser
+    // Premier octet : 0x00=suite, 0x01=dernier fragment
+    const BLE_SEND_CHUNK = 511; // 512 bytes max - 1 octet flag
+    async function bleWrite(line) {
+        const encoded = new TextEncoder().encode(line);
+        for (let off = 0; off < encoded.length; off += BLE_SEND_CHUNK) {
+            const chunk  = encoded.subarray(off, off + BLE_SEND_CHUNK);
+            const isLast = off + BLE_SEND_CHUNK >= encoded.length;
+            const packet = new Uint8Array(1 + chunk.length);
+            packet[0]    = isLast ? 0x01 : 0x00;
+            packet.set(chunk, 1);
+            await inChar.writeValueWithoutResponse(packet);
+        }
+    }
+
     await gattConnect();
 
     const writable = new WritableStream({
-        write(line) {
-            return inChar.writeValueWithoutResponse(new TextEncoder().encode(line));
-        }
+        write(line) { return bleWrite(line); }
     });
 
     return {
@@ -741,14 +752,14 @@ function buildSolGrid() {
 
 function setupSystemHandlers(restartFn) {
     const localRestart = restartFn || (() => {});
-    const wsActive = () => !!_masterRef.current?._reconnectUrl;
-    rebootBtn.onclick = () => wsActive() ? _masterRef.current.send('@reboot:') : localRestart();
+    const isRemote = () => !_masterRef.isLocal;
+    rebootBtn.onclick = () => isRemote() ? _masterRef.current.send('@reboot:') : localRestart();
     if (romSelector) {
         romSelector.onchange = () => {
             const name = romSelector.value;
             if (!name) return;
             romSelector.value = '';
-            if (wsActive()) {
+            if (isRemote()) {
                 sessionStorage.removeItem('custom_rom_bytes');
                 sessionStorage.removeItem('custom_rom_filename');
                 _masterRef.current.send(`@rom:name=${encodeURIComponent(name)}`);
@@ -770,7 +781,7 @@ function setupSystemHandlers(restartFn) {
             let bin = '';
             for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
             const b64 = btoa(bin);
-            if (wsActive()) {
+            if (isRemote()) {
                 _masterRef.current.send(`@rom:name=${encodeURIComponent(file.name)}&data=${encodeURIComponent(b64)}`);
             } else {
                 sessionStorage.setItem('custom_rom_bytes', b64);

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ================================================================
    PinMAME — bundle universel (navigateur Worker + Node.js CLI)
-   Généré le 2026-06-04T15:25:16.018Z
+   Généré le 2026-06-04T21:16:56.167Z
    Sources : src-emul/pinmame_web.js + pinmame_web.wasm + runtime.js
    ================================================================ */
 (function () {
@@ -6043,13 +6043,19 @@ Logs
                         }
                     });
 
+                    let bleInBuf = '';
                     const inChar = new bleno.Characteristic({
                         uuid: BLE_IN,
                         properties: ['write', 'writeWithoutResponse'],
                         onWriteRequest(data, offset, withoutResponse, cb) {
-                            const line = data.toString().trim();
-                            if (!handleClientLine(line, bleSend))
-                                emulator.handleLine(line);
+                            const isLast = data[0] === 0x01;
+                            bleInBuf += data.slice(1).toString('utf8');
+                            if (isLast) {
+                                const line = bleInBuf.trim();
+                                bleInBuf = '';
+                                if (line && !handleClientLine(line, bleSend))
+                                    emulator.handleLine(line);
+                            }
                             cb(bleno.Characteristic.RESULT_SUCCESS);
                         }
                     });

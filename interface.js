@@ -12,8 +12,10 @@
 // Un port expose : { readable: ReadableStream<string>, writable: WritableStream<string>, name, isLocal? }
 // Le port Worker ajoute : onAudio(cb) — cb(left, right) — canal audio séparé du texte
 
-function createWorkerPort() {
-    const worker = new Worker('runtime.js');
+async function createWorkerPort() {
+    const resp = await fetch('tilt');
+    const blob = new Blob([await resp.text()], { type: 'application/javascript' });
+    const worker = new Worker(URL.createObjectURL(blob));
     let audioCallback = null;
 
     const { readable, writable: innerWritable } = new TransformStream();
@@ -177,7 +179,7 @@ async function discoverMasters() {
 
 // Crée le master effectif à partir d'un stub ou retourne le master déjà résolu
 async function resolveMaster(m) {
-    if (m._local) return new SerialMaster(createWorkerPort());
+    if (m._local) return new SerialMaster(await createWorkerPort());
     if (m._ble)   return new SerialMaster(await createBluetoothPort());
     return m;
 }

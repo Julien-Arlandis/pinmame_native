@@ -80,29 +80,33 @@ echo "[*] [V93.4] Liaison des archives et injection des symboles modulaire..."
 emcc "$WASM_TEMP_OBJ_DIR/api.o" libpinmame_wasm.a "${LINK_FLAGS[@]}" \
     -Wl,--wrap=run_machine \
     -Wl,--wrap=DAC_DC_offset_correction_data_16_w \
-    -o pinmame_web.js
+    -o src-emul/pinmame_web.js
 
 # 📊 RAPPORT DE BUILD : Afficher la taille des fichiers générés
-if [ -f "pinmame_web.js" ] && [ -f "pinmame_web.wasm" ]; then
-    JS_SIZE=$(ls -lh pinmame_web.js | awk '{print $5}')
-    WASM_SIZE=$(ls -lh pinmame_web.wasm | awk '{print $5}')
-    JS_SIZE_BYTES=$(ls -l pinmame_web.js | awk '{print $5}')
-    WASM_SIZE_BYTES=$(ls -l pinmame_web.wasm | awk '{print $5}')
+if [ -f "src-emul/pinmame_web.js" ] && [ -f "src-emul/pinmame_web.wasm" ]; then
+    JS_SIZE=$(ls -lh src-emul/pinmame_web.js | awk '{print $5}')
+    WASM_SIZE=$(ls -lh src-emul/pinmame_web.wasm | awk '{print $5}')
+    JS_SIZE_BYTES=$(ls -l src-emul/pinmame_web.js | awk '{print $5}')
+    WASM_SIZE_BYTES=$(ls -l src-emul/pinmame_web.wasm | awk '{print $5}')
     TOTAL_BYTES=$((JS_SIZE_BYTES + WASM_SIZE_BYTES))
-    
+
     echo ""
     echo "=================================================="
     echo "📊 RAPPORT DE BUILD V93.4"
     echo "=================================================="
-    echo "✅ pinmame_web.js  : $JS_SIZE ($JS_SIZE_BYTES bytes)"
-    echo "✅ pinmame_web.wasm : $WASM_SIZE ($WASM_SIZE_BYTES bytes)"
+    echo "✅ src-emul/pinmame_web.js   : $JS_SIZE ($JS_SIZE_BYTES bytes)"
+    echo "✅ src-emul/pinmame_web.wasm : $WASM_SIZE ($WASM_SIZE_BYTES bytes)"
     echo "───────────────────────────────────────────────────"
-    printf "📦 TOTAL           : "
+    printf "📦 TOTAL WASM+JS   : "
     if [ $TOTAL_BYTES -lt 1048576 ]; then
         printf "%.2f KB\n" $(echo "scale=2; $TOTAL_BYTES / 1024" | bc)
     else
         printf "%.2f MB\n" $(echo "scale=2; $TOTAL_BYTES / 1048576" | bc)
     fi
+    echo "=================================================="
+
+    echo "[*] Assemblage du bundle universel → tilt"
+    node build_bundle.js
     echo "=================================================="
 else
     echo "⚠️  [V93.4] Certains fichiers n'ont pas été générés correctement."

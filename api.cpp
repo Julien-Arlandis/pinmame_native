@@ -395,8 +395,8 @@ extern "C" {
 
         for (int b = 0; b < 10; b++) { g_shared_corridor[200 + b] = coreGlobals.swMatrix[b]; }
         for (int l = 0; l < 12; l++) { g_shared_corridor[300 + l] = coreGlobals.lampMatrix[l]; }
-        if (memcmp(prev_lamps, coreGlobals.lampMatrix, 12) != 0) {
-            memcpy(prev_lamps, coreGlobals.lampMatrix, 12);
+        if (memcmp(prev_lamps, (const void*)coreGlobals.lampMatrix, 12) != 0) {
+            memcpy(prev_lamps, (const void*)coreGlobals.lampMatrix, 12);
             EM_ASM({ if (window.pushWasmLamps) window.pushWasmLamps($0); },
                    (uint32_t)(g_shared_corridor + 300));
         }

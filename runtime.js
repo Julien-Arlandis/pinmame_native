@@ -65,12 +65,7 @@ function normalizeRomBytes(customRomBytes) {
 function createEmulator() {
     let pinmameInstance = null;
     let vfdMemoryPointer = 0;
-    let lastVfdCounter  = 0;
-    let lastLampCounter    = 0;
-    let lastLampBroadcast  = 0;
-    let lastVfdBroadcast   = 0;
-    let lastSolCounter     = 0;
-    let lastSolState    = 0;
+    let lastSolState = 0;
 
     const Module = {
         locateFile(path) {
@@ -142,6 +137,33 @@ function createEmulator() {
         postAudio(left, right);
     };
 
+    globalThis.pushWasmDisplay = function(ptr) {
+        if (!pinmameInstance) return;
+        let data = '';
+        for (let i = 0; i < 40; i++) {
+            const lo = pinmameInstance.HEAPU8[ptr + i * 2];
+            const hi = pinmameInstance.HEAPU8[ptr + i * 2 + 1];
+            data += (lo | (hi << 8)).toString(16).padStart(4, '0');
+        }
+        postToChannel('display', `!display:action=raw&data=${data}`);
+    };
+
+    globalThis.pushWasmLamps = function(ptr) {
+        if (!pinmameInstance) return;
+        let lampHex = '';
+        for (let col = 0; col < 12; col++)
+            lampHex += pinmameInstance.HEAPU8[ptr + col].toString(16).padStart(2, '0');
+        postToChannel('driver', `!lamp:${lampHex}`);
+    };
+
+    globalThis.pushWasmSolens = function(solState) {
+        for (let s = 0; s < 32; s++) {
+            if (((solState >> s) & 1) !== ((lastSolState >> s) & 1))
+                postToChannel('driver', `!set:id=${s}&state=${(solState >> s) & 1}`);
+        }
+        lastSolState = solState;
+    };
+
     globalThis.postWasmLog = function(cmdId) {
         postToChannel('status', `@audio:cmd=0x${cmdId.toString(16).toUpperCase()}`);
     };
@@ -189,79 +211,7 @@ function createEmulator() {
 
         postToChannel('status', `@status:state=ready&rom=${encodeURIComponent(targetRomName)}`);
 
-        setTimeout(() => {
-            pinmameInstance._pinmame_web_boot();
-            lancerSurveillanceEvenementielle();
-        }, 100);
-    }
-
-    function lancerSurveillanceEvenementielle() {
-        function loop() {
-            if (pinmameInstance && vfdMemoryPointer) {
-
-                // Raw segment snapshot — fiable, utilisé par le rendu browser (emulDisplay)
-                const vfdCounter = readU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1080);
-                if (vfdCounter !== lastVfdCounter) {
-                    lastVfdCounter = vfdCounter;
-                    const now = Date.now();
-                    if (now - lastVfdBroadcast >= 50) {
-                        lastVfdBroadcast = now;
-                        let data = '';
-                        for (let i = 0; i < 40; i++) {
-                            const offset = vfdMemoryPointer + (i * 2);
-                            const mask = pinmameInstance.HEAPU8[offset] | (pinmameInstance.HEAPU8[offset + 1] << 8);
-                            data += mask.toString(16).padStart(4, '0');
-                        }
-                        postToChannel('display', `!display:action=raw&data=${data}`);
-                    }
-                }
-
-                // ASCII FIFO depuis api_pop_ascii_event() — pour le hardware série
-                // (actif quand api_hook_gottlieb_display_write est câblé dans le driver)
-                let ptr;
-                while ((ptr = pinmameInstance._api_pop_ascii_event()) !== 0) {
-                    const pos    = pinmameInstance.HEAPU8[ptr];
-                    const ascii  = pinmameInstance.HEAPU8[ptr + 1];
-                    const action = pinmameInstance.HEAPU8[ptr + 2];
-                    if (action === 2) {
-                        postToChannel('display', '!display:action=clear');
-                    } else if (action === 1) {
-                        postToChannel('display', `!display:action=move&pos=${pos}`);
-                    } else {
-                        postToChannel('display', `!display:action=write&pos=${pos}&text=${encodeURIComponent(String.fromCharCode(ascii))}`);
-                    }
-                }
-
-                // Lamps: un seul message avec les 12 colonnes packées en hex
-                const lampCounter = readU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1084);
-                if (lampCounter !== lastLampCounter) {
-                    lastLampCounter = lampCounter;
-                    const now = Date.now();
-                    if (now - lastLampBroadcast >= 50) {
-                        lastLampBroadcast = now;
-                        let lampHex = '';
-                        for (let col = 0; col < 12; col++)
-                            lampHex += pinmameInstance.HEAPU8[vfdMemoryPointer + 300 + col].toString(16).padStart(2, '0');
-                        postToChannel('driver', `!lamp:${lampHex}`);
-                    }
-                }
-
-                // Solenoids: emit one line per changed bit
-                const solCounter = readU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1088);
-                if (solCounter !== lastSolCounter) {
-                    lastSolCounter = solCounter;
-                    const solState = readU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 320);
-                    for (let s = 0; s < 32; s++) {
-                        if (((solState >> s) & 1) !== ((lastSolState >> s) & 1)) {
-                            postToChannel('driver', `!set:id=${s}&state=${(solState >> s) & 1}`);
-                        }
-                    }
-                    lastSolState = solState;
-                }
-            }
-            setTimeout(loop, 16);
-        }
-        loop();
+        setTimeout(() => { pinmameInstance._pinmame_web_boot(); }, 100);
     }
 
     // Parse a text protocol line coming from the INPUT channel

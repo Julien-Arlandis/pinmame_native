@@ -823,7 +823,7 @@ async function loadRomManifest() {
 async function bootstrap() {
     await loadRomManifest();
     const masters = await discoverMasters();
-    const master  = await selectMaster(masters);
+    let master  = await selectMaster(masters);
 
 
     updateMasterStatus(master);
@@ -882,6 +882,21 @@ async function bootstrap() {
     buildLampGrid();
     buildSolGrid();
     setupSystemHandlers(master);
+
+    async function restartLocalEmulator() {
+        master._port?.terminate?.();
+        const newPort = await createWorkerPort();
+        const newMaster = new SerialMaster(newPort);
+        master = newMaster;
+        connectMaster(newMaster, display);
+        setupSystemHandlers(newMaster);
+        buildSwitchGrid(newMaster);
+        buildSoundGrid(newMaster);
+        buildDipSwitches(newMaster);
+        rebootBtn.onclick = restartLocalEmulator;
+    }
+
+    if (master.isLocal) rebootBtn.onclick = restartLocalEmulator;
 
     // Bouton BLE — visible uniquement si le navigateur supporte Web Bluetooth
     const bleBtn = document.getElementById('bleConnectBtn');

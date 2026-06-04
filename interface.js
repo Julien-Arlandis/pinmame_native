@@ -468,7 +468,7 @@ function unlockAudio(master) {
             const outL = e.outputBuffer.getChannelData(0);
             const outR = e.outputBuffer.getChannelData(1);
             const distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
-            if (_audioMaster) _audioMaster.send(`@audio:distance=${Math.max(0, distance - 4096)}`);
+            if (_audioMaster?.isLocal) _audioMaster.send(`@audio:distance=${Math.max(0, distance - 4096)}`);
             if (isBufferWarming) {
                 if (distance >= 4096) isBufferWarming = false;
                 for (let i = 0; i < outL.length; i++) outL[i] = outR[i] = 0;

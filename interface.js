@@ -107,12 +107,12 @@ async function createBluetoothPort() {
     }
 
     device.addEventListener('gattserverdisconnected', async () => {
-        // Reconnexion automatique après reboot/changement de ROM
-        for (let i = 0; i < 10; i++) {
-            await new Promise(r => setTimeout(r, 1000));
+        for (let i = 0; i < 20; i++) {
+            statusEl.textContent = `🔄 BLE reconnexion… (${i + 1}/20)`;
+            statusEl.style.color = '#ffaa00';
+            await new Promise(r => setTimeout(r, 1500));
             try {
                 await gattConnect();
-                // Redemande l'état courant au serveur
                 await bleWrite('@connect:input=1&display=1&driver=1');
                 return;
             } catch {}
@@ -446,6 +446,7 @@ let lastSampleL = 0, lastSampleR = 0;
 let audioCtx = null, audioNode = null;
 let isBufferWarming = false;
 let _audioMaster = null; // Référence mutable — mise à jour à chaque changement de master
+let _pacingTimer  = null; // Fallback pacing quand AudioContext pas encore débloqué
 
 function feedAudioRingBuffer(left, right) {
     for (let i = 0; i < left.length; i++) {
@@ -460,9 +461,27 @@ function resetAudioRead() {
     isBufferWarming = true;
 }
 
+function startFallbackPacing() {
+    if (_pacingTimer) return;
+    const SAMPLE_RATE = 44100;
+    let samplesProduced = 0, paceStart = Date.now();
+    // Réinitialise la référence à chaque appel (nouveau master local)
+    _pacingTimer = setInterval(() => {
+        if (audioCtx && audioCtx.state === 'running') { stopFallbackPacing(); return; }
+        samplesProduced = (audioWritePtr - 0 + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
+        const samplesConsumed = Math.floor((Date.now() - paceStart) / 1000 * SAMPLE_RATE);
+        const distance = Math.max(0, samplesProduced - samplesConsumed);
+        _audioMaster?.send(`@audio:distance=${distance}`);
+    }, 32);
+}
+
+function stopFallbackPacing() {
+    if (_pacingTimer) { clearInterval(_pacingTimer); _pacingTimer = null; }
+}
+
 function unlockAudio(master) {
     if (audioCtx) {
-        if (audioCtx.state === 'suspended') audioCtx.resume().then(resetAudioRead).catch(() => {});
+        if (audioCtx.state === 'suspended') audioCtx.resume().then(() => { resetAudioRead(); stopFallbackPacing(); }).catch(() => {});
         return;
     }
     try {
@@ -470,6 +489,7 @@ function unlockAudio(master) {
         logToTerminal(`📊 Audio: ${audioCtx.sampleRate}Hz, état: ${audioCtx.state}`);
         resetAudioRead();
         if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+        else stopFallbackPacing();
 
         audioNode = audioCtx.createScriptProcessor(4096, 1, 2);
         const kick = audioCtx.createOscillator(); kick.frequency.value = 0;
@@ -840,7 +860,9 @@ async function bootstrap() {
         const audioUnlock = () => unlockAudio(master);
         document.body.addEventListener('click',      audioUnlock, { passive: true });
         document.body.addEventListener('touchstart', audioUnlock, { passive: true });
-        setTimeout(audioUnlock, 500);
+        // Pacing fallback : pace l'émulateur par l'horloge mur tant qu'AudioContext
+        // n'est pas débloqué (obligatoire sur mobile où resume() exige un geste)
+        startFallbackPacing();
     }
 
     buildSwitchGrid(master);
@@ -870,6 +892,8 @@ async function bootstrap() {
         _masterRef.current = newMaster;
         _masterRef.isLocal = (type === 'local');
         _audioMaster = newMaster;
+        if (type !== 'local') stopFallbackPacing();
+        else startFallbackPacing();
         connectMaster(newMaster, display);
         if (!newMaster.isLocal) newMaster.send('@connect:input=1&display=1&driver=1');
         setupSystemHandlers(type === 'local' ? () => restartLocalEmulator?.() : null);

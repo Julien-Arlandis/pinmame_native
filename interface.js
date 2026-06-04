@@ -426,6 +426,7 @@ let audioWritePtr = 0, audioReadPtr = 0;
 let lastSampleL = 0, lastSampleR = 0;
 let audioCtx = null, audioNode = null;
 let isBufferWarming = false;
+let _audioMaster = null; // Référence mutable — mise à jour à chaque changement de master
 
 function feedAudioRingBuffer(left, right) {
     for (let i = 0; i < left.length; i++) {
@@ -460,7 +461,7 @@ function unlockAudio(master) {
             const outL = e.outputBuffer.getChannelData(0);
             const outR = e.outputBuffer.getChannelData(1);
             const distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
-            if (master) master.send(`@audio:distance=${Math.max(0, distance - 4096)}`);
+            if (_audioMaster) _audioMaster.send(`@audio:distance=${Math.max(0, distance - 4096)}`);
             if (isBufferWarming) {
                 if (distance >= 4096) isBufferWarming = false;
                 for (let i = 0; i < outL.length; i++) outL[i] = outR[i] = 0;
@@ -830,8 +831,8 @@ async function bootstrap() {
     });
 
     const display = new GottliebDisplayEmulator('vfdCanvas');
+    _audioMaster = master;
     connectMaster(master, display);
-
 
     // Audio local uniquement si le maître tourne dans la page (Worker)
     if (master.isLocal) {
@@ -852,6 +853,7 @@ async function bootstrap() {
         const newPort = await createWorkerPort();
         const newMaster = new SerialMaster(newPort);
         master = newMaster;
+        _audioMaster = newMaster;
         connectMaster(newMaster, display);
         setupSystemHandlers(newMaster, restartLocalEmulator);
         buildSwitchGrid(newMaster);
@@ -867,6 +869,7 @@ async function bootstrap() {
         async function switchToNode(wsMaster) {
             master._port?.terminate?.();
             master = wsMaster;
+            _audioMaster = wsMaster;
             connectMaster(wsMaster, display);
             wsMaster.send('@connect:input=1&display=1&driver=1');
             setupSystemHandlers(wsMaster);

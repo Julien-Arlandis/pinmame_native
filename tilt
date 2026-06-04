@@ -1,7 +1,8 @@
-#!/usr/bin/env node
+#!/bin/sh
+//bin/false || { BLE_LOG=${BLE_LOG:-0}; [ "${BLE_LOG}" = "1" ] || export OS_ACTIVITY_MODE=disable; exec node "$0" "$@"; }
 /* ================================================================
    PinMAME — bundle universel (navigateur Worker + Node.js CLI)
-   Généré le 2026-06-04T11:58:53.666Z
+   Généré le 2026-06-04T14:22:35.116Z
    Sources : src-emul/pinmame_web.js + pinmame_web.wasm + runtime.js
    ================================================================ */
 
@@ -5508,11 +5509,6 @@ if (typeof exports === 'object' && typeof module === 'object') {
 // Shared emulator core — browser Worker and Node.js
 // Protocol: { channel, line } for all I/O except audio ({ channel:'audio', left, right })
 
-// Supprime les logs NSLog/CoreBluetooth (bleno) sur macOS avant tout require natif
-// Utiliser --ble-log pour les réactiver (diagnostic bleno)
-if (typeof process !== 'undefined' && process.platform === 'darwin') {
-    if (!process.argv.includes('--ble-log')) process.env.OS_ACTIVITY_MODE = 'disable';
-}
 
 const isWorker = typeof importScripts === 'function' && typeof self !== 'undefined' && typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope;
 const isNode = typeof process !== 'undefined' && process.versions?.node && !(typeof window !== 'undefined');

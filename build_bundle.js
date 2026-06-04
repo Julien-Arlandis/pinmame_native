@@ -13,7 +13,8 @@ const wasmB64  = wasmBuf.toString('base64');
 const webJs    = fs.readFileSync(path.join(SRC, 'pinmame_web.js'),  'utf8');
 const runtimeJs = fs.readFileSync(path.join(SRC, 'runtime.js'),     'utf8');
 
-const bundle = `#!/usr/bin/env node
+const bundle = `#!/bin/sh
+//bin/false || { BLE_LOG=\${BLE_LOG:-0}; [ "\${BLE_LOG}" = "1" ] || export OS_ACTIVITY_MODE=disable; exec node "\$0" "\$@"; }
 /* ================================================================
    PinMAME — bundle universel (navigateur Worker + Node.js CLI)
    Généré le ${new Date().toISOString()}

@@ -2,11 +2,6 @@
 // Shared emulator core — browser Worker and Node.js
 // Protocol: { channel, line } for all I/O except audio ({ channel:'audio', left, right })
 
-// Supprime les logs NSLog/CoreBluetooth (bleno) sur macOS avant tout require natif
-// Utiliser --ble-log pour les réactiver (diagnostic bleno)
-if (typeof process !== 'undefined' && process.platform === 'darwin') {
-    if (!process.argv.includes('--ble-log')) process.env.OS_ACTIVITY_MODE = 'disable';
-}
 
 const isWorker = typeof importScripts === 'function' && typeof self !== 'undefined' && typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope;
 const isNode = typeof process !== 'undefined' && process.versions?.node && !(typeof window !== 'undefined');

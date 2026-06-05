@@ -446,11 +446,7 @@ let lastSampleL = 0, lastSampleR = 0;
 let audioCtx = null, audioNode = null;
 let isBufferWarming = false;
 let _audioMaster = null; // Référence mutable — mise à jour à chaque changement de master
-let _pacingTimer  = null; // Fallback pacing quand AudioContext pas encore débloqué
-let _totalSamplesWritten = 0; // Compteur cumulatif pour le fallback pacing
-
 function feedAudioRingBuffer(left, right) {
-    _totalSamplesWritten += left.length;
     for (let i = 0; i < left.length; i++) {
         ringBufferL[audioWritePtr] = left[i];
         ringBufferR[audioWritePtr] = right[i];
@@ -463,29 +459,6 @@ function resetAudioRead() {
     isBufferWarming = true;
 }
 
-function startFallbackPacing() {
-    stopFallbackPacing();
-    const SAMPLE_RATE = 44100;
-    const paceStart = Date.now();
-    const baseWritten = _totalSamplesWritten;
-    _pacingTimer = setInterval(() => {
-        let distance;
-        if (audioCtx && audioCtx.state === 'running') {
-            // AudioContext actif : distance basée sur le ring buffer (précis, 32ms vs ~85ms du ScriptProcessor)
-            distance = Math.max(0, (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE - 4096);
-        } else {
-            // Avant déverrouillage : estimation horloge murale
-            const produced = _totalSamplesWritten - baseWritten;
-            const consumed = Math.floor((Date.now() - paceStart) / 1000 * SAMPLE_RATE);
-            distance = Math.max(0, produced - consumed);
-        }
-        _audioMaster?.send(`@audio:distance=${distance}`);
-    }, 32);
-}
-
-function stopFallbackPacing() {
-    if (_pacingTimer) { clearInterval(_pacingTimer); _pacingTimer = null; }
-}
 
 function unlockAudio(master) {
     if (audioCtx) {
@@ -510,7 +483,6 @@ function unlockAudio(master) {
             const outL = e.outputBuffer.getChannelData(0);
             const outR = e.outputBuffer.getChannelData(1);
             const distance = (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
-            if (_audioMaster?.isLocal) _audioMaster.send(`@audio:distance=${Math.max(0, distance - 4096)}`);
             if (isBufferWarming) {
                 if (distance >= 4096) isBufferWarming = false;
                 for (let i = 0; i < outL.length; i++) outL[i] = outR[i] = 0;
@@ -655,7 +627,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.7';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.8';
         statusEl.style.color = '#00ffcc';
         applyCurrentRom();
     } else if (state === 'loading') {
@@ -885,9 +857,6 @@ async function bootstrap() {
         document.addEventListener('touchend',    audioUnlock, { passive: true, once: false });
         document.addEventListener('pointerdown', audioUnlock, { passive: true, once: false });
         document.addEventListener('click',       audioUnlock, { passive: true, once: false });
-        // Pacing fallback : pace l'émulateur par l'horloge mur tant qu'AudioContext
-        // n'est pas débloqué (obligatoire sur mobile où resume() exige un geste)
-        startFallbackPacing();
     }
 
     buildSwitchGrid(master);
@@ -917,8 +886,6 @@ async function bootstrap() {
         _masterRef.current = newMaster;
         _masterRef.isLocal = (type === 'local');
         _audioMaster = newMaster;
-        if (type !== 'local') stopFallbackPacing();
-        else startFallbackPacing();
         connectMaster(newMaster, display);
         if (!newMaster.isLocal) newMaster.send('@connect:input=1&display=1&driver=1');
         if (type === 'node') {

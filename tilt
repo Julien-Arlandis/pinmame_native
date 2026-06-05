@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ================================================================
    PinMAME — bundle universel (navigateur Worker + Node.js CLI)
-   Généré le 2026-06-05T09:22:54.990Z
+   Généré le 2026-06-05T09:30:44.823Z
    Sources : src-emul/pinmame_web.js + pinmame_web.wasm + runtime.js
    ================================================================ */
 (function () {
@@ -5604,6 +5604,8 @@ function createEmulator() {
     let pinmameInstance = null;
     let vfdMemoryPointer = 0;
     let lastSolState = 0;
+    let samplesProduced = 0;
+    let paceStart = 0;
 
     const Module = {
         ...(_bundled && { wasmBinary: __PINMAME_WASM_BINARY__ }),
@@ -5676,6 +5678,7 @@ function createEmulator() {
         }
 
         postAudio(left, right);
+        samplesProduced += frames;
     };
 
     globalThis.pushWasmDisplay = function(ptr, callerGen) {
@@ -5755,6 +5758,17 @@ function createEmulator() {
         // api.cpp reads this and passes it back on every callback, so JS can reject
         // audio/display calls from stale Wasm instances that are still looping.
         writeU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1076, generation);
+
+        // Self-contained pacing: regulate emulator speed via @audio:distance every 32ms.
+        // Works identically in Worker and Node.js — no external pacing needed.
+        samplesProduced = 0;
+        paceStart = Date.now();
+        const pacingInterval = setInterval(() => {
+            if (generation !== _emulatorGeneration) { clearInterval(pacingInterval); return; }
+            const consumed = Math.floor((Date.now() - paceStart) / 1000 * 44100);
+            handleLine(`@audio:distance=${Math.max(0, samplesProduced - consumed)}`);
+        }, 32);
+
         const strAddr = vfdMemoryPointer + 1000;
         for (let i = 0; i < targetRomName.length; i++) pinmameInstance.HEAPU8[strAddr + i] = targetRomName.charCodeAt(i);
         pinmameInstance.HEAPU8[strAddr + targetRomName.length] = 0;
@@ -6126,7 +6140,6 @@ Logs
                 if (line === '@reboot:') {
                     info('  [REBOOT]  redémarrage émulateur en place');
                     lastStatusLine = lastDisplayLine = lastLampLine = null;
-                    resetPacing();
                     emulator = createEmulator();
                     const romArg = currentRomArgs.find(a => a.startsWith('--rom='));
                     const romName = romArg ? romArg.slice(6) : null;
@@ -6149,7 +6162,6 @@ Logs
                     currentRomArgs = currentRomArgs.filter(a => !a.startsWith('--rom=') && !a.startsWith('--custom-rom='));
                     currentRomArgs.push(`--rom=${name}`);
                     lastStatusLine = lastDisplayLine = lastLampLine = null;
-                    resetPacing();
                     emulator = createEmulator();
                     emulator.sendMessage('INIT_ENGINE', { customRomBytes: null, customRomName: name });
                     const notif = '@status:state=loading';
@@ -6185,23 +6197,8 @@ Logs
                 console.error('⚠️  Module ws absent — npm install ws');
             }
 
-            // Pacing : simule le feedback @audio:distance du navigateur
-            // Sans ça l'émulateur tourne en roue libre (trop rapide, son haché)
-            let samplesProduced = 0;
-            let paceStart = Date.now();
-            const SAMPLE_RATE = 44100;
-
-            function resetPacing() { samplesProduced = 0; paceStart = Date.now(); }
-
-            setInterval(() => {
-                const samplesConsumed = Math.floor((Date.now() - paceStart) / 1000 * SAMPLE_RATE);
-                const distance = Math.max(0, samplesProduced - samplesConsumed);
-                emulator.handleLine(`@audio:distance=${distance}`);
-            }, 32);
-
             globalThis.onEmulatorMessage = function({ channel, line, left, right }) {
                 if (channel === 'audio') {
-                    samplesProduced += left.length;
                     if (audioSink) audioSink.write(floatTo16BitPCM(left, right));
                 } else if (line) {
                     if (line.startsWith('@status:state=ready'))        lastStatusLine  = line;

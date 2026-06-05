@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ================================================================
    PinMAME — bundle universel (navigateur Worker + Node.js CLI)
-   Généré le 2026-06-04T23:59:29.499Z
+   Généré le 2026-06-05T00:03:04.715Z
    Sources : src-emul/pinmame_web.js + pinmame_web.wasm + runtime.js
    ================================================================ */
 (function () {
@@ -6166,8 +6166,6 @@ Logs
                     ws.send(`@master:name=runtime-node&version=1`);
                     ws.on('message', (data) => {
                         const line = data.toString().trim();
-                        if (line.startsWith('@set:') || line.startsWith('@sound:'))
-                            process.stderr.write(`[WS-RCV] ${line}\n`);
                         if (!handleClientLine(line, l => ws.send(l)))
                             emulator.handleLine(line);
                     });

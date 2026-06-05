@@ -5134,11 +5134,11 @@ function checkIncomingModuleAPI() {
 var ASM_CONSTS = {
   368500: () => { if (window.postWasmLog) window.postWasmLog("osd_exit called"); },  
  368567: () => { throw new Error("PinMAME: emulation stopped"); },  
- 368618: ($0) => { if (window.pushWasmDisplay) window.pushWasmDisplay($0); },  
- 368678: ($0) => { if (window.pushWasmLamps) window.pushWasmLamps($0); },  
- 368734: ($0) => { if (window.pushWasmSolens) window.pushWasmSolens($0); },  
- 368792: ($0) => { if (window.postWasmLog) { window.postWasmLog($0); } },  
- 368848: ($0, $1) => { if (window.pushWasmAudio) { window.pushWasmAudio($0, $1); } }
+ 368618: ($0, $1) => { if (window.pushWasmDisplay) window.pushWasmDisplay($0, $1); },  
+ 368682: ($0, $1) => { if (window.pushWasmLamps) window.pushWasmLamps($0, $1); },  
+ 368742: ($0, $1) => { if (window.pushWasmSolens) window.pushWasmSolens($0, $1); },  
+ 368804: ($0, $1) => { if (window.postWasmLog) { window.postWasmLog($0, $1); } },  
+ 368864: ($0, $1, $2) => { if (window.pushWasmAudio) { window.pushWasmAudio($0, $1, $2); } }
 };
 
 // Imports from the Wasm binary.

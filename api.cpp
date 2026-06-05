@@ -367,6 +367,11 @@ extern "C" {
         static uint8_t  prev_lamps[12]    = {};
         static uint32_t prev_solenoids    = 0xFFFFFFFF;
 
+        // Generation written by JS at boot (slot 1076). Passed to every callback so JS
+        // can reject calls from stale Wasm instances that are still looping after ROM change.
+        uint32_t emulator_generation = 0;
+        memcpy(&emulator_generation, &g_shared_corridor[1076], 4);
+
         uint16_t* vfd_export = (uint16_t*)g_shared_corridor;
         for (int i = 0; i < 20; i++) {
             vfd_export[i]      = coreGlobals.segments[i].w & 0xFFFF;
@@ -374,8 +379,8 @@ extern "C" {
         }
         if (memcmp(prev_segments, vfd_export, 40 * sizeof(uint16_t)) != 0) {
             memcpy(prev_segments, vfd_export, 40 * sizeof(uint16_t));
-            EM_ASM({ if (window.pushWasmDisplay) window.pushWasmDisplay($0); },
-                   (uint32_t)g_shared_corridor);
+            EM_ASM({ if (window.pushWasmDisplay) window.pushWasmDisplay($0, $1); },
+                   (uint32_t)g_shared_corridor, emulator_generation);
         }
 
         for (int sw = 0; sw < 80; sw++) { core_setSw(sw, g_shared_corridor[100 + sw]); }
@@ -397,22 +402,22 @@ extern "C" {
         for (int l = 0; l < 12; l++) { g_shared_corridor[300 + l] = coreGlobals.lampMatrix[l]; }
         if (memcmp(prev_lamps, (const void*)coreGlobals.lampMatrix, 12) != 0) {
             memcpy(prev_lamps, (const void*)coreGlobals.lampMatrix, 12);
-            EM_ASM({ if (window.pushWasmLamps) window.pushWasmLamps($0); },
-                   (uint32_t)(g_shared_corridor + 300));
+            EM_ASM({ if (window.pushWasmLamps) window.pushWasmLamps($0, $1); },
+                   (uint32_t)(g_shared_corridor + 300), emulator_generation);
         }
 
         uint32_t solenoids_state = coreGlobals.solenoids;
         if (solenoids_state != prev_solenoids) {
             prev_solenoids = solenoids_state;
-            EM_ASM({ if (window.pushWasmSolens) window.pushWasmSolens($0); },
-                   solenoids_state);
+            EM_ASM({ if (window.pushWasmSolens) window.pushWasmSolens($0, $1); },
+                   solenoids_state, emulator_generation);
         }
 
         uint8_t sound_user_cmd = g_shared_corridor[1060];
         if (sound_user_cmd > 0) {
-            g_shared_corridor[1060] = 0; 
+            g_shared_corridor[1060] = 0;
             sndbrd_0_data_w(0, sound_user_cmd);
-            EM_ASM({ if (window.postWasmLog) { window.postWasmLog($0); } }, sound_user_cmd);
+            EM_ASM({ if (window.postWasmLog) { window.postWasmLog($0, $1); } }, sound_user_cmd, emulator_generation);
         }
 
         int pending_samples = (g_audio_write_idx - g_audio_read_idx + C_AUDIO_BUFFER_MAX) % C_AUDIO_BUFFER_MAX;
@@ -423,16 +428,16 @@ extern "C" {
                 g_audio_read_idx = (g_audio_read_idx + 1) % C_AUDIO_BUFFER_MAX;
             }
             EM_ASM({
-                if (window.pushWasmAudio) { window.pushWasmAudio($0, $1); }
-            }, (uint32_t)g_linear_audio_buffer, pending_samples);
+                if (window.pushWasmAudio) { window.pushWasmAudio($0, $1, $2); }
+            }, (uint32_t)g_linear_audio_buffer, pending_samples, emulator_generation);
         }
 
         uint32_t js_buffer_dist = 0;
         memcpy(&js_buffer_dist, &g_shared_corridor[1070], 4);
-        if (js_buffer_dist > 8192) emscripten_sleep(12);
-        else if (js_buffer_dist > 4096) emscripten_sleep(6);
-        else if (js_buffer_dist > 1600) emscripten_sleep(2);
-        else emscripten_sleep(1);
+        if (js_buffer_dist > 8192) emscripten_sleep(20);
+        else if (js_buffer_dist > 4096) emscripten_sleep(18);
+        else if (js_buffer_dist > 1600) emscripten_sleep(16);
+        else emscripten_sleep(8);
     }
 
     void osd_update_video_and_audio(struct mame_display *display) {

@@ -90,8 +90,8 @@ function createEmulator() {
     const dacInteg = [0.0, 0.0];
     const dacPrev  = [-1, -1];   // -1 = non initialisé (warm-up premier appel)
 
-    globalThis.pushWasmAudio = function(ptr, count) {
-        if (generation !== _emulatorGeneration) return;
+    globalThis.pushWasmAudio = function(ptr, count, callerGen) {
+        if (callerGen !== generation) return;
         if (!pinmameInstance) return;
         const ptr16  = ptr >> 1;
         const frames = count / 2;
@@ -145,8 +145,8 @@ function createEmulator() {
         postAudio(left, right);
     };
 
-    globalThis.pushWasmDisplay = function(ptr) {
-        if (generation !== _emulatorGeneration) return;
+    globalThis.pushWasmDisplay = function(ptr, callerGen) {
+        if (callerGen !== generation) return;
         if (!pinmameInstance) return;
         let data = '';
         for (let i = 0; i < 40; i++) {
@@ -157,8 +157,8 @@ function createEmulator() {
         postToChannel('display', `!display:action=raw&data=${data}`);
     };
 
-    globalThis.pushWasmLamps = function(ptr) {
-        if (generation !== _emulatorGeneration) return;
+    globalThis.pushWasmLamps = function(ptr, callerGen) {
+        if (callerGen !== generation) return;
         if (!pinmameInstance) return;
         let lampHex = '';
         for (let col = 0; col < 12; col++)
@@ -166,8 +166,8 @@ function createEmulator() {
         postToChannel('driver', `!lamp:${lampHex}`);
     };
 
-    globalThis.pushWasmSolens = function(solState) {
-        if (generation !== _emulatorGeneration) return;
+    globalThis.pushWasmSolens = function(solState, callerGen) {
+        if (callerGen !== generation) return;
         for (let s = 0; s < 32; s++) {
             if (((solState >> s) & 1) !== ((lastSolState >> s) & 1))
                 postToChannel('driver', `!set:id=${s}&state=${(solState >> s) & 1}`);
@@ -175,8 +175,8 @@ function createEmulator() {
         lastSolState = solState;
     };
 
-    globalThis.postWasmLog = function(cmdId) {
-        if (generation !== _emulatorGeneration) return;
+    globalThis.postWasmLog = function(cmdId, callerGen) {
+        if (callerGen !== generation) return;
         postToChannel('status', `@audio:cmd=0x${cmdId.toString(16).toUpperCase()}`);
     };
 
@@ -218,6 +218,10 @@ function createEmulator() {
         pinmameInstance.FS.writeFile(`/roms/${targetRomName}.zip`, new Uint8Array(romBuffer));
 
         vfdMemoryPointer = pinmameInstance._pinmame_get_dsprom_ptr();
+        // Stamp our generation into the Wasm's own shared corridor (slot 1076).
+        // api.cpp reads this and passes it back on every callback, so JS can reject
+        // audio/display calls from stale Wasm instances that are still looping.
+        writeU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1076, generation);
         const strAddr = vfdMemoryPointer + 1000;
         for (let i = 0; i < targetRomName.length; i++) pinmameInstance.HEAPU8[strAddr + i] = targetRomName.charCodeAt(i);
         pinmameInstance.HEAPU8[strAddr + targetRomName.length] = 0;

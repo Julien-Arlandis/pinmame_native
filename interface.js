@@ -655,7 +655,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.6';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.7';
         statusEl.style.color = '#00ffcc';
         applyCurrentRom();
     } else if (state === 'loading') {

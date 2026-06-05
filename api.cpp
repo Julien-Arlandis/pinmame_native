@@ -460,7 +460,7 @@ extern "C" {
         if (js_buffer_dist > 8192) emscripten_sleep(20);
         else if (js_buffer_dist > 4096) emscripten_sleep(18);
         else if (js_buffer_dist > 1600) emscripten_sleep(16);
-        else emscripten_sleep(8);
+        else emscripten_sleep(15); // floor ~60fps : évite surproduction → overflow ring buffer
     }
 
     void osd_update_video_and_audio(struct mame_display *display) {

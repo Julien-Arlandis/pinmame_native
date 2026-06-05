@@ -468,6 +468,8 @@ function unlockAudio(master) {
     try {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)(); // pas de sampleRate forcé — Android choisit sa fréquence native
         logToTerminal(`📊 Audio: ${audioCtx.sampleRate}Hz, état: ${audioCtx.state}`);
+        // Synchronise la fréquence réelle de l'AudioContext avec le pacing du Worker
+        master.send(`@audio:samplerate=${audioCtx.sampleRate}`);
         resetAudioRead();
         if (audioCtx.state === 'suspended') {
             audioCtx.resume().catch(() => {});
@@ -627,7 +629,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.8';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.9';
         statusEl.style.color = '#00ffcc';
         applyCurrentRom();
     } else if (state === 'loading') {

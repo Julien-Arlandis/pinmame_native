@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ================================================================
    PinMAME — bundle universel (navigateur Worker + Node.js CLI)
-   Généré le 2026-06-05T09:51:44.507Z
+   Généré le 2026-06-05T10:02:19.832Z
    Sources : src-emul/pinmame_web.js + pinmame_web.wasm + runtime.js
    ================================================================ */
 (function () {

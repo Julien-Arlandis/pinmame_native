@@ -562,11 +562,13 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.11';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.12';
         statusEl.style.color = '#00ffcc';
+        logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();
     } else if (state === 'loading') {
         statusEl.textContent = '🟡 Chargement...'; statusEl.style.color = '';
+        logToTerminal('⏳ Chargement ROM...');
     }
 }
 
@@ -693,12 +695,16 @@ function buildSolGrid() {
 function setupSystemHandlers(restartFn) {
     const localRestart = restartFn || (() => {});
     const isRemote = () => !_masterRef.isLocal;
-    rebootBtn.onclick = () => isRemote() ? _masterRef.current.send('@reboot:') : localRestart();
+    rebootBtn.onclick = () => {
+        logToTerminal('🔄 Reboot');
+        isRemote() ? _masterRef.current.send('@reboot:') : localRestart();
+    };
     if (romSelector) {
         romSelector.onchange = () => {
             const name = romSelector.value;
             if (!name) return;
             romSelector.value = '';
+            logToTerminal(`📀 ROM sélectionnée : ${name}`);
             if (isRemote()) {
                 sessionStorage.removeItem('custom_rom_bytes');
                 sessionStorage.removeItem('custom_rom_filename');
@@ -721,6 +727,7 @@ function setupSystemHandlers(restartFn) {
             let bin = '';
             for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
             const b64 = btoa(bin);
+            logToTerminal(`📤 Upload ROM : ${file.name} (${(bytes.length/1024).toFixed(1)} KB)`);
             if (isRemote()) {
                 _masterRef.current.send(`@rom:name=${encodeURIComponent(file.name)}&data=${encodeURIComponent(b64)}`);
             } else {
@@ -818,6 +825,8 @@ async function bootstrap() {
     }
 
     async function switchToMaster(newMaster, type, rebuildUI = true) {
+        const modeLabel = { local: '🖥 Local', node: '🌐 Node WS', ble: '🔵 BLE' };
+        logToTerminal(`⚙️ Mode : ${modeLabel[type] || type}`);
         master._port?.disconnect?.();
         master = newMaster;
         _masterRef.current = newMaster;
@@ -855,6 +864,7 @@ async function bootstrap() {
 
     restartLocalEmulator = async () => {
         if (_masterRef.current?._reconnectUrl) return;
+        logToTerminal('🔄 Redémarrage émulateur local');
         const newPort = await createWorkerPort();
         await switchToMaster(new SerialMaster(newPort), 'local', false);
         buildSwitchGrid(); buildSoundGrid(); buildDipSwitches();

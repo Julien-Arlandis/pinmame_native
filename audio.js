@@ -58,7 +58,7 @@ function unlockAudio(master) {
                     lastSampleL = ringBufferL[audioReadPtr];
                     lastSampleR = ringBufferR[audioReadPtr];
                     audioReadPtr = (audioReadPtr + 1) % RING_BUFFER_SIZE;
-                } else { lastSampleL *= 0.9995; lastSampleR *= 0.9995; }
+                } else { lastSampleL *= 0.90; lastSampleR *= 0.90; }
                 outL[i] = lastSampleL; outR[i] = lastSampleR;
             }
             // Overflow : sauter en avant pour éviter la corruption du ring buffer

@@ -45,12 +45,14 @@ static int g_selected_game_index = 0;
 
 // ── DAC push buffer ───────────────────────────────────────────────────────────
 // Intercepté via --wrap=DAC_DC_offset_correction_data_16_w.
-// Les valeurs brutes (volume×data, 0..65025) sont accumulées ici chaque frame.
-// JS lit via api_get_dac_buffer/count/reset, applique l'intégrateur DC-offset
-// en JS et mélange dans pushWasmAudio — sans toucher au stream MAME.
+// L'intégrateur DC-offset est appliqué ici (réplique exacte de dac.c ligne 90),
+// donc g_dac_buf stocke des valeurs déjà traitées en -32768..32767.
+// JS normalise simplement par 32768 dans pushWasmAudio.
 #define DAC_BUF_MAX 4096
-static int g_dac_buf[2][DAC_BUF_MAX];
-static int g_dac_n[2] = {0, 0};
+static int    g_dac_buf[2][DAC_BUF_MAX];
+static int    g_dac_n[2]          = {0, 0};
+static double g_dac_integrator[2] = {0.0, 0.0};
+static int    g_dac_prev_data[2]  = {0, 0};
 
 static INT16 g_audio_ring_buffer[C_AUDIO_BUFFER_MAX];
 static int g_audio_write_idx = 0;
@@ -761,9 +763,16 @@ extern "C" {
 // ── Wrapper --wrap=DAC_DC_offset_correction_data_16_w ────────────────────────
 extern "C" void __real_DAC_DC_offset_correction_data_16_w(int num, int data);
 extern "C" void __wrap_DAC_DC_offset_correction_data_16_w(int num, int data) {
-    if ((unsigned)num < 2 && g_dac_n[num] < DAC_BUF_MAX)
-        g_dac_buf[num][g_dac_n[num]++] = data;
+    if ((unsigned)num < 2 && g_dac_n[num] < DAC_BUF_MAX) {
+        // Réplique exacte de dac.c : intégrateur DC-offset (0..65535 → -32768..32767)
+        g_dac_integrator[num] = g_dac_integrator[num] * 0.995 + (data - g_dac_prev_data[num]);
+        g_dac_prev_data[num]  = data;
+        int out = (int)g_dac_integrator[num];
+        if (out < -32768) out = -32768;
+        else if (out > 32767) out = 32767;
+        g_dac_buf[num][g_dac_n[num]++] = out;
+    }
     // __real_ NON appelé : le stream DAC MAME reste à 0.
-    // JS reconstruit l'audio DAC dans pushWasmAudio via api_get_dac_buffer.
+    // JS normalise simplement par 32768 dans pushWasmAudio.
 }
 

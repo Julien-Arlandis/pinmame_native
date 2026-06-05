@@ -88,10 +88,6 @@ function createEmulator() {
         noExitRuntime: true
     };
 
-    // Intégrateur DC-offset pour le DAC push (persistant entre frames)
-    // Réplique la logique de dac.c mais exécuté en JS avec bon timing
-    const dacInteg = [0.0, 0.0];
-    const dacPrev  = [-1, -1];   // -1 = non initialisé (warm-up premier appel)
 
     globalThis.pushWasmAudio = function(ptr, count, callerGen) {
         if (callerGen !== generation) return;
@@ -113,21 +109,11 @@ function createEmulator() {
 
             const dacPtr32 = pinmameInstance._api_get_dac_buffer(chip) >>> 2;
 
-            // Passer chaque écriture DAC par l'intégrateur DC-offset
+            // L'intégrateur DC-offset est déjà appliqué dans api.cpp (réplique dac.c).
+            // Les valeurs stockées sont en -32768..32767 → normaliser directement.
             const processed = new Float32Array(n);
             for (let i = 0; i < n; i++) {
-                const raw = pinmameInstance.HEAP32[dacPtr32 + i];   // 0..65025
-                if (dacPrev[chip] < 0) {
-                    // Warm-up : initialiser sans spike
-                    dacPrev[chip]  = raw;
-                    dacInteg[chip] = 0.0;
-                    processed[i]   = 0.0;
-                    continue;
-                }
-                dacInteg[chip] = dacInteg[chip] * 0.995 + (raw - dacPrev[chip]);
-                dacPrev[chip]  = raw;
-                // Gain 50% → mixing_level du DACinterface, normalisé [-1,+1]
-                processed[i] = Math.max(-0.5, Math.min(0.5, dacInteg[chip] / 65025.0));
+                processed[i] = pinmameInstance.HEAP32[dacPtr32 + i] / 32768.0;
             }
 
             // Redistribuer les N valeurs sur frames samples (interpolation linéaire)

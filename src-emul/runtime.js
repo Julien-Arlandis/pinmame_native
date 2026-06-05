@@ -89,6 +89,9 @@ function createEmulator() {
     };
 
 
+    // Dernier sample DAC de la frame précédente, pour continuité inter-frames
+    const lastFrameDacOut = [0.0, 0.0];
+
     globalThis.pushWasmAudio = function(ptr, count, callerGen) {
         if (callerGen !== generation) return;
         if (!pinmameInstance) return;
@@ -116,17 +119,23 @@ function createEmulator() {
                 processed[i] = pinmameInstance.HEAP32[dacPtr32 + i] / 32768.0;
             }
 
-            // Redistribuer les N valeurs sur frames samples (interpolation linéaire)
-            const scale = (n - 1) / (frames - 1);
+            // Redistribuer sur frames samples en incluant le dernier sample de la frame
+            // précédente comme point de départ → interpolation continue inter-frames.
+            // Points de référence : [lastFrameDacOut, processed[0..n-1]] = n+1 points
+            const prevVal = lastFrameDacOut[chip];
+            const scale   = n / (frames - 1);  // n intervals sur frames-1 pas
             for (let s = 0; s < frames; s++) {
                 const pos  = s * scale;
-                const i0   = pos | 0;
-                const i1   = i0 + 1 < n ? i0 + 1 : i0;
+                const i0   = pos | 0;           // 0 = frame précédente, 1..n = processed[0..n-1]
+                const i1   = i0 + 1 <= n ? i0 + 1 : i0;
                 const frac = pos - i0;
-                const dac  = processed[i0] * (1 - frac) + processed[i1] * frac;
+                const v0   = i0 === 0 ? prevVal : processed[i0 - 1];
+                const v1   = i1 === 0 ? prevVal : processed[i1 - 1];
+                const dac  = v0 * (1 - frac) + v1 * frac;
                 left[s]    = Math.max(-1, Math.min(1, left[s]  + dac));
                 right[s]   = Math.max(-1, Math.min(1, right[s] + dac));
             }
+            lastFrameDacOut[chip] = processed[n - 1];
 
             pinmameInstance._api_reset_dac_buffer(chip);
         }

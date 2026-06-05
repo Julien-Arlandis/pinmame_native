@@ -58,10 +58,13 @@ function unlockAudio(master) {
                     lastSampleL = ringBufferL[audioReadPtr];
                     lastSampleR = ringBufferR[audioReadPtr];
                     audioReadPtr = (audioReadPtr + 1) % RING_BUFFER_SIZE;
-                } else { lastSampleL *= 0.90; lastSampleR *= 0.90; }
+                    // Buffer trop plein : drainer à 2× sans saut brutal (correction graduelle)
+                    if (distance > 24576 && audioReadPtr !== audioWritePtr)
+                        audioReadPtr = (audioReadPtr + 1) % RING_BUFFER_SIZE;
+                }
+                // Pas de decay : on maintient le dernier sample → pas de clic à la reprise
                 outL[i] = lastSampleL; outR[i] = lastSampleR;
             }
-            if (distance > 24576) audioReadPtr = (audioWritePtr - 8192 + RING_BUFFER_SIZE) % RING_BUFFER_SIZE;
         };
         audioNode.connect(audioCtx.destination);
         logToTerminal('🔊 Flux audio connecté.');

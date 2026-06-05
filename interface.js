@@ -469,10 +469,16 @@ function startFallbackPacing() {
     const paceStart = Date.now();
     const baseWritten = _totalSamplesWritten;
     _pacingTimer = setInterval(() => {
-        if (audioCtx && audioCtx.state === 'running') { stopFallbackPacing(); return; }
-        const produced = _totalSamplesWritten - baseWritten;
-        const consumed = Math.floor((Date.now() - paceStart) / 1000 * SAMPLE_RATE);
-        const distance = Math.max(0, produced - consumed);
+        let distance;
+        if (audioCtx && audioCtx.state === 'running') {
+            // AudioContext actif : distance basée sur le ring buffer (précis, 32ms vs ~85ms du ScriptProcessor)
+            distance = Math.max(0, (audioWritePtr - audioReadPtr + RING_BUFFER_SIZE) % RING_BUFFER_SIZE - 4096);
+        } else {
+            // Avant déverrouillage : estimation horloge murale
+            const produced = _totalSamplesWritten - baseWritten;
+            const consumed = Math.floor((Date.now() - paceStart) / 1000 * SAMPLE_RATE);
+            distance = Math.max(0, produced - consumed);
+        }
         _audioMaster?.send(`@audio:distance=${distance}`);
     }, 32);
 }
@@ -483,7 +489,7 @@ function stopFallbackPacing() {
 
 function unlockAudio(master) {
     if (audioCtx) {
-        if (audioCtx.state === 'suspended') audioCtx.resume().then(() => { resetAudioRead(); stopFallbackPacing(); }).catch(() => {});
+        if (audioCtx.state === 'suspended') audioCtx.resume().then(resetAudioRead).catch(() => {});
         return;
     }
     try {
@@ -491,9 +497,7 @@ function unlockAudio(master) {
         logToTerminal(`📊 Audio: ${audioCtx.sampleRate}Hz, état: ${audioCtx.state}`);
         resetAudioRead();
         if (audioCtx.state === 'suspended') {
-            audioCtx.resume().then(stopFallbackPacing).catch(() => {});
-        } else {
-            stopFallbackPacing();
+            audioCtx.resume().catch(() => {});
         }
 
         audioNode = audioCtx.createScriptProcessor(4096, 1, 2);
@@ -651,7 +655,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.5-dbg';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.6';
         statusEl.style.color = '#00ffcc';
         applyCurrentRom();
     } else if (state === 'loading') {

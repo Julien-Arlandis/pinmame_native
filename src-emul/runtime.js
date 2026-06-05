@@ -203,6 +203,11 @@ function createEmulator() {
         postToChannel('status', `@audio:cmd=0x${cmdId.toString(16).toUpperCase()}`);
     };
 
+    globalThis.postWasmSoundChips = function(chips) {
+        if (generation !== _emulatorGeneration) return;
+        postToChannel('status', `@sound:chips=${chips}`);
+    };
+
     async function initialiserMoteur(customRomBytes, customRomName, baseUrl) {
         postToChannel('status', '@status:state=loading');
         if (isNode) globalThis.window = globalThis;

@@ -562,7 +562,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.10';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.11';
         statusEl.style.color = '#00ffcc';
         applyCurrentRom();
     } else if (state === 'loading') {
@@ -588,6 +588,8 @@ function connectMaster(master, display) {
             handleDriverLine(line);
         } else if (line.startsWith('@status:')) {
             handleStatusLine(line);
+        } else if (line.startsWith('@sound:chips=')) {
+            logToTerminal(`🎵 Son: ${decodeURIComponent(line.slice(13))}`);
         } else if (line.startsWith('@roms:list=')) {
             const names = line.slice(11).split(',').map(decodeURIComponent).filter(Boolean);
             romSelector.innerHTML = '<option value=""></option>' + names.map(n => `<option value="${n}">${stripExt(n)}</option>`).join('');

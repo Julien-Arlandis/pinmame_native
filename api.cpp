@@ -366,11 +366,32 @@ extern "C" {
         static uint16_t prev_segments[40] = {};
         static uint8_t  prev_lamps[12]    = {};
         static uint32_t prev_solenoids    = 0xFFFFFFFF;
+        static bool     sound_chips_posted = false;
 
         // Generation written by JS at boot (slot 1076). Passed to every callback so JS
         // can reject calls from stale Wasm instances that are still looping after ROM change.
         uint32_t emulator_generation = 0;
         memcpy(&emulator_generation, &g_shared_corridor[1076], 4);
+
+        // Post sound chip names once on first frame.
+        if (!sound_chips_posted && Machine && Machine->drv) {
+            sound_chips_posted = true;
+            char chip_list[256] = {0};
+            int len = 0;
+            for (int i = 0; i < MAX_SOUND; i++) {
+                if (!Machine->drv->sound[i].sound_type) break;
+                const char* name = sound_name(&Machine->drv->sound[i]);
+                if (!name) name = "?";
+                if (len > 0 && len < (int)sizeof(chip_list) - 3) {
+                    chip_list[len++] = ','; chip_list[len++] = ' ';
+                }
+                while (*name && len < (int)sizeof(chip_list) - 1)
+                    chip_list[len++] = *name++;
+            }
+            EM_ASM({
+                if (window.postWasmSoundChips) window.postWasmSoundChips(UTF8ToString($0));
+            }, chip_list);
+        }
 
         uint16_t* vfd_export = (uint16_t*)g_shared_corridor;
         for (int i = 0; i < 20; i++) {

@@ -11,9 +11,24 @@ let audioCtx = null, audioNode = null;
 let isBufferWarming = false;
 
 function feedAudioRingBuffer(left, right) {
-    for (let i = 0; i < left.length; i++) {
-        ringBufferL[audioWritePtr] = left[i];
-        ringBufferR[audioWritePtr] = right[i];
+    let inL = left, inR = right;
+    if (audioCtx && audioCtx.sampleRate !== 44100) {
+        const ratio = 44100 / audioCtx.sampleRate;
+        const n = Math.round(left.length / ratio);
+        inL = new Float32Array(n);
+        inR = new Float32Array(n);
+        for (let i = 0; i < n; i++) {
+            const src = i * ratio;
+            const i0  = src | 0;
+            const i1  = i0 + 1 < left.length ? i0 + 1 : i0;
+            const f   = src - i0;
+            inL[i] = left[i0]  * (1 - f) + left[i1]  * f;
+            inR[i] = right[i0] * (1 - f) + right[i1] * f;
+        }
+    }
+    for (let i = 0; i < inL.length; i++) {
+        ringBufferL[audioWritePtr] = inL[i];
+        ringBufferR[audioWritePtr] = inR[i];
         audioWritePtr = (audioWritePtr + 1) % RING_BUFFER_SIZE;
     }
 }
@@ -31,8 +46,6 @@ function unlockAudio(master) {
     try {
         audioCtx = new (window.AudioContext || window.webkitAudioContext)(); // pas de sampleRate forcé — Android choisit sa fréquence native
         logToTerminal(`📊 Audio: ${audioCtx.sampleRate}Hz, état: ${audioCtx.state}`);
-        // Synchronise la fréquence réelle de l'AudioContext avec le pacing du Worker
-        master.send(`@audio:samplerate=${audioCtx.sampleRate}`);
         resetAudioRead();
         if (audioCtx.state === 'suspended') {
             audioCtx.resume().catch(() => {});

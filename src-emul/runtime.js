@@ -73,7 +73,6 @@ function createEmulator() {
     let lastSolState = 0;
     let samplesProduced = 0;
     let paceStart = 0;
-    let audioSampleRate = 44100;
 
     const Module = {
         ...(_bundled && { wasmBinary: __PINMAME_WASM_BINARY__ }),
@@ -140,27 +139,8 @@ function createEmulator() {
             pinmameInstance._api_reset_dac_buffer(chip);
         }
 
-        // Resample 44100 → audioSampleRate if needed (e.g. browser AudioContext at 48000 Hz).
-        // Done in the emulator thread so samplesProduced stays in output-rate units and
-        // pacing remains consistent without any special handling in the main thread.
-        let outLeft = left, outRight = right;
-        if (audioSampleRate !== 44100 && frames > 1) {
-            const ratio = 44100 / audioSampleRate;
-            const outFrames = Math.round(frames / ratio);
-            outLeft  = new Float32Array(outFrames);
-            outRight = new Float32Array(outFrames);
-            for (let i = 0; i < outFrames; i++) {
-                const srcPos = i * ratio;
-                const i0 = srcPos | 0;
-                const i1 = i0 + 1 < frames ? i0 + 1 : i0;
-                const frac = srcPos - i0;
-                outLeft[i]  = left[i0]  * (1 - frac) + left[i1]  * frac;
-                outRight[i] = right[i0] * (1 - frac) + right[i1] * frac;
-            }
-        }
-
-        postAudio(outLeft, outRight);
-        samplesProduced += outLeft.length;
+        postAudio(left, right);
+        samplesProduced += frames;
     };
 
     globalThis.pushWasmDisplay = function(ptr, callerGen) {
@@ -252,7 +232,7 @@ function createEmulator() {
         paceStart = Date.now();
         const pacingInterval = setInterval(() => {
             if (generation !== _emulatorGeneration) { clearInterval(pacingInterval); return; }
-            const consumed = Math.floor((Date.now() - paceStart) / 1000 * audioSampleRate);
+            const consumed = Math.floor((Date.now() - paceStart) / 1000 * 44100);
             handleLine(`@audio:distance=${Math.max(0, samplesProduced - consumed)}`);
         }, 32);
 
@@ -285,8 +265,6 @@ function createEmulator() {
             p = new URLSearchParams(line.slice(7));
             const dist = parseInt(p.get('distance'));
             if (!isNaN(dist)) writeU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1070, dist);
-            const sr = parseInt(p.get('samplerate'));
-            if (!isNaN(sr) && sr > 0) { audioSampleRate = sr; samplesProduced = 0; paceStart = Date.now(); }
         }
     }
 

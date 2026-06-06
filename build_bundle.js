@@ -11,11 +11,7 @@ const OUT   = path.join(__dirname, 'tilt');
 const wasmBuf  = fs.readFileSync(path.join(SRC, 'pinmame_web.wasm'));
 const wasmB64  = wasmBuf.toString('base64');
 const webJs    = fs.readFileSync(path.join(SRC, 'pinmame_web.js'),  'utf8');
-const runtimeJsRaw = fs.readFileSync(path.join(SRC, 'runtime.js'), 'utf8');
-// Dans le bundle _bundled=true toujours : retirer le require() mort et le bloc Node entier
-const runtimeJs = runtimeJsRaw
-    .replace(/const isNode = [^;]+;/, 'const isNode = false;')
-    .replace(/\/\/ ── Node\.js ─+\n[\s\S]*$/, '');
+const runtimeJs = fs.readFileSync(path.join(SRC, 'runtime.js'), 'utf8');
 
 const bundle = `#!/usr/bin/env node
 /* ================================================================

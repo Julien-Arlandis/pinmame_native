@@ -251,7 +251,6 @@ Logs
 
             function makeEmulator() {
                 return createEmulator({
-                    getBufferDepth: audioSink?.queued !== undefined ? () => audioSink.queued : null,
                     sendLine(channel, line) {
                         if (line.startsWith('@status:state=ready'))       lastStatusLine  = line;
                         if (line.startsWith('!display:action=raw&data=')) lastDisplayLine = line;

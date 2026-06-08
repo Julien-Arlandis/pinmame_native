@@ -51,13 +51,13 @@ function normalizeRomBytes(customRomBytes) {
 // sendLine(channel, line)  — envoie une ligne texte vers l'hôte
 // sendAudio(left, right)   — envoie des frames Float32Array vers l'hôte
 // loadRom(romName, baseUrl) → Promise<ArrayBuffer>
-function createEmulator({ sendLine, sendAudio, loadRom, getBufferDepth }) {
+function createEmulator({ sendLine, sendAudio, loadRom }) {
     const generation = ++_emulatorGeneration;
     let pinmameInstance = null;
     let vfdMemoryPointer = 0;
     let lastSolState = 0;
     let samplesProduced = 0;
-    let paceStart = 0;
+    let firstAudioTime = null;
 
     const Module = {
         get wasmBinary() { return globalThis.__PINMAME_WASM_BINARY__; },
@@ -78,6 +78,7 @@ function createEmulator({ sendLine, sendAudio, loadRom, getBufferDepth }) {
     globalThis.pushWasmAudio = function(ptr, count, callerGen) {
         if (callerGen !== generation) return;
         if (!pinmameInstance) return;
+        if (firstAudioTime === null) firstAudioTime = Date.now();
         const ptr16  = ptr >> 1;
         const frames = count / 2;
         const left   = new Float32Array(frames);
@@ -200,17 +201,12 @@ function createEmulator({ sendLine, sendAudio, loadRom, getBufferDepth }) {
         // Self-contained pacing: regulate emulator speed via @audio:distance every 32ms.
         // Works identically in Worker and Node.js — no external pacing needed.
         samplesProduced = 0;
-        paceStart = Date.now();
+        firstAudioTime = null;
         const pacingInterval = setInterval(() => {
             if (generation !== _emulatorGeneration) { clearInterval(pacingInterval); return; }
-            let dist;
-            if (getBufferDepth) {
-                // Profondeur réelle du buffer de sortie fournie par le consommateur (Node Speaker, browser AudioContext…)
-                dist = getBufferDepth();
-            } else {
-                const consumed = Math.floor((Date.now() - paceStart) / 1000 * 44100);
-                dist = Math.max(0, samplesProduced - consumed);
-            }
+            const dist = firstAudioTime !== null
+                ? Math.max(0, samplesProduced - Math.floor((Date.now() - firstAudioTime) / 1000 * 44100))
+                : 0;
             handleLine(`@audio:distance=${dist}`);
         }, 32);
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.20</title>
+    <title>PinMAME Workbench v3.21</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -206,6 +206,63 @@
         #startBtn:hover { border-color: var(--neon-green); color: var(--neon-green); }
         #testBtn:hover { border-color: var(--neon-amber); color: var(--neon-amber); }
 
+        /* --- Panel Override Display --- */
+        .display-override-panel {
+            width: 100%;
+            max-width: 1120px;
+            background: #06080a;
+            border: 1px solid #1e2a1e;
+            border-radius: 5px;
+            padding: 10px 14px 12px;
+            box-sizing: border-box;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: flex-end;
+        }
+        .ovr-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .ovr-label {
+            font-size: 0.6rem;
+            color: #4a6;
+            text-transform: uppercase;
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+        .ovr-input {
+            background: #0d120d;
+            border: 1px solid #1e3a1e;
+            color: #00ffcc;
+            font-family: monospace;
+            font-size: 0.9rem;
+            padding: 6px 10px;
+            border-radius: 4px;
+            width: 260px;
+            max-width: calc(50vw - 30px);
+            box-sizing: border-box;
+            letter-spacing: 2px;
+            transition: border-color 0.15s;
+        }
+        .ovr-input:focus { outline: none; border-color: #00ffcc; }
+        .ovr-speed {
+            background: #0d120d;
+            border: 1px solid #1e3a1e;
+            color: #aaa;
+            font-family: monospace;
+            font-size: 0.75rem;
+            padding: 6px 8px;
+            border-radius: 4px;
+            height: 34px;
+        }
+        #overrideToggle { height: 34px; }
+        #overrideToggle.active {
+            background: #1a0a0a;
+            border-color: #aa2200;
+            color: #ff5533;
+        }
         /* --- Afficheur Alphanumérique Plasma VFD --- */
         .display-container {
             width: 100%;
@@ -218,8 +275,36 @@
             margin-bottom: 15px;
             box-sizing: border-box;
             display: flex;
-            justify-content: center;
+            flex-direction: column;
+            align-items: center;
+            gap: 10px;
         }
+        .canvas-wrapper {
+            position: relative;
+            width: 100%;
+            max-width: 1120px;
+        }
+        #overrideBtn {
+            position: absolute;
+            bottom: 6px;
+            right: 6px;
+            width: 28px;
+            height: 28px;
+            font-size: 0.85rem;
+            padding: 0;
+            background: rgba(0,255,204,0.06);
+            border: 1px solid #1e3a1e;
+            color: #00ffcc;
+            border-radius: 4px;
+            cursor: pointer;
+            line-height: 28px;
+            text-align: center;
+            z-index: 10;
+            opacity: 0.6;
+            transition: opacity 0.15s, background 0.15s;
+        }
+        #overrideBtn:hover { opacity: 1; background: rgba(0,255,204,0.12); }
+        #overrideBtn.active { opacity: 1; background: rgba(255,50,50,0.12); border-color: #aa2200; color: #ff5533; }
         #vfdCanvas {
             background: #020202;
             border-radius: 4px;
@@ -589,7 +674,41 @@
     </div>
 
     <div class="display-container">
-        <canvas id="vfdCanvas" width="1120" height="220"></canvas>
+        <div class="canvas-wrapper">
+            <canvas id="vfdCanvas" width="1120" height="220"></canvas>
+            <button id="overrideBtn" title="Écriture manuelle sur l'afficheur">✏️</button>
+        </div>
+        <div id="overridePanel" class="display-override-panel" style="display:none;">
+            <div class="ovr-field">
+                <span class="ovr-label">Ligne 1</span>
+                <input id="ovrL1" class="ovr-input" type="text" maxlength="60" placeholder="20 car. max (défile si plus long)">
+            </div>
+            <div class="ovr-field">
+                <span class="ovr-label">Ligne 2</span>
+                <input id="ovrL2" class="ovr-input" type="text" maxlength="60" placeholder="20 car. max (défile si plus long)">
+            </div>
+            <div class="ovr-field">
+                <span class="ovr-label">Défilement</span>
+                <div class="mode-selector" id="ovrDirGroup">
+                    <button class="mode-btn" data-dir="right">◀◀</button>
+                    <button class="mode-btn active" data-dir="none">⏸</button>
+                    <button class="mode-btn" data-dir="left">▶▶</button>
+                </div>
+            </div>
+            <div class="ovr-field">
+                <span class="ovr-label">Vitesse</span>
+                <select id="ovrSpeed" class="ovr-speed">
+                    <option value="200">Lent</option>
+                    <option value="100" selected>Normal</option>
+                    <option value="50">Rapide</option>
+                    <option value="25">Turbo</option>
+                </select>
+            </div>
+            <div class="ovr-field">
+                <span class="ovr-label">&nbsp;</span>
+                <button id="overrideToggle" class="btn-system">▶ Activer</button>
+            </div>
+        </div>
     </div>
 
     <div class="dashboard">

@@ -321,6 +321,12 @@ class GottliebDisplayEmulator {
         this.vfdCells = new Uint16Array(40);
         this.cursorPosition = 0;
         this._dirty = false;
+        this._overrideActive = false;
+        this._overrideL1 = '';
+        this._overrideL2 = '';
+        this._overrideDir = 'none';
+        this._overrideOffset = 0;
+        this._overrideTimer = null;
         // Source de vérité unique — ASCII → segments PinMAME
         // Bits : a=0x0001 b=0x0002 c=0x0004 d=0x0008 e=0x0010 f=0x0020
         //        g1=0x0040 g2=0x0800 i=0x0100 j=0x0200 k=0x0400
@@ -367,8 +373,51 @@ class GottliebDisplayEmulator {
         return s;
     }
 
+    enableOverride(l1, l2, dir, speedMs) {
+        this._overrideL1 = (l1 || '').toUpperCase();
+        this._overrideL2 = (l2 || '').toUpperCase();
+        this._overrideDir = dir || 'none';
+        this._overrideOffset = 0;
+        this._overrideActive = true;
+        if (this._overrideTimer) { clearInterval(this._overrideTimer); this._overrideTimer = null; }
+        this._applyOverride();
+        if (this._overrideDir !== 'none') {
+            this._overrideTimer = setInterval(() => {
+                if (this._overrideDir === 'left') this._overrideOffset++;
+                else this._overrideOffset--;
+                this._applyOverride();
+            }, speedMs || 100);
+        }
+    }
+
+    disableOverride() {
+        this._overrideActive = false;
+        if (this._overrideTimer) { clearInterval(this._overrideTimer); this._overrideTimer = null; }
+        this._dirty = true;
+    }
+
+    _getScrollWindow(text, offset) {
+        if (!text) return '                    ';
+        const total = text.length + 20;
+        const o = ((offset % total) + total) % total;
+        const padded = ' '.repeat(20) + text + ' '.repeat(20);
+        const doubled = padded + padded;
+        return doubled.slice(o, o + 20).padEnd(20, ' ');
+    }
+
+    _applyOverride() {
+        const w1 = this._getScrollWindow(this._overrideL1, this._overrideOffset);
+        const w2 = this._getScrollWindow(this._overrideL2, this._overrideOffset);
+        for (let i = 0; i < 20; i++) {
+            this.vfdCells[i]      = this.ascii2gottlieb[w1.charCodeAt(i) & 0x7F] || 0;
+            this.vfdCells[20 + i] = this.ascii2gottlieb[w2.charCodeAt(i) & 0x7F] || 0;
+        }
+        this._dirty = true;
+    }
+
     parseCommand(cmd) {
         if (!cmd || !cmd.startsWith('!display:')) return;
+        if (this._overrideActive) return;
         const params = new URLSearchParams(cmd.slice(9));
         switch (params.get('action')) {
             case 'raw': {
@@ -607,7 +656,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.20';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.21';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();
@@ -834,6 +883,57 @@ async function bootstrap() {
     });
 
     const display = new GottliebDisplayEmulator('vfdCanvas');
+
+    // ── Override display panel ─────────────────────────────────────────────
+    {
+        const overrideBtn    = document.getElementById('overrideBtn');
+        const overridePanel  = document.getElementById('overridePanel');
+        const ovrL1          = document.getElementById('ovrL1');
+        const ovrL2          = document.getElementById('ovrL2');
+        const ovrDirGroup    = document.getElementById('ovrDirGroup');
+        const ovrSpeed       = document.getElementById('ovrSpeed');
+        const overrideToggle = document.getElementById('overrideToggle');
+        let   ovrDir         = 'none';
+
+        overrideBtn.addEventListener('click', () => {
+            const open = overridePanel.style.display !== 'none';
+            overridePanel.style.display = open ? 'none' : 'flex';
+            overrideBtn.classList.toggle('active', !open);
+        });
+
+        ovrDirGroup.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                ovrDirGroup.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                ovrDir = btn.dataset.dir;
+                if (display._overrideActive)
+                    display.enableOverride(ovrL1.value, ovrL2.value, ovrDir, parseInt(ovrSpeed.value));
+            });
+        });
+
+        ovrSpeed.addEventListener('change', () => {
+            if (display._overrideActive)
+                display.enableOverride(ovrL1.value, ovrL2.value, ovrDir, parseInt(ovrSpeed.value));
+        });
+
+        [ovrL1, ovrL2].forEach(inp => inp.addEventListener('input', () => {
+            if (display._overrideActive)
+                display.enableOverride(ovrL1.value, ovrL2.value, ovrDir, parseInt(ovrSpeed.value));
+        }));
+
+        overrideToggle.addEventListener('click', () => {
+            if (display._overrideActive) {
+                display.disableOverride();
+                overrideToggle.textContent = '▶ Activer';
+                overrideToggle.classList.remove('active');
+            } else {
+                display.enableOverride(ovrL1.value, ovrL2.value, ovrDir, parseInt(ovrSpeed.value));
+                overrideToggle.textContent = '⏹ Désactiver';
+                overrideToggle.classList.add('active');
+            }
+        });
+    }
+
     _masterRef.current = master;
     _masterRef.isLocal = master.isLocal;
     _audioMaster = master;

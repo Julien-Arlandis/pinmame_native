@@ -376,31 +376,26 @@ class GottliebDisplayEmulator {
         return s;
     }
 
-    enableOverride(l1, l2, dirL1, dirL2, speedMs) {
-        this._overrideL1 = (l1 || '').toUpperCase();
-        this._overrideL2 = (l2 || '').toUpperCase();
-        this._overrideDirL1 = dirL1 || 'none';
-        this._overrideDirL2 = dirL2 || 'none';
-        this._overrideOffsetL1 = 0;
-        this._overrideOffsetL2 = 0;
-        this._overrideActive = true;
-        if (this._overrideTimerL1) { clearInterval(this._overrideTimerL1); this._overrideTimerL1 = null; }
-        if (this._overrideTimerL2) { clearInterval(this._overrideTimerL2); this._overrideTimerL2 = null; }
+    _enableOverrideLine(n, text, dir, speedMs) {
+        const tKey = `_overrideTimerL${n}`, oKey = `_overrideOffsetL${n}`, dKey = `_overrideDirL${n}`, lKey = `_overrideL${n}`;
+        this[lKey] = (text || '').toUpperCase();
+        this[dKey] = dir || 'none';
+        this[oKey] = 0;
+        if (this[tKey]) { clearInterval(this[tKey]); this[tKey] = null; }
         this._applyOverride();
-        if (this._overrideDirL1 !== 'none') {
-            this._overrideTimerL1 = setInterval(() => {
-                if (this._overrideDirL1 === 'left') this._overrideOffsetL1++;
-                else this._overrideOffsetL1--;
+        if (this[dKey] !== 'none') {
+            this[tKey] = setInterval(() => {
+                if (this[dKey] === 'left') this[oKey]++;
+                else this[oKey]--;
                 this._applyOverride();
             }, speedMs || 100);
         }
-        if (this._overrideDirL2 !== 'none') {
-            this._overrideTimerL2 = setInterval(() => {
-                if (this._overrideDirL2 === 'left') this._overrideOffsetL2++;
-                else this._overrideOffsetL2--;
-                this._applyOverride();
-            }, speedMs || 100);
-        }
+    }
+
+    enableOverride(l1, l2, dirL1, dirL2, speedMs) {
+        this._overrideActive = true;
+        this._enableOverrideLine(1, l1, dirL1, speedMs);
+        this._enableOverrideLine(2, l2, dirL2, speedMs);
     }
 
     disableOverride() {
@@ -916,9 +911,11 @@ async function bootstrap() {
         const overrideToggle = document.getElementById('overrideToggle');
         let ovrDirL1 = 'none', ovrDirL2 = 'none';
 
-        const applyIfActive = () => {
-            if (display._overrideActive)
-                display.enableOverride(ovrL1.value, ovrL2.value, ovrDirL1, ovrDirL2, parseInt(ovrSpeed.value));
+        const applyLineIfActive = (n) => {
+            if (!display._overrideActive) return;
+            const text = n === 1 ? ovrL1.value : ovrL2.value;
+            const dir  = n === 1 ? ovrDirL1 : ovrDirL2;
+            display._enableOverrideLine(n, text, dir, parseInt(ovrSpeed.value));
         };
 
         overrideBtn.addEventListener('click', () => {
@@ -932,7 +929,7 @@ async function bootstrap() {
                 ovrDirGroupL1.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 ovrDirL1 = btn.dataset.dir;
-                applyIfActive();
+                applyLineIfActive(1);
             });
         });
 
@@ -941,12 +938,13 @@ async function bootstrap() {
                 ovrDirGroupL2.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
                 ovrDirL2 = btn.dataset.dir;
-                applyIfActive();
+                applyLineIfActive(2);
             });
         });
 
-        ovrSpeed.addEventListener('change', applyIfActive);
-        [ovrL1, ovrL2].forEach(inp => inp.addEventListener('input', applyIfActive));
+        ovrSpeed.addEventListener('change', () => { applyLineIfActive(1); applyLineIfActive(2); });
+        ovrL1.addEventListener('input', () => applyLineIfActive(1));
+        ovrL2.addEventListener('input', () => applyLineIfActive(2));
 
         overrideToggle.addEventListener('click', () => {
             if (display._overrideActive) {

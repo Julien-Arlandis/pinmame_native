@@ -914,15 +914,17 @@ async function bootstrap() {
         const ovrL2          = document.getElementById('ovrL2');
         const ovrDirGroupL1  = document.getElementById('ovrDirGroupL1');
         const ovrDirGroupL2  = document.getElementById('ovrDirGroupL2');
-        const ovrSpeed       = document.getElementById('ovrSpeed');
+        const ovrSpeedL1     = document.getElementById('ovrSpeedL1');
+        const ovrSpeedL2     = document.getElementById('ovrSpeedL2');
         const overrideToggle = document.getElementById('overrideToggle');
         let ovrDirL1 = 'none', ovrDirL2 = 'none';
 
         const applyLineIfActive = (n) => {
             if (!display._overrideActive) return;
-            const text = n === 1 ? ovrL1.value : ovrL2.value;
-            const dir  = n === 1 ? ovrDirL1 : ovrDirL2;
-            display._enableOverrideLine(n, text, dir, parseInt(ovrSpeed.value), false);
+            const text  = n === 1 ? ovrL1.value : ovrL2.value;
+            const dir   = n === 1 ? ovrDirL1 : ovrDirL2;
+            const speed = parseInt(n === 1 ? ovrSpeedL1.value : ovrSpeedL2.value);
+            display._enableOverrideLine(n, text, dir, speed, false);
         };
 
         overrideBtn.addEventListener('click', () => {
@@ -949,7 +951,8 @@ async function bootstrap() {
             });
         });
 
-        ovrSpeed.addEventListener('change', () => { applyLineIfActive(1); applyLineIfActive(2); });
+        ovrSpeedL1.addEventListener('change', () => applyLineIfActive(1));
+        ovrSpeedL2.addEventListener('change', () => applyLineIfActive(2));
         ovrL1.addEventListener('input', () => applyLineIfActive(1));
         ovrL2.addEventListener('input', () => applyLineIfActive(2));
 
@@ -959,7 +962,9 @@ async function bootstrap() {
                 overrideToggle.textContent = '▶ Activer';
                 overrideToggle.classList.remove('active');
             } else {
-                display.enableOverride(ovrL1.value, ovrL2.value, ovrDirL1, ovrDirL2, parseInt(ovrSpeed.value));
+                display._overrideActive = true;
+                display._enableOverrideLine(1, ovrL1.value, ovrDirL1, parseInt(ovrSpeedL1.value), true);
+                display._enableOverrideLine(2, ovrL2.value, ovrDirL2, parseInt(ovrSpeedL2.value), true);
                 overrideToggle.textContent = '⏹ Désactiver';
                 overrideToggle.classList.add('active');
             }

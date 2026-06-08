@@ -376,16 +376,16 @@ class GottliebDisplayEmulator {
         return s;
     }
 
-    _enableOverrideLine(n, text, dir, speedMs) {
+    _enableOverrideLine(n, text, dir, speedMs, resetOffset = true) {
         const tKey = `_overrideTimerL${n}`, oKey = `_overrideOffsetL${n}`, dKey = `_overrideDirL${n}`, lKey = `_overrideL${n}`;
         this[lKey] = (text || '').toUpperCase();
         this[dKey] = dir || 'none';
-        this[oKey] = 0;
+        if (resetOffset) this[oKey] = 0;
         if (this[tKey]) { clearInterval(this[tKey]); this[tKey] = null; }
         this._applyOverride();
         if (this[dKey] !== 'none') {
             this[tKey] = setInterval(() => {
-                if (this[dKey] === 'right') this[oKey]++;
+                if (this[dKey] === 'left') this[oKey]++;
                 else this[oKey]--;
                 this._applyOverride();
             }, speedMs || 100);
@@ -915,7 +915,7 @@ async function bootstrap() {
             if (!display._overrideActive) return;
             const text = n === 1 ? ovrL1.value : ovrL2.value;
             const dir  = n === 1 ? ovrDirL1 : ovrDirL2;
-            display._enableOverrideLine(n, text, dir, parseInt(ovrSpeed.value));
+            display._enableOverrideLine(n, text, dir, parseInt(ovrSpeed.value), false);
         };
 
         overrideBtn.addEventListener('click', () => {

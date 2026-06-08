@@ -216,6 +216,11 @@
             padding: 10px 14px 12px;
             box-sizing: border-box;
             display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .ovr-row {
+            display: flex;
             flex-wrap: wrap;
             gap: 10px;
             align-items: flex-end;
@@ -679,51 +684,55 @@
             <button id="overrideBtn">✏️ TEXTE</button>
         </div>
         <div id="overridePanel" class="display-override-panel" style="display:none;">
-            <div class="ovr-field">
-                <span class="ovr-label">Ligne 1</span>
-                <input id="ovrL1" class="ovr-input" type="text" maxlength="60" placeholder="20 car. max (défile si plus long)">
-            </div>
-            <div class="ovr-field">
-                <span class="ovr-label">Défilement L1</span>
-                <div class="mode-selector" id="ovrDirGroupL1">
-                    <button class="mode-btn" data-dir="left">◀◀</button>
-                    <button class="mode-btn active" data-dir="none">⏸</button>
-                    <button class="mode-btn" data-dir="right">▶▶</button>
+            <div class="ovr-row">
+                <div class="ovr-field">
+                    <span class="ovr-label">Ligne 1</span>
+                    <input id="ovrL1" class="ovr-input" type="text" maxlength="60" placeholder="20 car. max (défile si plus long)">
+                </div>
+                <div class="ovr-field">
+                    <span class="ovr-label">Défilement L1</span>
+                    <div class="mode-selector" id="ovrDirGroupL1">
+                        <button class="mode-btn" data-dir="left">◀◀</button>
+                        <button class="mode-btn active" data-dir="none">⏸</button>
+                        <button class="mode-btn" data-dir="right">▶▶</button>
+                    </div>
+                </div>
+                <div class="ovr-field">
+                    <span class="ovr-label">Vitesse L1</span>
+                    <select id="ovrSpeedL1" class="ovr-speed">
+                        <option value="200">Lent</option>
+                        <option value="100" selected>Normal</option>
+                        <option value="50">Rapide</option>
+                        <option value="25">Turbo</option>
+                    </select>
                 </div>
             </div>
-            <div class="ovr-field">
-                <span class="ovr-label">Vitesse L1</span>
-                <select id="ovrSpeedL1" class="ovr-speed">
-                    <option value="200">Lent</option>
-                    <option value="100" selected>Normal</option>
-                    <option value="50">Rapide</option>
-                    <option value="25">Turbo</option>
-                </select>
-            </div>
-            <div class="ovr-field">
-                <span class="ovr-label">Ligne 2</span>
-                <input id="ovrL2" class="ovr-input" type="text" maxlength="60" placeholder="20 car. max (défile si plus long)">
-            </div>
-            <div class="ovr-field">
-                <span class="ovr-label">Défilement L2</span>
-                <div class="mode-selector" id="ovrDirGroupL2">
-                    <button class="mode-btn" data-dir="left">◀◀</button>
-                    <button class="mode-btn active" data-dir="none">⏸</button>
-                    <button class="mode-btn" data-dir="right">▶▶</button>
+            <div class="ovr-row">
+                <div class="ovr-field">
+                    <span class="ovr-label">Ligne 2</span>
+                    <input id="ovrL2" class="ovr-input" type="text" maxlength="60" placeholder="20 car. max (défile si plus long)">
                 </div>
-            </div>
-            <div class="ovr-field">
-                <span class="ovr-label">Vitesse L2</span>
-                <select id="ovrSpeedL2" class="ovr-speed">
-                    <option value="200">Lent</option>
-                    <option value="100" selected>Normal</option>
-                    <option value="50">Rapide</option>
-                    <option value="25">Turbo</option>
-                </select>
-            </div>
-            <div class="ovr-field">
-                <span class="ovr-label">&nbsp;</span>
-                <button id="overrideToggle" class="btn-system">▶ Activer</button>
+                <div class="ovr-field">
+                    <span class="ovr-label">Défilement L2</span>
+                    <div class="mode-selector" id="ovrDirGroupL2">
+                        <button class="mode-btn" data-dir="left">◀◀</button>
+                        <button class="mode-btn active" data-dir="none">⏸</button>
+                        <button class="mode-btn" data-dir="right">▶▶</button>
+                    </div>
+                </div>
+                <div class="ovr-field">
+                    <span class="ovr-label">Vitesse L2</span>
+                    <select id="ovrSpeedL2" class="ovr-speed">
+                        <option value="200">Lent</option>
+                        <option value="100" selected>Normal</option>
+                        <option value="50">Rapide</option>
+                        <option value="25">Turbo</option>
+                    </select>
+                </div>
+                <div class="ovr-field">
+                    <span class="ovr-label">&nbsp;</span>
+                    <button id="overrideToggle" class="btn-system">▶ Activer</button>
+                </div>
             </div>
         </div>
     </div>

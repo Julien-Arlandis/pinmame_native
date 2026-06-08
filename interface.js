@@ -405,9 +405,16 @@ class GottliebDisplayEmulator {
         return doubled.slice(o, o + 20).padEnd(20, ' ');
     }
 
+    _centerText(text) {
+        const t = (text || '').slice(0, 20);
+        const left = Math.floor((20 - t.length) / 2);
+        return t.padStart(left + t.length, ' ').padEnd(20, ' ');
+    }
+
     _applyOverride() {
-        const w1 = this._getScrollWindow(this._overrideL1, this._overrideOffset);
-        const w2 = this._getScrollWindow(this._overrideL2, this._overrideOffset);
+        const fixed = this._overrideDir === 'none';
+        const w1 = fixed ? this._centerText(this._overrideL1) : this._getScrollWindow(this._overrideL1, this._overrideOffset);
+        const w2 = fixed ? this._centerText(this._overrideL2) : this._getScrollWindow(this._overrideL2, this._overrideOffset);
         for (let i = 0; i < 20; i++) {
             this.vfdCells[i]      = this.ascii2gottlieb[w1.charCodeAt(i) & 0x7F] || 0;
             this.vfdCells[20 + i] = this.ascii2gottlieb[w2.charCodeAt(i) & 0x7F] || 0;

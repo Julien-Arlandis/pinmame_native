@@ -286,25 +286,25 @@
         }
         #overrideBtn {
             position: absolute;
-            bottom: 6px;
-            right: 6px;
-            width: 28px;
+            bottom: 8px;
+            right: 8px;
             height: 28px;
-            font-size: 0.85rem;
-            padding: 0;
-            background: rgba(0,255,204,0.06);
-            border: 1px solid #1e3a1e;
+            padding: 0 10px;
+            font-size: 0.72rem;
+            font-family: monospace;
+            font-weight: bold;
+            letter-spacing: 1px;
+            background: rgba(0,255,204,0.12);
+            border: 1px solid #00ffcc;
             color: #00ffcc;
             border-radius: 4px;
             cursor: pointer;
-            line-height: 28px;
             text-align: center;
             z-index: 10;
-            opacity: 0.6;
-            transition: opacity 0.15s, background 0.15s;
+            transition: background 0.15s, color 0.15s;
         }
-        #overrideBtn:hover { opacity: 1; background: rgba(0,255,204,0.12); }
-        #overrideBtn.active { opacity: 1; background: rgba(255,50,50,0.12); border-color: #aa2200; color: #ff5533; }
+        #overrideBtn:hover { background: rgba(0,255,204,0.25); }
+        #overrideBtn.active { background: rgba(255,50,50,0.15); border-color: #ff5533; color: #ff5533; }
         #vfdCanvas {
             background: #020202;
             border-radius: 4px;
@@ -676,7 +676,7 @@
     <div class="display-container">
         <div class="canvas-wrapper">
             <canvas id="vfdCanvas" width="1120" height="220"></canvas>
-            <button id="overrideBtn" title="Écriture manuelle sur l'afficheur">✏️</button>
+            <button id="overrideBtn">✏️ TEXTE</button>
         </div>
         <div id="overridePanel" class="display-override-panel" style="display:none;">
             <div class="ovr-field">

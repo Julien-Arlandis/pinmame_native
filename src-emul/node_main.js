@@ -95,13 +95,17 @@ Logs
                 try {
                     const Speaker = require('speaker');
                     let spk = null;
-                    const queue = [], QUEUE_MAX = 16;
+                    const queue = [];
                     let draining = false;
+                    let queuedSamples = 0;
 
                     const flush = () => {
                         while (queue.length > 0 && spk) {
-                            const ok = spk.write(queue.shift());
+                            const buf = queue[0];
+                            const ok = spk.write(buf);
                             if (!ok) { draining = true; spk.once('drain', () => { draining = false; flush(); }); return; }
+                            queue.shift();
+                            queuedSamples -= buf.length / 4;
                         }
                     };
 
@@ -112,11 +116,14 @@ Logs
                     };
                     makeSpk();
 
-                    audioSink  = { write: buf => {
-                        while (queue.length >= QUEUE_MAX) queue.shift();
-                        queue.push(buf);
-                        if (!draining) flush();
-                    }};
+                    audioSink = {
+                        write(buf) {
+                            queue.push(buf);
+                            queuedSamples += buf.length / 4;
+                            if (!draining) flush();
+                        },
+                        get queued() { return queuedSamples; }
+                    };
                     audioLabel = 'speaker (npm)';
                 } catch (e) { info(`  Audio    : speaker non chargé — ${e.message}`); }
 
@@ -277,6 +284,14 @@ Logs
             }
 
             let emulator = makeEmulator();
+
+            // Pacing corrigé : envoie la profondeur réelle du queue Speaker toutes les 16ms.
+            // Plus fréquent que le pacing wall-clock de runtime.js (32ms) → prend le dessus.
+            // Sans ça, runtime.js estime la consommation par horloge murale et ignore le backpressure
+            // du Speaker, ce qui provoque des drops silencieux et du crackling.
+            if (audioSink && 'queued' in audioSink) {
+                setInterval(() => emulator.handleLine(`@audio:distance=${audioSink.queued}`), 16);
+            }
 
             // Logique commune WS + BLE : retourne true si la ligne a été traitée
             function handleClientLine(line, replyCb) {

@@ -380,7 +380,14 @@ class GottliebDisplayEmulator {
         const tKey = `_overrideTimerL${n}`, oKey = `_overrideOffsetL${n}`, dKey = `_overrideDirL${n}`, lKey = `_overrideL${n}`;
         this[lKey] = (text || '').toUpperCase();
         this[dKey] = dir || 'none';
-        if (resetOffset) this[oKey] = 0;
+        if (resetOffset) {
+            if ((dir || 'none') === 'none') {
+                const len = Math.min((text || '').length, 20);
+                this[oKey] = 20 - Math.floor((20 - len) / 2);
+            } else {
+                this[oKey] = 0;
+            }
+        }
         if (this[tKey]) { clearInterval(this[tKey]); this[tKey] = null; }
         this._applyOverride();
         if (this[dKey] !== 'none') {
@@ -421,8 +428,8 @@ class GottliebDisplayEmulator {
     }
 
     _applyOverride() {
-        const w1 = this._overrideDirL1 === 'none' ? this._centerText(this._overrideL1) : this._getScrollWindow(this._overrideL1, this._overrideOffsetL1);
-        const w2 = this._overrideDirL2 === 'none' ? this._centerText(this._overrideL2) : this._getScrollWindow(this._overrideL2, this._overrideOffsetL2);
+        const w1 = this._getScrollWindow(this._overrideL1, this._overrideOffsetL1);
+        const w2 = this._getScrollWindow(this._overrideL2, this._overrideOffsetL2);
         for (let i = 0; i < 20; i++) {
             this.vfdCells[i]      = this.ascii2gottlieb[w1.charCodeAt(i) & 0x7F] || 0;
             this.vfdCells[20 + i] = this.ascii2gottlieb[w2.charCodeAt(i) & 0x7F] || 0;

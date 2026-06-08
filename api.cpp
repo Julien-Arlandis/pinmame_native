@@ -404,6 +404,20 @@ extern "C" {
             memcpy(prev_segments, vfd_export, 40 * sizeof(uint16_t));
             EM_ASM({ if (window.pushWasmDisplay) window.pushWasmDisplay($0, $1); },
                    (uint32_t)g_shared_corridor, emulator_generation);
+            // Decode segments → ASCII text via core_ascii2seg16 reverse scan
+            char display_text[41];
+            for (int i = 0; i < 40; i++) {
+                uint16_t seg = coreGlobals.segments[i].w & 0xFFFF;
+                display_text[i] = ' ';
+                if (seg != 0) {
+                    for (int c = 0x20; c < 0x80; c++) {
+                        if (core_ascii2seg16[c] == seg) { display_text[i] = (char)c; break; }
+                    }
+                }
+            }
+            display_text[40] = '\0';
+            EM_ASM({ if (window.pushWasmDisplayText) window.pushWasmDisplayText(UTF8ToString($0), $1); },
+                   display_text, emulator_generation);
         }
 
         for (int sw = 0; sw < 80; sw++) { core_setSw(sw, g_shared_corridor[100 + sw]); }

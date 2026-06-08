@@ -14,9 +14,54 @@
 
 async function createWorkerPort() {
     const resp = await fetch('tilt');
-    const blob = new Blob([await resp.text()], { type: 'application/javascript' });
+    const arrayBuffer = await resp.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+
+    // Split JS text from binary WASM embedded after the /* __WASM__ marker
+    const markerBytes = new TextEncoder().encode('\n/* __WASM__\n');
+    let markerPos = -1;
+    outer: for (let i = bytes.length - markerBytes.length; i >= 0; i--) {
+        for (let j = 0; j < markerBytes.length; j++) {
+            if (bytes[i + j] !== markerBytes[j]) continue outer;
+        }
+        markerPos = i; break;
+    }
+
+    let wasmBytes = null;
+    const jsBytes = markerPos !== -1 ? bytes.subarray(0, markerPos) : bytes;
+
+    if (markerPos !== -1) {
+        const endMarker = new TextEncoder().encode('\n*/');
+        let endPos = -1;
+        outer2: for (let i = bytes.length - endMarker.length; i > markerPos; i--) {
+            for (let j = 0; j < endMarker.length; j++) {
+                if (bytes[i + j] !== endMarker[j]) continue outer2;
+            }
+            endPos = i; break;
+        }
+        if (endPos !== -1) {
+            const raw = bytes.subarray(markerPos + markerBytes.length, endPos);
+            // Unescape: *\/ (0x2A 0x5C 0x2F) → */ (0x2A 0x2F)
+            const out = new Uint8Array(raw.length);
+            let oi = 0;
+            for (let i = 0; i < raw.length; i++) {
+                if (raw[i] === 0x2A && raw[i+1] === 0x5C && raw[i+2] === 0x2F) {
+                    out[oi++] = 0x2A; out[oi++] = 0x2F; i += 2;
+                } else { out[oi++] = raw[i]; }
+            }
+            wasmBytes = out.subarray(0, oi);
+        }
+    }
+
+    const jsText = new TextDecoder().decode(jsBytes);
+    const blob = new Blob([jsText], { type: 'application/javascript' });
     const worker = new Worker(URL.createObjectURL(blob));
     let audioCallback = null;
+
+    if (wasmBytes) {
+        const buf = wasmBytes.buffer.slice(wasmBytes.byteOffset, wasmBytes.byteOffset + wasmBytes.byteLength);
+        worker.postMessage({ type: 'WASM_BINARY', data: buf }, [buf]);
+    }
 
     const { readable, writable: innerWritable } = new TransformStream();
     const lineWriter = innerWritable.getWriter();
@@ -562,7 +607,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.17';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.20';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();

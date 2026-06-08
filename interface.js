@@ -324,9 +324,12 @@ class GottliebDisplayEmulator {
         this._overrideActive = false;
         this._overrideL1 = '';
         this._overrideL2 = '';
-        this._overrideDir = 'none';
-        this._overrideOffset = 0;
-        this._overrideTimer = null;
+        this._overrideDirL1 = 'none';
+        this._overrideDirL2 = 'none';
+        this._overrideOffsetL1 = 0;
+        this._overrideOffsetL2 = 0;
+        this._overrideTimerL1 = null;
+        this._overrideTimerL2 = null;
         // Source de vérité unique — ASCII → segments PinMAME
         // Bits : a=0x0001 b=0x0002 c=0x0004 d=0x0008 e=0x0010 f=0x0020
         //        g1=0x0040 g2=0x0800 i=0x0100 j=0x0200 k=0x0400
@@ -373,18 +376,28 @@ class GottliebDisplayEmulator {
         return s;
     }
 
-    enableOverride(l1, l2, dir, speedMs) {
+    enableOverride(l1, l2, dirL1, dirL2, speedMs) {
         this._overrideL1 = (l1 || '').toUpperCase();
         this._overrideL2 = (l2 || '').toUpperCase();
-        this._overrideDir = dir || 'none';
-        this._overrideOffset = 0;
+        this._overrideDirL1 = dirL1 || 'none';
+        this._overrideDirL2 = dirL2 || 'none';
+        this._overrideOffsetL1 = 0;
+        this._overrideOffsetL2 = 0;
         this._overrideActive = true;
-        if (this._overrideTimer) { clearInterval(this._overrideTimer); this._overrideTimer = null; }
+        if (this._overrideTimerL1) { clearInterval(this._overrideTimerL1); this._overrideTimerL1 = null; }
+        if (this._overrideTimerL2) { clearInterval(this._overrideTimerL2); this._overrideTimerL2 = null; }
         this._applyOverride();
-        if (this._overrideDir !== 'none') {
-            this._overrideTimer = setInterval(() => {
-                if (this._overrideDir === 'left') this._overrideOffset++;
-                else this._overrideOffset--;
+        if (this._overrideDirL1 !== 'none') {
+            this._overrideTimerL1 = setInterval(() => {
+                if (this._overrideDirL1 === 'left') this._overrideOffsetL1++;
+                else this._overrideOffsetL1--;
+                this._applyOverride();
+            }, speedMs || 100);
+        }
+        if (this._overrideDirL2 !== 'none') {
+            this._overrideTimerL2 = setInterval(() => {
+                if (this._overrideDirL2 === 'left') this._overrideOffsetL2++;
+                else this._overrideOffsetL2--;
                 this._applyOverride();
             }, speedMs || 100);
         }
@@ -392,7 +405,8 @@ class GottliebDisplayEmulator {
 
     disableOverride() {
         this._overrideActive = false;
-        if (this._overrideTimer) { clearInterval(this._overrideTimer); this._overrideTimer = null; }
+        if (this._overrideTimerL1) { clearInterval(this._overrideTimerL1); this._overrideTimerL1 = null; }
+        if (this._overrideTimerL2) { clearInterval(this._overrideTimerL2); this._overrideTimerL2 = null; }
         this._dirty = true;
     }
 
@@ -412,9 +426,8 @@ class GottliebDisplayEmulator {
     }
 
     _applyOverride() {
-        const fixed = this._overrideDir === 'none';
-        const w1 = fixed ? this._centerText(this._overrideL1) : this._getScrollWindow(this._overrideL1, this._overrideOffset);
-        const w2 = fixed ? this._centerText(this._overrideL2) : this._getScrollWindow(this._overrideL2, this._overrideOffset);
+        const w1 = this._overrideDirL1 === 'none' ? this._centerText(this._overrideL1) : this._getScrollWindow(this._overrideL1, this._overrideOffsetL1);
+        const w2 = this._overrideDirL2 === 'none' ? this._centerText(this._overrideL2) : this._getScrollWindow(this._overrideL2, this._overrideOffsetL2);
         for (let i = 0; i < 20; i++) {
             this.vfdCells[i]      = this.ascii2gottlieb[w1.charCodeAt(i) & 0x7F] || 0;
             this.vfdCells[20 + i] = this.ascii2gottlieb[w2.charCodeAt(i) & 0x7F] || 0;
@@ -897,10 +910,16 @@ async function bootstrap() {
         const overridePanel  = document.getElementById('overridePanel');
         const ovrL1          = document.getElementById('ovrL1');
         const ovrL2          = document.getElementById('ovrL2');
-        const ovrDirGroup    = document.getElementById('ovrDirGroup');
+        const ovrDirGroupL1  = document.getElementById('ovrDirGroupL1');
+        const ovrDirGroupL2  = document.getElementById('ovrDirGroupL2');
         const ovrSpeed       = document.getElementById('ovrSpeed');
         const overrideToggle = document.getElementById('overrideToggle');
-        let   ovrDir         = 'none';
+        let ovrDirL1 = 'none', ovrDirL2 = 'none';
+
+        const applyIfActive = () => {
+            if (display._overrideActive)
+                display.enableOverride(ovrL1.value, ovrL2.value, ovrDirL1, ovrDirL2, parseInt(ovrSpeed.value));
+        };
 
         overrideBtn.addEventListener('click', () => {
             const open = overridePanel.style.display !== 'none';
@@ -908,25 +927,26 @@ async function bootstrap() {
             overrideBtn.classList.toggle('active', !open);
         });
 
-        ovrDirGroup.querySelectorAll('.mode-btn').forEach(btn => {
+        ovrDirGroupL1.querySelectorAll('.mode-btn').forEach(btn => {
             btn.addEventListener('click', () => {
-                ovrDirGroup.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+                ovrDirGroupL1.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
                 btn.classList.add('active');
-                ovrDir = btn.dataset.dir;
-                if (display._overrideActive)
-                    display.enableOverride(ovrL1.value, ovrL2.value, ovrDir, parseInt(ovrSpeed.value));
+                ovrDirL1 = btn.dataset.dir;
+                applyIfActive();
             });
         });
 
-        ovrSpeed.addEventListener('change', () => {
-            if (display._overrideActive)
-                display.enableOverride(ovrL1.value, ovrL2.value, ovrDir, parseInt(ovrSpeed.value));
+        ovrDirGroupL2.querySelectorAll('.mode-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                ovrDirGroupL2.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                ovrDirL2 = btn.dataset.dir;
+                applyIfActive();
+            });
         });
 
-        [ovrL1, ovrL2].forEach(inp => inp.addEventListener('input', () => {
-            if (display._overrideActive)
-                display.enableOverride(ovrL1.value, ovrL2.value, ovrDir, parseInt(ovrSpeed.value));
-        }));
+        ovrSpeed.addEventListener('change', applyIfActive);
+        [ovrL1, ovrL2].forEach(inp => inp.addEventListener('input', applyIfActive));
 
         overrideToggle.addEventListener('click', () => {
             if (display._overrideActive) {
@@ -934,7 +954,7 @@ async function bootstrap() {
                 overrideToggle.textContent = '▶ Activer';
                 overrideToggle.classList.remove('active');
             } else {
-                display.enableOverride(ovrL1.value, ovrL2.value, ovrDir, parseInt(ovrSpeed.value));
+                display.enableOverride(ovrL1.value, ovrL2.value, ovrDirL1, ovrDirL2, parseInt(ovrSpeed.value));
                 overrideToggle.textContent = '⏹ Désactiver';
                 overrideToggle.classList.add('active');
             }

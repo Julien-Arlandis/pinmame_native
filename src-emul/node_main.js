@@ -101,11 +101,10 @@ Logs
 
                     const flush = () => {
                         while (queue.length > 0 && spk) {
-                            const buf = queue[0];
+                            const buf = queue.shift();
+                            queuedSamples -= buf.length / 4;
                             const ok = spk.write(buf);
                             if (!ok) { draining = true; spk.once('drain', () => { draining = false; flush(); }); return; }
-                            queue.shift();
-                            queuedSamples -= buf.length / 4;
                         }
                     };
 
@@ -252,6 +251,7 @@ Logs
 
             function makeEmulator() {
                 return createEmulator({
+                    getBufferDepth: audioSink?.queued !== undefined ? () => audioSink.queued : null,
                     sendLine(channel, line) {
                         if (line.startsWith('@status:state=ready'))       lastStatusLine  = line;
                         if (line.startsWith('!display:action=raw&data=')) lastDisplayLine = line;
@@ -284,14 +284,6 @@ Logs
             }
 
             let emulator = makeEmulator();
-
-            // Pacing corrigé : envoie la profondeur réelle du queue Speaker toutes les 16ms.
-            // Plus fréquent que le pacing wall-clock de runtime.js (32ms) → prend le dessus.
-            // Sans ça, runtime.js estime la consommation par horloge murale et ignore le backpressure
-            // du Speaker, ce qui provoque des drops silencieux et du crackling.
-            if (audioSink && 'queued' in audioSink) {
-                setInterval(() => emulator.handleLine(`@audio:distance=${audioSink.queued}`), 16);
-            }
 
             // Logique commune WS + BLE : retourne true si la ligne a été traitée
             function handleClientLine(line, replyCb) {

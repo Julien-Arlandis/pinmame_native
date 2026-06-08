@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /* ================================================================
    PinMAME — bundle universel (navigateur Worker + Node.js CLI)
-   Généré le 2026-06-08T22:13:46.039Z
+   Généré le 2026-06-08T23:12:05.545Z
    Sources : src-emul/pinmame_web.js + pinmame_web.wasm + runtime.js
    ================================================================ */
 if (typeof process !== 'undefined' && typeof __filename !== 'undefined') {
@@ -5596,7 +5596,7 @@ function normalizeRomBytes(customRomBytes) {
 // sendLine(channel, line)  — envoie une ligne texte vers l'hôte
 // sendAudio(left, right)   — envoie des frames Float32Array vers l'hôte
 // loadRom(romName, baseUrl) → Promise<ArrayBuffer>
-function createEmulator({ sendLine, sendAudio, loadRom }) {
+function createEmulator({ sendLine, sendAudio, loadRom, getBufferDepth }) {
     const generation = ++_emulatorGeneration;
     let pinmameInstance = null;
     let vfdMemoryPointer = 0;
@@ -5748,8 +5748,15 @@ function createEmulator({ sendLine, sendAudio, loadRom }) {
         paceStart = Date.now();
         const pacingInterval = setInterval(() => {
             if (generation !== _emulatorGeneration) { clearInterval(pacingInterval); return; }
-            const consumed = Math.floor((Date.now() - paceStart) / 1000 * 44100);
-            handleLine(`@audio:distance=${Math.max(0, samplesProduced - consumed)}`);
+            let dist;
+            if (getBufferDepth) {
+                // Profondeur réelle du buffer de sortie fournie par le consommateur (Node Speaker, browser AudioContext…)
+                dist = getBufferDepth();
+            } else {
+                const consumed = Math.floor((Date.now() - paceStart) / 1000 * 44100);
+                dist = Math.max(0, samplesProduced - consumed);
+            }
+            handleLine(`@audio:distance=${dist}`);
         }, 32);
 
         const strAddr = vfdMemoryPointer + 1000;
@@ -5920,12 +5927,15 @@ Logs
                 try {
                     const Speaker = require('speaker');
                     let spk = null;
-                    const queue = [], QUEUE_MAX = 16;
+                    const queue = [];
                     let draining = false;
+                    let queuedSamples = 0;
 
                     const flush = () => {
                         while (queue.length > 0 && spk) {
-                            const ok = spk.write(queue.shift());
+                            const buf = queue.shift();
+                            queuedSamples -= buf.length / 4;
+                            const ok = spk.write(buf);
                             if (!ok) { draining = true; spk.once('drain', () => { draining = false; flush(); }); return; }
                         }
                     };
@@ -5937,11 +5947,14 @@ Logs
                     };
                     makeSpk();
 
-                    audioSink  = { write: buf => {
-                        while (queue.length >= QUEUE_MAX) queue.shift();
-                        queue.push(buf);
-                        if (!draining) flush();
-                    }};
+                    audioSink = {
+                        write(buf) {
+                            queue.push(buf);
+                            queuedSamples += buf.length / 4;
+                            if (!draining) flush();
+                        },
+                        get queued() { return queuedSamples; }
+                    };
                     audioLabel = 'speaker (npm)';
                 } catch (e) { info(`  Audio    : speaker non chargé — ${e.message}`); }
 
@@ -6070,6 +6083,7 @@ Logs
 
             function makeEmulator() {
                 return createEmulator({
+                    getBufferDepth: audioSink?.queued !== undefined ? () => audioSink.queued : null,
                     sendLine(channel, line) {
                         if (line.startsWith('@status:state=ready'))       lastStatusLine  = line;
                         if (line.startsWith('!display:action=raw&data=')) lastDisplayLine = line;

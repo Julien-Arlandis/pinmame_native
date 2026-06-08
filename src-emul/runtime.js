@@ -51,7 +51,7 @@ function normalizeRomBytes(customRomBytes) {
 // sendLine(channel, line)  — envoie une ligne texte vers l'hôte
 // sendAudio(left, right)   — envoie des frames Float32Array vers l'hôte
 // loadRom(romName, baseUrl) → Promise<ArrayBuffer>
-function createEmulator({ sendLine, sendAudio, loadRom }) {
+function createEmulator({ sendLine, sendAudio, loadRom, getBufferDepth }) {
     const generation = ++_emulatorGeneration;
     let pinmameInstance = null;
     let vfdMemoryPointer = 0;
@@ -203,8 +203,15 @@ function createEmulator({ sendLine, sendAudio, loadRom }) {
         paceStart = Date.now();
         const pacingInterval = setInterval(() => {
             if (generation !== _emulatorGeneration) { clearInterval(pacingInterval); return; }
-            const consumed = Math.floor((Date.now() - paceStart) / 1000 * 44100);
-            handleLine(`@audio:distance=${Math.max(0, samplesProduced - consumed)}`);
+            let dist;
+            if (getBufferDepth) {
+                // Profondeur réelle du buffer de sortie fournie par le consommateur (Node Speaker, browser AudioContext…)
+                dist = getBufferDepth();
+            } else {
+                const consumed = Math.floor((Date.now() - paceStart) / 1000 * 44100);
+                dist = Math.max(0, samplesProduced - consumed);
+            }
+            handleLine(`@audio:distance=${dist}`);
         }, 32);
 
         const strAddr = vfdMemoryPointer + 1000;

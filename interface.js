@@ -385,7 +385,7 @@ class GottliebDisplayEmulator {
         this._applyOverride();
         if (this[dKey] !== 'none') {
             this[tKey] = setInterval(() => {
-                if (this[dKey] === 'left') this[oKey]++;
+                if (this[dKey] === 'right') this[oKey]++;
                 else this[oKey]--;
                 this._applyOverride();
             }, speedMs || 100);

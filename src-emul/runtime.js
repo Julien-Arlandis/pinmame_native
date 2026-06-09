@@ -23,8 +23,8 @@ if (isWorker) {
 
 // Chargement de audio.js pour les environnements non-bundlés
 if (!_bundled) {
-    if (isWorker) importScripts('audio.js');
-    else if (isNode) require('./audio.js');
+    if (isWorker) importScripts('runtime-audio.js');
+    else if (isNode) require('./runtime-audio.js');
 }
 
 function readU32(heap, base) {

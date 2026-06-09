@@ -3,6 +3,13 @@
 #include <cstring>
 #include <emscripten.h>
 
+#ifndef __rolq
+#define __rolq(x,c) (((unsigned long long)(x) << (c)) | ((unsigned long long)(x) >> (64 - (c))))
+#endif
+#ifndef __rorq
+#define __rorq(x,c) (((unsigned long long)(x) >> (c)) | ((unsigned long long)(x) << (64 - (c))))
+#endif
+
 extern "C" {
 #include "driver.h"
 }

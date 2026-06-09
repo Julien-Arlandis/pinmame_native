@@ -12,6 +12,7 @@
 
 extern "C" {
 #include "driver.h"
+#include "sound/ym2151.h"
 }
 
 // ── Tailles des tampons ───────────────────────────────────────────────────────
@@ -76,6 +77,55 @@ extern "C" {
         else if (js_buffer_dist > 1600) emscripten_sleep(15);
         else                             emscripten_sleep(12);
     }
+
+    // ── Exports DAC pour JS ───────────────────────────────────────────────────
+    // ── Pont hardware YM2151 (OPM) ────────────────────────────────────────────
+    extern void stream_update(int stream, int min_interval);
+
+    static void (*g_mame_opm_irq_handler)(int, int) = nullptr;
+
+    static void native_jarek_irq_bridge(int state) {
+        if (g_mame_opm_irq_handler) { g_mame_opm_irq_handler(0, state); }
+    }
+
+    int OPMInit(int num, int clock, int rate, void (*timer_handler)(int, int, int, double), void (*irq_handler)(int, int)) {
+        g_mame_opm_irq_handler = irq_handler;
+        int res = YM2151Init(num, (double)clock, (double)rate);
+        YM2151SetIrqHandler(num, native_jarek_irq_bridge);
+        return res;
+    }
+
+    void OPMShutdown(void) { YM2151Shutdown(); }
+    void OPMResetChip(int num) { YM2151ResetChip(num); }
+
+    void OPMUpdateOne(int num, INT16 **buffer, int length) {
+        YM2151UpdateOne(num, buffer, length);
+    }
+
+    void OPMSetPortHander(int num, void (*PortWrite)(unsigned int offset, unsigned char data)) {}
+
+    int YM2151TimerOver(int num, int c) { return 0; }
+
+    static int g_gts80b_sound_reg_latch = 0;
+    void YM2151_register_port_0_w(offs_t offset, data8_t data) {
+        g_gts80b_sound_reg_latch = data;
+    }
+    void YM2151_data_port_0_w(offs_t offset, data8_t data) {
+        for (int i = 0; i < 4; i++) { stream_update(i, 0); }
+        YM2151WriteReg(0, g_gts80b_sound_reg_latch, data);
+    }
+
+    // ── Stubs OSD son + puces secondaires ─────────────────────────────────────
+    int osd_init_sound(void) { return 0; }
+    void proc_mechsounds(int p1, int p2) {}
+
+    int YM2203_sh_start(const struct MachineSound *msound) { return 0; }
+    void YM2203_sh_stop(void) {}
+    void YM2203_sh_reset(void) {}
+
+    int OKIM6295_sh_start(const struct MachineSound *msound) { return 0; }
+    void OKIM6295_sh_stop(void) {}
+    void OKIM6295_sh_update(void) {}
 
     // ── Exports DAC pour JS ───────────────────────────────────────────────────
     EMSCRIPTEN_KEEPALIVE

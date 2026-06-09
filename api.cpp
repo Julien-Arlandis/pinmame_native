@@ -26,8 +26,7 @@ extern "C" {
 #include "driver.h"
 #include "core.h"
 #include "usrintrf.h"
-#include "sound/ym2151.h" 
-#include "sound/samples.h" 
+#include "sound/samples.h"
 #include "inptport.h" 
 }
 
@@ -104,46 +103,6 @@ extern "C" void logerror(const char* text, ...) {
 }
 
 // =========================================================================
-// 🌟 1. LE PONT MATÉRIEL YAMAHA AVEC FLUSH SYNCHRONE 🌟
-// =========================================================================
-extern "C" {
-    extern void stream_update(int stream, int min_interval); 
-
-    static void (*g_mame_opm_irq_handler)(int, int) = nullptr;
-
-    static void native_jarek_irq_bridge(int state) {
-        if (g_mame_opm_irq_handler) { g_mame_opm_irq_handler(0, state); }
-    }
-
-    int OPMInit(int num, int clock, int rate, void (*timer_handler)(int, int, int, double), void (*irq_handler)(int, int)) {
-        g_mame_opm_irq_handler = irq_handler;
-        int res = YM2151Init(num, (double)clock, (double)rate);
-        YM2151SetIrqHandler(num, native_jarek_irq_bridge);
-        return res;
-    }
-
-    void OPMShutdown(void) { YM2151Shutdown(); }
-    void OPMResetChip(int num) { YM2151ResetChip(num); }
-    
-    void OPMUpdateOne(int num, INT16 **buffer, int length) {
-        YM2151UpdateOne(num, buffer, length);
-    }
-    
-    void OPMSetPortHander(int num, void (*PortWrite)(unsigned int offset, unsigned char data)) {}
-
-    int YM2151TimerOver(int num, int c) { return 0; }
-
-    static int g_gts80b_sound_reg_latch = 0;
-    void YM2151_register_port_0_w(offs_t offset, data8_t data) {
-        g_gts80b_sound_reg_latch = data;
-    }
-    void YM2151_data_port_0_w(offs_t offset, data8_t data) {
-        for(int i = 0; i < 4; i++) { stream_update(i, 0); }
-        YM2151WriteReg(0, g_gts80b_sound_reg_latch, data);
-    }
-}
-
-// =========================================================================
 // 🌟 2. PONT SYSTÈME OSD MAME 🌟
 // =========================================================================
 extern "C" {
@@ -193,7 +152,6 @@ extern "C" {
     void osd_pause(int paused) {}
     int osd_skip_this_frame(void) { return 0; }
     int osd_init_video(void) { return 0; }
-    int osd_init_sound(void) { return 0; }
     int osd_init_input(void) { return 0; }
 
     int osd_create_display(const struct osd_create_params *params, UINT32 *rgb_components) { return 0; }
@@ -263,16 +221,7 @@ extern "C" {
     int handle_user_interface(struct mame_bitmap *bitmap) { return 0; }
     int artwork_load_artwork_file(void) { return 0; }
     void pic8259_0_issue_irq(int p1) {}
-    void proc_mechsounds(int p1, int p2) {} 
     void throttle_speed_part(int p1, int p2) {}
-
-    int YM2203_sh_start(const struct MachineSound *msound) { return 0; }
-    void YM2203_sh_stop(void) {}
-    void YM2203_sh_reset(void) {}
-    
-    int OKIM6295_sh_start(const struct MachineSound *msound) { return 0; }
-    void OKIM6295_sh_stop(void) {}
-    void OKIM6295_sh_update(void) {}
 
     int video_init(void) { return 0; }
 

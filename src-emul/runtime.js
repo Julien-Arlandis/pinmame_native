@@ -92,7 +92,7 @@ function createEmulator({ sendLine, sendAudio, loadRom }) {
         // Mixer la contribution DAC (jeux sans YM2151 : Robowars, b2…)
         for (let chip = 0; chip < 2; chip++) {
             const n = pinmameInstance._api_get_dac_count(chip);
-            if (n === 0) continue;
+            if (n === 0) { lastFrameDacOut[chip] = 0; continue; }
 
             const dacPtr32 = pinmameInstance._api_get_dac_buffer(chip) >>> 2;
 

@@ -473,8 +473,8 @@ extern "C" {
         memcpy(&js_buffer_dist, &g_shared_corridor[1070], 4);
         if (js_buffer_dist > 8192) emscripten_sleep(20);
         else if (js_buffer_dist > 4096) emscripten_sleep(17);
-        else if (js_buffer_dist > 1600) emscripten_sleep(15);
-        else emscripten_sleep(10); // floor ~83fps : garantit le remplissage du buffer à vide
+        else if (js_buffer_dist > 1600) emscripten_sleep(16); // ~62fps ≈ 1.04× real-time
+        else emscripten_sleep(14); // emergency fill: ~71fps si buffer presque vide
     }
 
     void osd_update_video_and_audio(struct mame_display *display) {
@@ -779,7 +779,7 @@ extern "C" void __real_DAC_DC_offset_correction_data_16_w(int num, int data);
 extern "C" void __wrap_DAC_DC_offset_correction_data_16_w(int num, int data) {
     if ((unsigned)num < 2 && g_dac_n[num] < DAC_BUF_MAX) {
         // Réplique exacte de dac.c : intégrateur DC-offset (0..65535 → -32768..32767)
-        g_dac_integrator[num] = g_dac_integrator[num] * 0.995 + (data - g_dac_prev_data[num]);
+        g_dac_integrator[num] = g_dac_integrator[num] * 0.990 + (data - g_dac_prev_data[num]);
         g_dac_prev_data[num]  = data;
         int out = (int)g_dac_integrator[num];
         if (out < -32768) out = -32768;

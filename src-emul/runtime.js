@@ -74,12 +74,6 @@ function createEmulator({ sendLine, sendAudio, loadRom }) {
 
     // Dernier sample DAC de la frame précédente, pour continuité inter-frames
     const lastFrameDacOut = [0.0, 0.0];
-    // État du filtre passe-bas anti-aliasing DAC (1-pôle, fc ≈ 7 kHz @ 44100 Hz)
-    // Lisse les artefacts "escalier" de l'upsampling ~15625 Hz → 44100 Hz
-    // sans affecter le caractère percussif (gain ≈ -3 dB à 7 kHz, -10 dB à 12 kHz)
-    const dacLpState = [0.0, 0.0];
-    // a = 1 - exp(-2π*7000/44100) ≈ 0.631  →  pôle à 0.369
-    const DAC_LP_A = 0.631;
 
     globalThis.pushWasmAudio = function(ptr, count, callerGen) {
         if (callerGen !== generation) return;
@@ -114,7 +108,6 @@ function createEmulator({ sendLine, sendAudio, loadRom }) {
             // Points de référence : [lastFrameDacOut, processed[0..n-1]] = n+1 points
             const prevVal = lastFrameDacOut[chip];
             const scale   = n / (frames - 1);  // n intervals sur frames-1 pas
-            let   lp      = dacLpState[chip];
             for (let s = 0; s < frames; s++) {
                 const pos  = s * scale;
                 const i0   = pos | 0;           // 0 = frame précédente, 1..n = processed[0..n-1]
@@ -122,13 +115,10 @@ function createEmulator({ sendLine, sendAudio, loadRom }) {
                 const frac = pos - i0;
                 const v0   = i0 === 0 ? prevVal : processed[i0 - 1];
                 const v1   = i1 === 0 ? prevVal : processed[i1 - 1];
-                const raw  = v0 * (1 - frac) + v1 * frac;
-                // Filtre passe-bas 1-pôle : lisse les artefacts d'upsampling DAC
-                lp = (1 - DAC_LP_A) * lp + DAC_LP_A * raw;
-                left[s]  = Math.max(-1, Math.min(1, left[s]  + lp));
-                right[s] = Math.max(-1, Math.min(1, right[s] + lp));
+                const dac  = v0 * (1 - frac) + v1 * frac;
+                left[s]  = Math.max(-1, Math.min(1, left[s]  + dac));
+                right[s] = Math.max(-1, Math.min(1, right[s] + dac));
             }
-            dacLpState[chip]      = lp;
             lastFrameDacOut[chip] = processed[n - 1];
 
             pinmameInstance._api_reset_dac_buffer(chip);

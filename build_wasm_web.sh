@@ -51,7 +51,8 @@ API_FLAGS=(
 )
 
 echo "[*] [V93.4] Compilation du pont API C++..."
-emcc "${API_FLAGS[@]}" -c api.cpp -o "$WASM_TEMP_OBJ_DIR/api.o"
+emcc "${API_FLAGS[@]}" -c api.cpp   -o "$WASM_TEMP_OBJ_DIR/api.o"
+emcc "${API_FLAGS[@]}" -c audio.cpp -o "$WASM_TEMP_OBJ_DIR/audio.o"
 
 # =========================================================================
 # 🔗 ÉDITION DES LIENS ET GÉNÉRATION WEBASSEMBLY
@@ -77,7 +78,7 @@ LINK_FLAGS=(
 )
 
 echo "[*] [V93.4] Liaison des archives et injection des symboles modulaire..."
-emcc "$WASM_TEMP_OBJ_DIR/api.o" libpinmame_wasm.a "${LINK_FLAGS[@]}" \
+emcc "$WASM_TEMP_OBJ_DIR/api.o" "$WASM_TEMP_OBJ_DIR/audio.o" libpinmame_wasm.a "${LINK_FLAGS[@]}" \
     -Wl,--wrap=run_machine \
     -Wl,--wrap=DAC_DC_offset_correction_data_16_w \
     -o src-emul/pinmame_web.js

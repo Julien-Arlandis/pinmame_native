@@ -10,7 +10,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdarg> 
-#include <emscripten.h> 
+#include <emscripten.h>
+#include "audio.h"
 
 #ifndef __rolq
 #define __rolq(x,c) (((unsigned long long)(x) << (c)) | ((unsigned long long)(x) >> (64 - (c))))
@@ -35,29 +36,6 @@ static uint8_t g_shared_corridor[4096] = {0};
 static char g_display_text[100] = "Analyseur Global Actif";
 static uint32_t g_font_security_anchor[10000] = {0}; 
 static int g_selected_game_index = 0;
-
-// =========================================================================
-// 🎵 TAMPONS AUDIO MAME -> WEBASSEMBLY
-// =========================================================================
-#define C_AUDIO_BUFFER_MAX 131072
-#define SAMPLES_PER_FRAME 735
-
-
-// ── DAC push buffer ───────────────────────────────────────────────────────────
-// Intercepté via --wrap=DAC_DC_offset_correction_data_16_w.
-// L'intégrateur DC-offset est appliqué ici (réplique exacte de dac.c ligne 90),
-// donc g_dac_buf stocke des valeurs déjà traitées en -32768..32767.
-// JS normalise simplement par 32768 dans pushWasmAudio.
-#define DAC_BUF_MAX 4096
-static int    g_dac_buf[2][DAC_BUF_MAX];
-static int    g_dac_n[2]          = {0, 0};
-static double g_dac_integrator[2] = {0.0, 0.0};
-static int    g_dac_prev_data[2]  = {0, 0};
-
-static INT16 g_audio_ring_buffer[C_AUDIO_BUFFER_MAX];
-static int g_audio_write_idx = 0;
-static int g_audio_read_idx = 0; 
-static INT16 g_linear_audio_buffer[C_AUDIO_BUFFER_MAX];
 
 // =========================================================================
 // 🛰️ STRUCTURE ET TAMPON FIFO DU PROTOCOLE ASCII EXTRAIT
@@ -87,8 +65,6 @@ static void push_display_event(uint8_t pos, uint8_t ascii, uint8_t action) {
     g_display_queue[g_display_write_ptr].action = action;
     g_display_write_ptr = next_write;
 }
-
-extern "C" void emscripten_sleep(unsigned int ms);
 
 // NOP handlers for WASM table indices 29-31 that fall in the "unknown static" range
 // (> STATIC_BANKMAX=24 but not RAM/ROM/RAMROM/NOP). These are needed because
@@ -227,20 +203,6 @@ extern "C" {
     void osd_free_colors(void) {}
     int osd_display_loading_rom_message(const char *name, struct rom_load_data *romdata) { return 0; }
     
-    int osd_start_audio_stream(int stereo) { return SAMPLES_PER_FRAME; }
-
-    int osd_update_audio_stream(INT16 *buffer) {
-        int shorts_to_copy = SAMPLES_PER_FRAME * 2;
-        for (int i = 0; i < shorts_to_copy; i++) {
-            g_audio_ring_buffer[g_audio_write_idx] = buffer[i];
-            g_audio_write_idx = (g_audio_write_idx + 1) % C_AUDIO_BUFFER_MAX;
-        }
-        return SAMPLES_PER_FRAME;
-    }
-
-    void osd_stop_audio_stream(void) {}
-    void osd_sound_enable(int enable) {}
-
     struct GfxElement *builduifont(void) { return (struct GfxElement *)g_font_security_anchor; }
     struct osd_bitmap* artwork_get_ui_bitmap(void) { return (struct osd_bitmap*)g_dummy_buffer; }
     void init_user_interface(void) {} 
@@ -457,24 +419,11 @@ extern "C" {
             EM_ASM({ if (window.postWasmLog) { window.postWasmLog($0, $1); } }, sound_user_cmd, emulator_generation);
         }
 
-        int pending_samples = (g_audio_write_idx - g_audio_read_idx + C_AUDIO_BUFFER_MAX) % C_AUDIO_BUFFER_MAX;
-        if (pending_samples > 0) {
-            if (pending_samples > 4096) pending_samples = 4096;
-            for (int i = 0; i < pending_samples; i++) {
-                g_linear_audio_buffer[i] = g_audio_ring_buffer[g_audio_read_idx];
-                g_audio_read_idx = (g_audio_read_idx + 1) % C_AUDIO_BUFFER_MAX;
-            }
-            EM_ASM({
-                if (window.pushWasmAudio) { window.pushWasmAudio($0, $1, $2); }
-            }, (uint32_t)g_linear_audio_buffer, pending_samples, emulator_generation);
-        }
+        audio_push_frame(emulator_generation);
 
         uint32_t js_buffer_dist = 0;
         memcpy(&js_buffer_dist, &g_shared_corridor[1070], 4);
-        if (js_buffer_dist > 8192) emscripten_sleep(20);
-        else if (js_buffer_dist > 4096) emscripten_sleep(17);
-        else if (js_buffer_dist > 1600) emscripten_sleep(16); // ~62fps ≈ 1.04× real-time
-        else emscripten_sleep(14); // emergency fill: ~71fps si buffer presque vide
+        audio_frame_pacing(js_buffer_dist);
     }
 
     void osd_update_video_and_audio(struct mame_display *display) {
@@ -763,30 +712,5 @@ extern "C" {
         run_game(game_index);
     }
 
-    // ── Exports DAC push buffer ───────────────────────────────────────────────
-    EMSCRIPTEN_KEEPALIVE
-    int api_get_dac_count(int chip) { return (unsigned)chip < 2 ? g_dac_n[chip] : 0; }
-
-    EMSCRIPTEN_KEEPALIVE
-    int* api_get_dac_buffer(int chip) { return (unsigned)chip < 2 ? g_dac_buf[chip] : nullptr; }
-
-    EMSCRIPTEN_KEEPALIVE
-    void api_reset_dac_buffer(int chip) { if ((unsigned)chip < 2) g_dac_n[chip] = 0; }
-}
-
-// ── Wrapper --wrap=DAC_DC_offset_correction_data_16_w ────────────────────────
-extern "C" void __real_DAC_DC_offset_correction_data_16_w(int num, int data);
-extern "C" void __wrap_DAC_DC_offset_correction_data_16_w(int num, int data) {
-    if ((unsigned)num < 2 && g_dac_n[num] < DAC_BUF_MAX) {
-        // Réplique exacte de dac.c : intégrateur DC-offset (0..65535 → -32768..32767)
-        g_dac_integrator[num] = g_dac_integrator[num] * 0.990 + (data - g_dac_prev_data[num]);
-        g_dac_prev_data[num]  = data;
-        int out = (int)g_dac_integrator[num];
-        if (out < -32768) out = -32768;
-        else if (out > 32767) out = 32767;
-        g_dac_buf[num][g_dac_n[num]++] = out;
-    }
-    // __real_ NON appelé : le stream DAC MAME reste à 0.
-    // JS normalise simplement par 32768 dans pushWasmAudio.
 }
 

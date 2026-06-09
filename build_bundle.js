@@ -10,6 +10,7 @@ const OUT   = path.join(__dirname, 'tilt');
 
 const wasmBuf    = fs.readFileSync(path.join(SRC, 'pinmame_web.wasm'));
 const webJs      = fs.readFileSync(path.join(SRC, 'pinmame_web.js'),  'utf8');
+const audioJs    = fs.readFileSync(path.join(SRC, 'audio.js'),    'utf8');
 const runtimeJs  = fs.readFileSync(path.join(SRC, 'runtime.js'),  'utf8');
 const nodeMainJs = fs.readFileSync(path.join(SRC, 'node_main.js'), 'utf8');
 
@@ -63,7 +64,7 @@ const jsText = `#!/usr/bin/env node
 /* ================================================================
    PinMAME — bundle universel (navigateur Worker + Node.js CLI)
    Généré le ${new Date().toISOString()}
-   Sources : src-emul/pinmame_web.js + pinmame_web.wasm + runtime.js
+   Sources : src-emul/pinmame_web.js + pinmame_web.wasm + audio.js + runtime.js
    ================================================================ */
 ${nodeExtract}
 
@@ -96,6 +97,8 @@ if (typeof process !== 'undefined' && typeof require !== 'undefined' &&
 }
 
 ${webJs}
+
+${audioJs}
 
 ${bundledRuntimeJs}
 

@@ -57,7 +57,7 @@ function normalizeRomBytes(customRomBytes) {
 // sendLine(channel, line)  — envoie une ligne texte vers l'hôte
 // sendAudio(left, right)   — envoie des frames Float32Array vers l'hôte
 // loadRom(romName, baseUrl) → Promise<ArrayBuffer>
-function createEmulator({ sendLine, sendAudio, loadRom }) {
+function createEmulator({ sendLine, sendAudio, sendCapture, loadRom }) {
     const generation = ++_emulatorGeneration;
     let pinmameInstance = null;
     let vfdMemoryPointer = 0;
@@ -130,6 +130,7 @@ function createEmulator({ sendLine, sendAudio, loadRom }) {
         const audio = createAudioProcessor({
             pinmameInstance: instance,
             sendAudio,
+            sendCapture,
             generation,
             getEmulatorGeneration: () => _emulatorGeneration
         });
@@ -185,6 +186,15 @@ function createEmulator({ sendLine, sendAudio, loadRom }) {
             p = new URLSearchParams(line.slice(7));
             const dist = parseInt(p.get('distance'));
             if (!isNaN(dist)) writeU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1070, dist);
+            const chip = parseFloat(p.get('chip')), dac = parseFloat(p.get('dac'));
+            if (!isNaN(chip) && !isNaN(dac) && globalThis.setAudioMix) globalThis.setAudioMix(chip, dac);
+            const sep = p.get('sep');
+            if (sep !== null && globalThis.setAudioSep) globalThis.setAudioSep(sep === '1');
+        } else if (line.startsWith('@capture:')) {
+            p = new URLSearchParams(line.slice(9));
+            const action = p.get('action');
+            if (action === 'start' && globalThis.startCapture) globalThis.startCapture();
+            else if (action === 'stop' && globalThis.stopCapture) globalThis.stopCapture();
         }
     }
 
@@ -204,8 +214,9 @@ if (isWorker) {
         if (msg.type === 'WASM_BINARY') {
             globalThis.__PINMAME_WASM_BINARY__ = new Uint8Array(msg.data);
             emulator = createEmulator({
-                sendLine:  (ch, line) => self.postMessage({ channel: ch, line }),
-                sendAudio: (l, r)    => self.postMessage({ channel: 'audio', left: l, right: r }),
+                sendLine:    (ch, line) => self.postMessage({ channel: ch, line }),
+                sendAudio:   (l, r)     => self.postMessage({ channel: 'audio', left: l, right: r }),
+                sendCapture: (d)        => self.postMessage({ channel: 'capture', ym_L: d.ym_L, ym_R: d.ym_R, dac: d.dac }, [d.ym_L.buffer, d.ym_R.buffer, d.dac.buffer]),
                 loadRom:   async (romName, baseUrl) => {
                     const url = baseUrl ? new URL(`roms/${romName}.zip`, baseUrl).href : `roms/${romName}.zip`;
                     const resp = await fetch(url);

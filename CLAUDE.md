@@ -10,3 +10,4 @@ C'est une base externe. Toute correction passe exclusivement par :
 - `index.html`
 
 Demander explicitement l'autorisation avant toute exception.
+Écris et pense toujours en Français !

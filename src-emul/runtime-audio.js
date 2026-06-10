@@ -24,10 +24,16 @@ function createAudioProcessor({ pinmameInstance: P, sendAudio, sendCapture, gene
         const n = count >> 1, h = ptr >> 1;
 
         const ym_L = new Float32Array(n), ym_R = new Float32Array(n);
+        let sumL = 0, sumR = 0;
         for (let j = 0; j < n; j++) {
             ym_L[j] = P.HEAP16[h + j * 2]     / 32768;
             ym_R[j] = P.HEAP16[h + j * 2 + 1] / 32768;
+            sumL += ym_L[j]; sumR += ym_R[j];
         }
+        // Soustrait la moyenne du bloc : simule les condensateurs de couplage du hardware réel.
+        // L'AY-8910 (PSG non-signé) sort [0,V] ; les condos centrent à [-V/2,+V/2].
+        const dcL = sumL / n, dcR = sumR / n;
+        for (let j = 0; j < n; j++) { ym_L[j] -= dcL; ym_R[j] -= dcR; }
 
         const dac = new Float32Array(n);
         for (let c = 0; c < 2; c++) {

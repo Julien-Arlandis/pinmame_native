@@ -11,7 +11,6 @@
 #include <cstring>
 #include <cstdarg> 
 #include <emscripten.h>
-#include "audio.h"
 
 #ifndef __rolq
 #define __rolq(x,c) (((unsigned long long)(x) << (c)) | ((unsigned long long)(x) >> (64 - (c))))
@@ -24,11 +23,22 @@ typedef uint8_t BMTYPE;
 
 extern "C" {
 #include "driver.h"
+#include "sound/ym2151.h"
 #include "core.h"
 #include "usrintrf.h"
 #include "sound/samples.h"
 #include "inptport.h" 
 }
+
+#define ABMAX 131072
+#define SPF   735
+#define DMAX  4096
+
+static INT16 g_ring[ABMAX], g_lin[DMAX];
+static int   g_wi = 0, g_ri = 0;
+static int   g_dac[2][DMAX], g_dn[2] = {};
+
+extern "C" void stream_update(int, int);
 
 static uint8_t g_dummy_buffer[1024 * 1024] = {0}; 
 static uint8_t g_shared_corridor[4096] = {0};      
@@ -275,6 +285,57 @@ extern "C" {
         return ev;
     }
 
+    static int g_stereo = 1;
+    int osd_start_audio_stream(int stereo) { g_stereo = stereo; return SPF; }
+    int osd_update_audio_stream(INT16 *b) {
+        if (g_stereo) {
+            for (int i = 0; i < SPF * 2; i++) { g_ring[g_wi] = b[i]; g_wi = (g_wi + 1) % ABMAX; }
+        } else {
+            // mono : MAME ne fournit que SPF samples — on duplique L=R pour garder le format stéréo
+            for (int i = 0; i < SPF; i++) {
+                g_ring[g_wi] = b[i]; g_wi = (g_wi + 1) % ABMAX;
+                g_ring[g_wi] = b[i]; g_wi = (g_wi + 1) % ABMAX;
+            }
+        }
+        return SPF;
+    }
+    void osd_stop_audio_stream() {}
+    void osd_sound_enable(int) {}
+    int  osd_init_sound() { return 0; }
+    void proc_mechsounds(int, int) {}
+    int  YM2203_sh_start(const struct MachineSound *) { return 0; }
+    void YM2203_sh_stop() {} void YM2203_sh_reset() {}
+    int  OKIM6295_sh_start(const struct MachineSound *) { return 0; }
+    void OKIM6295_sh_stop() {} void OKIM6295_sh_update() {}
+
+    void audio_push_frame(uint32_t gen) {
+        int n = (g_wi - g_ri + ABMAX) % ABMAX;
+        if (!n) return;
+        if (n > DMAX) n = DMAX;
+        for (int i = 0; i < n; i++) { g_lin[i] = g_ring[g_ri]; g_ri = (g_ri + 1) % ABMAX; }
+        EM_ASM({ if (window.pushWasmAudio) window.pushWasmAudio($0, $1, $2); }, (uint32_t)g_lin, n, gen);
+    }
+
+    static void (*g_irq)(int, int) = nullptr;
+    static void irq_bridge(int s) { if (g_irq) g_irq(0, s); }
+    int OPMInit(int n, int c, int r, void (*)(int,int,int,double), void (*ih)(int,int)) {
+        g_irq = ih; int res = YM2151Init(n,(double)c,(double)r); YM2151SetIrqHandler(n,irq_bridge); return res;
+    }
+    void OPMShutdown() { YM2151Shutdown(); }
+    void OPMResetChip(int n) { YM2151ResetChip(n); }
+    void OPMUpdateOne(int n, INT16 **b, int l) { YM2151UpdateOne(n, b, l); }
+    void OPMSetPortHander(int, void (*)(unsigned, unsigned char)) {}
+    int  YM2151TimerOver(int, int) { return 0; }
+    static int g_reg = 0;
+    void YM2151_register_port_0_w(offs_t, data8_t d) { g_reg = d; }
+    void YM2151_data_port_0_w(offs_t, data8_t d) {
+        for (int i = 0; i < 4; i++) stream_update(i, 0);
+        YM2151WriteReg(0, g_reg, d);
+    }
+    EMSCRIPTEN_KEEPALIVE int  api_get_dac_count(int c)   { return (unsigned)c < 2 ? g_dn[c] : 0; }
+    EMSCRIPTEN_KEEPALIVE int* api_get_dac_buffer(int c)   { return (unsigned)c < 2 ? g_dac[c] : nullptr; }
+    EMSCRIPTEN_KEEPALIVE void api_reset_dac_buffer(int c) { if ((unsigned)c < 2) g_dn[c] = 0; }
+
     void artwork_update_video_and_audio(struct mame_display *display) {
         static uint16_t prev_segments[40] = {};
         static uint8_t  prev_lamps[12]    = {};
@@ -372,10 +433,7 @@ extern "C" {
 
         uint32_t js_buffer_dist = 0;
         memcpy(&js_buffer_dist, &g_shared_corridor[1070], 4);
-        if      (js_buffer_dist > 8192) emscripten_sleep(20);
-        else if (js_buffer_dist > 4096) emscripten_sleep(17);
-        else if (js_buffer_dist > 1600) emscripten_sleep(15);
-        else                             emscripten_sleep(8);
+        emscripten_sleep(8 + js_buffer_dist / 512);
     }
 
     void osd_update_video_and_audio(struct mame_display *display) {
@@ -664,5 +722,10 @@ extern "C" {
         run_game(game_index);
     }
 
+}
+
+extern "C" void __wrap_DAC_DC_offset_correction_data_16_w(int n, int d) {
+    if ((unsigned)n < 2 && g_dn[n] < DMAX)
+        g_dac[n][g_dn[n]++] = d;
 }
 

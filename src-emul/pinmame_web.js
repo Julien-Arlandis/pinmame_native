@@ -5134,18 +5134,21 @@ function checkIncomingModuleAPI() {
 var ASM_CONSTS = {
   368516: () => { if (window.postWasmLog) window.postWasmLog("osd_exit called"); },  
  368583: () => { throw new Error("PinMAME: emulation stopped"); },  
- 368634: ($0) => { if (window.postWasmSoundChips) window.postWasmSoundChips(UTF8ToString($0)); },  
- 368714: ($0, $1) => { if (window.pushWasmDisplay) window.pushWasmDisplay($0, $1); },  
- 368778: ($0, $1) => { if (window.pushWasmDisplayText) window.pushWasmDisplayText(UTF8ToString($0), $1); },  
- 368864: ($0, $1) => { if (window.pushWasmLamps) window.pushWasmLamps($0, $1); },  
- 368924: ($0, $1) => { if (window.pushWasmSolens) window.pushWasmSolens($0, $1); },  
- 368986: ($0, $1) => { if (window.postWasmLog) { window.postWasmLog($0, $1); } },  
- 369046: ($0, $1, $2) => { if (window.pushWasmAudio) window.pushWasmAudio($0, $1, $2); }
+ 368634: ($0, $1, $2) => { if (window.pushWasmAudio) window.pushWasmAudio($0, $1, $2); },  
+ 368698: ($0) => { if (window.postWasmSoundChips) window.postWasmSoundChips(UTF8ToString($0)); },  
+ 368778: ($0, $1) => { if (window.pushWasmDisplay) window.pushWasmDisplay($0, $1); },  
+ 368842: ($0, $1) => { if (window.pushWasmDisplayText) window.pushWasmDisplayText(UTF8ToString($0), $1); },  
+ 368928: ($0, $1) => { if (window.pushWasmLamps) window.pushWasmLamps($0, $1); },  
+ 368988: ($0, $1) => { if (window.pushWasmSolens) window.pushWasmSolens($0, $1); },  
+ 369050: ($0, $1) => { if (window.postWasmLog) { window.postWasmLog($0, $1); } }
 };
 
 // Imports from the Wasm binary.
 var _api_hook_gottlieb_display_write = Module['_api_hook_gottlieb_display_write'] = makeInvalidEarlyAccess('_api_hook_gottlieb_display_write');
 var _api_pop_ascii_event = Module['_api_pop_ascii_event'] = makeInvalidEarlyAccess('_api_pop_ascii_event');
+var _api_get_dac_count = Module['_api_get_dac_count'] = makeInvalidEarlyAccess('_api_get_dac_count');
+var _api_get_dac_buffer = Module['_api_get_dac_buffer'] = makeInvalidEarlyAccess('_api_get_dac_buffer');
+var _api_reset_dac_buffer = Module['_api_reset_dac_buffer'] = makeInvalidEarlyAccess('_api_reset_dac_buffer');
 var _pinmame_get_gprom_ptr = Module['_pinmame_get_gprom_ptr'] = makeInvalidEarlyAccess('_pinmame_get_gprom_ptr');
 var _pinmame_get_dsprom_ptr = Module['_pinmame_get_dsprom_ptr'] = makeInvalidEarlyAccess('_pinmame_get_dsprom_ptr');
 var _pinmame_get_display = Module['_pinmame_get_display'] = makeInvalidEarlyAccess('_pinmame_get_display');
@@ -5153,9 +5156,6 @@ var _pinmame_get_version = Module['_pinmame_get_version'] = makeInvalidEarlyAcce
 var _pinmame_web_entry = Module['_pinmame_web_entry'] = makeInvalidEarlyAccess('_pinmame_web_entry');
 var _pinmame_web_tick = Module['_pinmame_web_tick'] = makeInvalidEarlyAccess('_pinmame_web_tick');
 var _pinmame_web_boot = Module['_pinmame_web_boot'] = makeInvalidEarlyAccess('_pinmame_web_boot');
-var _api_get_dac_count = Module['_api_get_dac_count'] = makeInvalidEarlyAccess('_api_get_dac_count');
-var _api_get_dac_buffer = Module['_api_get_dac_buffer'] = makeInvalidEarlyAccess('_api_get_dac_buffer');
-var _api_reset_dac_buffer = Module['_api_reset_dac_buffer'] = makeInvalidEarlyAccess('_api_reset_dac_buffer');
 var _malloc = makeInvalidEarlyAccess('_malloc');
 var _free = makeInvalidEarlyAccess('_free');
 var _fflush = makeInvalidEarlyAccess('_fflush');
@@ -5192,6 +5192,9 @@ var wasmMemory = makeInvalidEarlyAccess('wasmMemory');
 function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['api_hook_gottlieb_display_write'] != 'undefined', 'missing Wasm export: api_hook_gottlieb_display_write');
   assert(typeof wasmExports['api_pop_ascii_event'] != 'undefined', 'missing Wasm export: api_pop_ascii_event');
+  assert(typeof wasmExports['api_get_dac_count'] != 'undefined', 'missing Wasm export: api_get_dac_count');
+  assert(typeof wasmExports['api_get_dac_buffer'] != 'undefined', 'missing Wasm export: api_get_dac_buffer');
+  assert(typeof wasmExports['api_reset_dac_buffer'] != 'undefined', 'missing Wasm export: api_reset_dac_buffer');
   assert(typeof wasmExports['pinmame_get_gprom_ptr'] != 'undefined', 'missing Wasm export: pinmame_get_gprom_ptr');
   assert(typeof wasmExports['pinmame_get_dsprom_ptr'] != 'undefined', 'missing Wasm export: pinmame_get_dsprom_ptr');
   assert(typeof wasmExports['pinmame_get_display'] != 'undefined', 'missing Wasm export: pinmame_get_display');
@@ -5199,9 +5202,6 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['pinmame_web_entry'] != 'undefined', 'missing Wasm export: pinmame_web_entry');
   assert(typeof wasmExports['pinmame_web_tick'] != 'undefined', 'missing Wasm export: pinmame_web_tick');
   assert(typeof wasmExports['pinmame_web_boot'] != 'undefined', 'missing Wasm export: pinmame_web_boot');
-  assert(typeof wasmExports['api_get_dac_count'] != 'undefined', 'missing Wasm export: api_get_dac_count');
-  assert(typeof wasmExports['api_get_dac_buffer'] != 'undefined', 'missing Wasm export: api_get_dac_buffer');
-  assert(typeof wasmExports['api_reset_dac_buffer'] != 'undefined', 'missing Wasm export: api_reset_dac_buffer');
   assert(typeof wasmExports['malloc'] != 'undefined', 'missing Wasm export: malloc');
   assert(typeof wasmExports['free'] != 'undefined', 'missing Wasm export: free');
   assert(typeof wasmExports['fflush'] != 'undefined', 'missing Wasm export: fflush');
@@ -5235,6 +5235,9 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['__indirect_function_table'] != 'undefined', 'missing Wasm export: __indirect_function_table');
   _api_hook_gottlieb_display_write = Module['_api_hook_gottlieb_display_write'] = createExportWrapper('api_hook_gottlieb_display_write', 1);
   _api_pop_ascii_event = Module['_api_pop_ascii_event'] = createExportWrapper('api_pop_ascii_event', 0);
+  _api_get_dac_count = Module['_api_get_dac_count'] = createExportWrapper('api_get_dac_count', 1);
+  _api_get_dac_buffer = Module['_api_get_dac_buffer'] = createExportWrapper('api_get_dac_buffer', 1);
+  _api_reset_dac_buffer = Module['_api_reset_dac_buffer'] = createExportWrapper('api_reset_dac_buffer', 1);
   _pinmame_get_gprom_ptr = Module['_pinmame_get_gprom_ptr'] = createExportWrapper('pinmame_get_gprom_ptr', 0);
   _pinmame_get_dsprom_ptr = Module['_pinmame_get_dsprom_ptr'] = createExportWrapper('pinmame_get_dsprom_ptr', 0);
   _pinmame_get_display = Module['_pinmame_get_display'] = createExportWrapper('pinmame_get_display', 0);
@@ -5242,9 +5245,6 @@ function assignWasmExports(wasmExports) {
   _pinmame_web_entry = Module['_pinmame_web_entry'] = createExportWrapper('pinmame_web_entry', 2);
   _pinmame_web_tick = Module['_pinmame_web_tick'] = createExportWrapper('pinmame_web_tick', 1);
   _pinmame_web_boot = Module['_pinmame_web_boot'] = createExportWrapper('pinmame_web_boot', 0);
-  _api_get_dac_count = Module['_api_get_dac_count'] = createExportWrapper('api_get_dac_count', 1);
-  _api_get_dac_buffer = Module['_api_get_dac_buffer'] = createExportWrapper('api_get_dac_buffer', 1);
-  _api_reset_dac_buffer = Module['_api_reset_dac_buffer'] = createExportWrapper('api_reset_dac_buffer', 1);
   _malloc = createExportWrapper('malloc', 1);
   _free = createExportWrapper('free', 1);
   _fflush = createExportWrapper('fflush', 1);

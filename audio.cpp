@@ -34,6 +34,7 @@ static int    g_dac_buf[2][DAC_BUF_MAX];
 static int    g_dac_n[2]          = {0, 0};
 static double g_dac_integrator[2] = {0.0, 0.0};
 static int    g_dac_prev_data[2]  = {0, 0};
+static double g_dac_lp[2]         = {0.0, 0.0}; // filtre passe-bas reconstruction DAC
 
 extern "C" void emscripten_sleep(unsigned int ms);
 
@@ -145,9 +146,11 @@ extern "C" {
 extern "C" void __real_DAC_DC_offset_correction_data_16_w(int num, int data);
 extern "C" void __wrap_DAC_DC_offset_correction_data_16_w(int num, int data) {
     if ((unsigned)num < 2 && g_dac_n[num] < DAC_BUF_MAX) {
-        g_dac_integrator[num] = g_dac_integrator[num] * 0.990 + (data - g_dac_prev_data[num]);
+        g_dac_integrator[num] = g_dac_integrator[num] + (data - g_dac_prev_data[num]);
         g_dac_prev_data[num]  = data;
-        int out = (int)g_dac_integrator[num];
+        // filtre passe-bas : coupe les harmoniques > ~7 kHz (alpha=0.7 à 15625 Hz)
+        g_dac_lp[num] = 0.7 * g_dac_integrator[num] + 0.3 * g_dac_lp[num];
+        int out = (int)g_dac_lp[num];
         if (out < -32768) out = -32768;
         else if (out > 32767) out = 32767;
         g_dac_buf[num][g_dac_n[num]++] = out;

@@ -372,7 +372,10 @@ extern "C" {
 
         uint32_t js_buffer_dist = 0;
         memcpy(&js_buffer_dist, &g_shared_corridor[1070], 4);
-        audio_frame_pacing(js_buffer_dist);
+        if      (js_buffer_dist > 8192) emscripten_sleep(20);
+        else if (js_buffer_dist > 4096) emscripten_sleep(17);
+        else if (js_buffer_dist > 1600) emscripten_sleep(15);
+        else                             emscripten_sleep(8);
     }
 
     void osd_update_video_and_audio(struct mame_display *display) {

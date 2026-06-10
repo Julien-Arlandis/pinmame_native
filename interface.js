@@ -1,6 +1,24 @@
 // interface.js
 // Browser UI — découverte de maîtres (WebSerial ou Worker local), sélection, connexion
 
+function feedAudioRingBuffer() {}
+
+function unlockAudio() {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    ctx.resume();
+    let t = 0;
+    feedAudioRingBuffer = (left, right) => {
+        const s = ctx.createBufferSource();
+        s.buffer = ctx.createBuffer(2, left.length, 44100);
+        s.buffer.getChannelData(0).set(left);
+        s.buffer.getChannelData(1).set(right);
+        s.connect(ctx.destination);
+        s.start(t = Math.max(t, ctx.currentTime + left.length / 44100));
+        t += left.length / 44100;
+    };
+    unlockAudio = () => ctx.resume();
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // MAÎTRES
 // Un maître parle le protocole texte ligne par ligne :
@@ -13,7 +31,7 @@
 // Le port Worker ajoute : onAudio(cb) — cb(left, right) — canal audio séparé du texte
 
 async function createWorkerPort() {
-    const resp = await fetch('tilt');
+    const resp = await fetch('tilt', { cache: 'no-store' });
     const arrayBuffer = await resp.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
 
@@ -56,7 +74,8 @@ async function createWorkerPort() {
     const jsText = new TextDecoder().decode(jsBytes);
     const blob = new Blob([jsText], { type: 'application/javascript' });
     const worker = new Worker(URL.createObjectURL(blob));
-    let audioCallback = null;
+    let audioCallback   = null;
+    let captureCallback = null;
 
     if (wasmBytes) {
         const buf = wasmBytes.buffer.slice(wasmBytes.byteOffset, wasmBytes.byteOffset + wasmBytes.byteLength);
@@ -69,6 +88,8 @@ async function createWorkerPort() {
     worker.onmessage = ({ data: msg }) => {
         if (msg.channel === 'audio') {
             audioCallback?.(msg.left, msg.right);
+        } else if (msg.channel === 'capture') {
+            captureCallback?.(msg);
         } else if (msg.line) {
             lineWriter.write(msg.line).catch(() => {});
         }
@@ -90,7 +111,8 @@ async function createWorkerPort() {
         name: 'Exécution locale (navigateur)', isLocal: true,
         terminate()   { worker.terminate(); },
         disconnect()  { worker.terminate(); },
-        onAudio(cb) { audioCallback = cb; }
+        onAudio(cb)    { audioCallback   = cb; },
+        onCapture(cb)  { captureCallback = cb; }
     };
 }
 
@@ -202,7 +224,8 @@ class SerialMaster {
         this._callbacks = [];
         this.isLocal = port.isLocal || false;
 
-        if (port.onAudio) port.onAudio((l, r) => this._audioCallback?.(l, r));
+        if (port.onAudio)   port.onAudio((l, r) => this._audioCallback?.(l, r));
+        if (port.onCapture) port.onCapture((d)    => this._captureCallback?.(d));
         this._pump(port.readable);
     }
 
@@ -220,7 +243,8 @@ class SerialMaster {
 
     send(line)         { this._writer.write(line).catch(() => {}); }
     onMessage(cb)      { this._callbacks.push(cb); }
-    onAudio(cb)        { this._audioCallback = cb; }
+    onAudio(cb)        { this._audioCallback   = cb; }
+    onCapture(cb)      { this._captureCallback = cb; }
     onDisconnect(cb)   { this._disconnectCallback = cb; }
     get name()         { return this._port.name; }
 }
@@ -678,7 +702,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.33';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.47';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();
@@ -883,6 +907,44 @@ function setupSystemHandlers(restartFn) {
 // BOOTSTRAP
 // ═══════════════════════════════════════════════════════════════════════════════
 
+function matWrite(variables) {
+    const LE = true;
+    const enc = new TextEncoder();
+    function pad8(n) { return (n + 7) & ~7; }
+    function elem(type, bytes) {
+        const p = pad8(bytes.byteLength);
+        const buf = new Uint8Array(8 + p);
+        const dv = new DataView(buf.buffer);
+        dv.setUint32(0, type, LE);
+        dv.setUint32(4, bytes.byteLength, LE);
+        buf.set(bytes, 8);
+        return buf;
+    }
+    const chunks = [];
+    for (const [name, arr] of Object.entries(variables)) {
+        const n = arr.length;
+        const flags = new Uint8Array(8); new DataView(flags.buffer).setUint32(0, 7, LE);
+        const dims  = new Uint8Array(8); const dv = new DataView(dims.buffer); dv.setInt32(0, 1, LE); dv.setInt32(4, n, LE);
+        const flagsEl = elem(6, flags);
+        const dimsEl  = elem(5, dims);
+        const nameEl  = elem(1, enc.encode(name));
+        const dataEl  = elem(7, new Uint8Array(arr.buffer, arr.byteOffset, arr.byteLength));
+        const innerSize = flagsEl.byteLength + dimsEl.byteLength + nameEl.byteLength + dataEl.byteLength;
+        const outerTag = new Uint8Array(8);
+        new DataView(outerTag.buffer).setUint32(0, 14, LE);
+        new DataView(outerTag.buffer).setUint32(4, innerSize, LE);
+        chunks.push(outerTag, flagsEl, dimsEl, nameEl, dataEl);
+    }
+    const hdr = new Uint8Array(128);
+    const desc = enc.encode('MATLAB 5.0 MAT-file, PinMAME Workbench');
+    hdr.set(desc); for (let i = desc.length; i < 116; i++) hdr[i] = 0x20;
+    hdr[124] = 0x00; hdr[125] = 0x01; hdr[126] = 0x49; hdr[127] = 0x4D;
+    let total = 128; for (const c of chunks) total += c.byteLength;
+    const out = new Uint8Array(total); out.set(hdr, 0);
+    let off = 128; for (const c of chunks) { out.set(c, off); off += c.byteLength; }
+    return out;
+}
+
 async function loadRomManifest() {
     try {
         const r = await fetch('roms/manifest.json');
@@ -975,6 +1037,24 @@ async function bootstrap() {
     _masterRef.isLocal = master.isLocal;
     _audioMaster = master;
     connectMaster(master, display);
+
+    window.setAudioMix = (chip, dac) => _masterRef.current?.send(`@audio:chip=${chip}&dac=${dac}`);
+    window.setAudioSep = (s)         => _masterRef.current?.send(`@audio:sep=${s ? 1 : 0}`);
+    window.startCapture = () => _masterRef.current?.send('@capture:action=start');
+    window.stopCapture  = () => _masterRef.current?.send('@capture:action=stop');
+
+    master.onCapture((d) => {
+        const bytes = matWrite({ ym_L: d.ym_L, ym_R: d.ym_R, dac: d.dac });
+        const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
+        const a = document.createElement('a');
+        a.href = url; a.download = `capture_${Date.now()}.mat`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+        logToTerminal(`✅ Capture ${d.ym_L.length} samples téléchargée`);
+        window.dispatchEvent(new Event('captureComplete'));
+    });
 
     // Audio local uniquement si le maître tourne dans la page (Worker)
     if (master.isLocal) {

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.33</title>
+    <title>PinMAME Workbench v3.47</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -793,6 +793,28 @@
             <div class="panel-box expandable">
                 <div class="sound-rack">
                     <div class="panel-title">🎵 Générateur d'Interruptions Audio (Soundboard Hook)</div>
+                    <div style="margin-bottom:10px; display:flex; flex-direction:column; gap:8px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div style="font-size:0.65rem; color:#555; text-transform:uppercase; font-weight:bold; letter-spacing:1px;">Mix Audio</div>
+                            <div style="display:flex; border:1px solid #333; border-radius:4px; overflow:hidden;">
+                                <button id="btnMix" class="mode-btn active" style="font-size:0.65rem; padding:3px 10px;">MIX</button>
+                                <button id="btnSep" class="mode-btn"        style="font-size:0.65rem; padding:3px 10px;">L / R</button>
+                            </div>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <span style="font-size:0.65rem; color:#888; width:36px;">CHIP</span>
+                            <input id="sliderCHIP" type="range" min="0" max="100" value="100" style="flex:1; accent-color:var(--neon-cyan);">
+                            <span id="valCHIP" style="font-size:0.75rem; color:var(--neon-cyan); width:36px; text-align:right;">100%</span>
+                        </div>
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <span style="font-size:0.65rem; color:#888; width:36px;">DAC</span>
+                            <input id="sliderDAC" type="range" min="0" max="100" value="100" style="flex:1; accent-color:var(--neon-amber);">
+                            <span id="valDAC" style="font-size:0.75rem; color:var(--neon-amber); width:36px; text-align:right;">100%</span>
+                        </div>
+                        <div style="display:flex; justify-content:flex-end;">
+                            <button id="captureBtn" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#c00; color:#ff4444;">&#9679; REC</button>
+                        </div>
+                    </div>
                     <div id="cmd-grid" class="grid-container-cmd"></div>
                 </div>
             </div>
@@ -828,7 +850,54 @@
         </div>
     </div>
 
-    <script src="audio.js?v=3.33"></script>
-    <script src="interface.js?v=3.33"></script>
+    <script src="interface.js?v=3.34"></script>
+    <script>
+        (function() {
+            const sCHIP = document.getElementById('sliderCHIP');
+            const sDAC  = document.getElementById('sliderDAC');
+            const vCHIP = document.getElementById('valCHIP');
+            const vDAC  = document.getElementById('valDAC');
+            function applyMix() {
+                const chip = +sCHIP.value, dac = +sDAC.value;
+                vCHIP.textContent = chip + '%';
+                vDAC.textContent  = dac  + '%';
+                if (window.setAudioMix) window.setAudioMix(chip / 100, dac / 100);
+            }
+            sCHIP.addEventListener('input', applyMix);
+            sDAC.addEventListener ('input', applyMix);
+
+            const btnMix = document.getElementById('btnMix');
+            const btnSep = document.getElementById('btnSep');
+            function setSepMode(sep) {
+                btnMix.classList.toggle('active', !sep);
+                btnSep.classList.toggle('active',  sep);
+                if (window.setAudioSep) window.setAudioSep(sep);
+            }
+            btnMix.addEventListener('click', () => setSepMode(false));
+            btnSep.addEventListener('click', () => setSepMode(true));
+
+            const captureBtn = document.getElementById('captureBtn');
+            let capturing = false;
+            function setCapturing(state) {
+                capturing = state;
+                if (capturing) {
+                    captureBtn.innerHTML        = '&#9632; STOP';
+                    captureBtn.style.background = '#3a0000';
+                    captureBtn.style.borderColor= '#ff0000';
+                    captureBtn.style.color      = '#ff4444';
+                } else {
+                    captureBtn.innerHTML        = '&#9679; REC';
+                    captureBtn.style.background = '';
+                    captureBtn.style.borderColor= '#c00';
+                    captureBtn.style.color      = '#ff4444';
+                }
+            }
+            captureBtn.addEventListener('click', () => {
+                if (!capturing) { setCapturing(true);  window.startCapture?.(); }
+                else            { setCapturing(false); window.stopCapture?.();  }
+            });
+            window.addEventListener('captureComplete', () => setCapturing(false));
+        })();
+    </script>
 </body>
 </html>

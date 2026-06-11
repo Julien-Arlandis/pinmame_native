@@ -3,6 +3,7 @@ function createAudioProcessor({ pinmameInstance: P, sendAudio, sendCapture, gene
     let coeff_CHIP = 1.0;
     let coeff_DAC  = 1.0;
     let sep_mode   = false;
+    let K1 = 3/6; let K2 = 2/6; let K3 = 1/6; // 3-point moving average coefficients
 
     globalThis.setAudioMix = (chip, dac) => { coeff_CHIP = chip; coeff_DAC = dac; };
     globalThis.setAudioSep = (s)         => { sep_mode = s; };
@@ -38,7 +39,7 @@ function createAudioProcessor({ pinmameInstance: P, sendAudio, sendCapture, gene
             for (let i = 0; i < n; i++) {
                 const idx = i * sc, i0 = 0 | idx, i1 = Math.min(i0 + 1, nd - 1), frac = idx - i0;
                 const raw = (P.HEAP32[b + i0] * (1 - frac) + P.HEAP32[b + i1] * frac) / 32768;
-                dac[i] = (raw + dacPrev1 + dacPrev2) / 3;
+                dac[i] = (raw * K1 + dacPrev1 * K2 + dacPrev2 * K3);
                 dacPrev2 = dacPrev1; dacPrev1 = raw;
             }
             P._api_reset_dac_buffer(c);
@@ -57,6 +58,8 @@ function createAudioProcessor({ pinmameInstance: P, sendAudio, sendCapture, gene
 
         sendAudio(L, R);
         prod += n;
+
+        if (globalThis._scopeTap) globalThis._scopeTap(ym_L, ym_R, dac);
 
         if (capBuf) {
             for (let i = 0; i < n; i++) {

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.54</title>
+    <title>PinMAME Workbench v3.55</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -858,7 +858,6 @@
                 <span style="color:#0af; font-family:monospace; font-size:0.85rem; font-weight:bold; letter-spacing:2px;">&#9638; AUDIO SCOPE</span>
                 <div style="display:flex; gap:8px; align-items:center;">
                     <span id="scopeInfo" style="font-family:monospace; font-size:0.7rem; color:#555;"></span>
-                    <button id="scopeRefreshBtn" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#0af; color:#0af;">&#9100; CAPTURE</button>
                     <button id="scopeCloseBtn" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#444; color:#888;">&#10005;</button>
                 </div>
             </div>
@@ -914,12 +913,10 @@
             });
             window.addEventListener('captureComplete', () => setCapturing(false));
 
-            // ── Scope ──────────────────────────────────────────────────────────
-            const scopeOverlay     = document.getElementById('scopeOverlay');
-            const scopeCanvas      = document.getElementById('scopeCanvas');
-            const scopeRefreshBtn  = document.getElementById('scopeRefreshBtn');
-            const scopeCloseBtn    = document.getElementById('scopeCloseBtn');
-            const scopeInfo        = document.getElementById('scopeInfo');
+            // ── Scope temps réel ───────────────────────────────────────────────
+            const scopeOverlay = document.getElementById('scopeOverlay');
+            const scopeCanvas  = document.getElementById('scopeCanvas');
+            const scopeInfo    = document.getElementById('scopeInfo');
 
             const SCOPE_CHANNELS = [
                 { key: 'ym_L', label: 'CHIP L', color: '#00ffcc' },
@@ -928,13 +925,35 @@
             ];
             const SCOPE_ROW_H = 120;
             const SCOPE_W     = 800;
+            const RING_SIZE   = 44100 / 2; // 500 ms
 
             scopeCanvas.width  = SCOPE_W;
             scopeCanvas.height = SCOPE_ROW_H * SCOPE_CHANNELS.length;
 
-            function drawScope(d) {
+            const ring = {
+                ym_L: new Float32Array(RING_SIZE),
+                ym_R: new Float32Array(RING_SIZE),
+                dac:  new Float32Array(RING_SIZE),
+            };
+            let ringWrite = 0;
+            let scopeRafId = null;
+
+            // appelé par runtime-audio.js à chaque bloc audio
+            globalThis._scopeTap = null;
+
+            function scopeTap(ym_L, ym_R, dac) {
+                const n = ym_L.length;
+                for (let i = 0; i < n; i++) {
+                    ring.ym_L[ringWrite] = ym_L[i];
+                    ring.ym_R[ringWrite] = ym_R[i];
+                    ring.dac[ringWrite]  = dac[i];
+                    ringWrite = (ringWrite + 1) % RING_SIZE;
+                }
+            }
+
+            function drawScopeFrame() {
                 const ctx  = scopeCanvas.getContext('2d');
-                const W    = scopeCanvas.width;
+                const W    = SCOPE_W;
                 const rowH = SCOPE_ROW_H;
                 ctx.fillStyle = '#080808';
                 ctx.fillRect(0, 0, W, scopeCanvas.height);
@@ -942,89 +961,67 @@
                 SCOPE_CHANNELS.forEach((ch, ri) => {
                     const y0  = ri * rowH;
                     const mid = y0 + rowH / 2;
-                    const data = d[ch.key];
-                    const n    = data ? data.length : 0;
-                    const amp  = rowH / 2 - 6;
+                    const amp = rowH / 2 - 6;
+                    const buf = ring[ch.key];
 
-                    // fond row
                     ctx.fillStyle = ri % 2 === 0 ? '#0a0a0a' : '#080808';
                     ctx.fillRect(0, y0, W, rowH);
 
-                    // ligne 0
-                    ctx.strokeStyle = '#1e1e1e';
+                    ctx.strokeStyle = '#1a1a1a';
                     ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.moveTo(0, y0);  ctx.lineTo(W, y0);  ctx.stroke();
                     ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
 
-                    // séparateur haut
-                    ctx.strokeStyle = '#1a1a1a';
-                    ctx.beginPath(); ctx.moveTo(0, y0); ctx.lineTo(W, y0); ctx.stroke();
-
-                    // grille verticale
                     ctx.strokeStyle = '#141414';
                     for (let gx = 1; gx < 8; gx++) {
                         const x = (gx / 8) * W;
                         ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y0 + rowH); ctx.stroke();
                     }
 
-                    // label
                     ctx.fillStyle = ch.color;
                     ctx.font = 'bold 11px monospace';
                     ctx.fillText(ch.label, 8, y0 + 15);
 
-                    // stats
-                    if (n) {
-                        let mn = data[0], mx = data[0], rms = 0;
-                        for (let i = 0; i < n; i++) { if (data[i] < mn) mn = data[i]; if (data[i] > mx) mx = data[i]; rms += data[i] * data[i]; }
-                        rms = Math.sqrt(rms / n);
-                        ctx.fillStyle = '#555';
-                        ctx.font = '10px monospace';
-                        ctx.fillText(`min:${mn.toFixed(3)}  max:${mx.toFixed(3)}  rms:${rms.toFixed(3)}`, 8, y0 + rowH - 6);
+                    // stats sur la fenêtre affichée
+                    let mn = buf[0], mx = buf[0], rms = 0;
+                    for (let i = 0; i < RING_SIZE; i++) {
+                        const v = buf[i];
+                        if (v < mn) mn = v; if (v > mx) mx = v; rms += v * v;
                     }
+                    rms = Math.sqrt(rms / RING_SIZE);
+                    ctx.fillStyle = '#555';
+                    ctx.font = '10px monospace';
+                    ctx.fillText(`min:${mn.toFixed(3)}  max:${mx.toFixed(3)}  rms:${rms.toFixed(3)}`, 8, y0 + rowH - 6);
 
-                    // courbe
-                    if (!n) return;
-                    const step = n / W;
+                    // courbe — lit le ring dans l'ordre chronologique
                     ctx.strokeStyle = ch.color;
                     ctx.lineWidth = 1;
                     ctx.shadowBlur = 3;
                     ctx.shadowColor = ch.color;
                     ctx.beginPath();
                     for (let x = 0; x < W; x++) {
-                        const i  = Math.min(0 | (x * step), n - 1);
-                        const y  = mid - data[i] * amp;
+                        const idx = (ringWrite + Math.round(x * RING_SIZE / W)) % RING_SIZE;
+                        const y   = mid - buf[idx] * amp;
                         x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
                     }
                     ctx.stroke();
                     ctx.shadowBlur = 0;
                 });
-            }
 
-            function doScopeCapture(ms) {
-                ms = ms || 500;
-                scopeRefreshBtn.textContent = '...';
-                scopeRefreshBtn.disabled    = true;
-                scopeInfo.textContent       = '';
-                window._scopeCaptureCallback = (d) => {
-                    drawScope(d);
-                    const total = d.ym_L ? d.ym_L.length : 0;
-                    scopeInfo.textContent    = `${total} samples · ${(total / 44100 * 1000).toFixed(0)} ms`;
-                    scopeRefreshBtn.textContent = '&#9100; CAPTURE';
-                    scopeRefreshBtn.innerHTML   = '&#9100; CAPTURE';
-                    scopeRefreshBtn.disabled    = false;
-                };
-                window.startCapture?.();
-                setTimeout(() => window.stopCapture?.(), ms);
+                scopeInfo.textContent = `${RING_SIZE} samples · 500 ms`;
+                if (scopeOverlay.style.display !== 'none') scopeRafId = requestAnimationFrame(drawScopeFrame);
             }
 
             document.getElementById('scopeBtn').addEventListener('click', () => {
                 scopeOverlay.style.display = 'flex';
-                doScopeCapture(500);
+                globalThis._scopeTap = scopeTap;
+                scopeRafId = requestAnimationFrame(drawScopeFrame);
             });
-            scopeCloseBtn.addEventListener('click', () => {
+            document.getElementById('scopeCloseBtn').addEventListener('click', () => {
                 scopeOverlay.style.display = 'none';
-                window._scopeCaptureCallback = null;
+                globalThis._scopeTap = null;
+                if (scopeRafId) { cancelAnimationFrame(scopeRafId); scopeRafId = null; }
             });
-            scopeRefreshBtn.addEventListener('click', () => doScopeCapture(500));
         })();
     </script>
 </body>

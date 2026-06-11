@@ -8,6 +8,7 @@ function createAudioProcessor({ pinmameInstance: P, sendAudio, sendCapture, gene
     globalThis.setAudioSep = (s)         => { sep_mode = s; };
 
     let prod = 0, t0 = null;
+    let dacPrev1 = 0, dacPrev2 = 0;
 
     let capBuf = null;
     globalThis.startCapture = () => { capBuf = { ym_L: [], ym_R: [], dac: [] }; };
@@ -36,7 +37,9 @@ function createAudioProcessor({ pinmameInstance: P, sendAudio, sendCapture, gene
             const b = P._api_get_dac_buffer(c) >>> 2, sc = nd / n;
             for (let i = 0; i < n; i++) {
                 const idx = i * sc, i0 = 0 | idx, i1 = Math.min(i0 + 1, nd - 1), frac = idx - i0;
-                dac[i] = (P.HEAP32[b + i0] * (1 - frac) + P.HEAP32[b + i1] * frac) / 32768;
+                const raw = (P.HEAP32[b + i0] * (1 - frac) + P.HEAP32[b + i1] * frac) / 32768;
+                dac[i] = (raw + dacPrev1 + dacPrev2) / 3;
+                dacPrev2 = dacPrev1; dacPrev1 = raw;
             }
             P._api_reset_dac_buffer(c);
         }

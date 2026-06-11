@@ -340,31 +340,62 @@ extern "C" {
         static uint16_t prev_segments[40] = {};
         static uint8_t  prev_lamps[12]    = {};
         static uint32_t prev_solenoids    = 0xFFFFFFFF;
-        static bool     sound_chips_posted = false;
+        static bool     machine_info_posted = false;
 
         // Generation written by JS at boot (slot 1076). Passed to every callback so JS
         // can reject calls from stale Wasm instances that are still looping after ROM change.
         uint32_t emulator_generation = 0;
         memcpy(&emulator_generation, &g_shared_corridor[1076], 4);
 
-        // Post sound chip names once on first frame.
-        if (!sound_chips_posted && Machine && Machine->drv) {
-            sound_chips_posted = true;
-            char chip_list[256] = {0};
+        // Post full machine info once on first frame: CPUs + sound chips + stereo + rate.
+        if (!machine_info_posted && Machine && Machine->drv) {
+            machine_info_posted = true;
+            char info[512] = {0};
             int len = 0;
+
+            // CPUs
+            len += snprintf(info + len, sizeof(info) - len, "cpu=");
+            bool first_cpu = true;
+            for (int i = 0; i < MAX_CPU; i++) {
+                if (!Machine->drv->cpu[i].cpu_type) break;
+                const char* cname = cputype_name(Machine->drv->cpu[i].cpu_type);
+                int clk = Machine->drv->cpu[i].cpu_clock;
+                bool audio = (Machine->drv->cpu[i].cpu_flags & CPU_AUDIO_CPU) != 0;
+                char clk_str[16];
+                if (clk >= 1000000) snprintf(clk_str, sizeof(clk_str), "%dMHz", clk / 1000000);
+                else                snprintf(clk_str, sizeof(clk_str), "%dkHz", clk / 1000);
+                len += snprintf(info + len, sizeof(info) - len, "%s%s@%s%s",
+                    first_cpu ? "" : "+", cname ? cname : "?", clk_str, audio ? "(audio)" : "");
+                first_cpu = false;
+            }
+
+            // Sound chips
+            len += snprintf(info + len, sizeof(info) - len, "|snd=");
+            bool first_snd = true;
+            char chip_list[128] = {0};
+            int clen = 0;
             for (int i = 0; i < MAX_SOUND; i++) {
                 if (!Machine->drv->sound[i].sound_type) break;
-                const char* name = sound_name(&Machine->drv->sound[i]);
-                if (!name) name = "?";
-                if (len > 0 && len < (int)sizeof(chip_list) - 3) {
-                    chip_list[len++] = ','; chip_list[len++] = ' ';
-                }
-                while (*name && len < (int)sizeof(chip_list) - 1)
-                    chip_list[len++] = *name++;
+                const char* sname = sound_name(&Machine->drv->sound[i]);
+                if (!sname) sname = "?";
+                len += snprintf(info + len, sizeof(info) - len, "%s%s", first_snd ? "" : "+", sname);
+                // also build chip_list for legacy postWasmSoundChips
+                if (!first_snd && clen < (int)sizeof(chip_list) - 3) { chip_list[clen++] = ','; chip_list[clen++] = ' '; }
+                for (int k = 0; sname[k] && clen < (int)sizeof(chip_list) - 1; k++) chip_list[clen++] = sname[k];
+                first_snd = false;
             }
+
+            // Stereo + rate
+            len += snprintf(info + len, sizeof(info) - len, "|stereo=%d|rate=%d", g_stereo, options.samplerate);
+
             EM_ASM({
-                if (window.postWasmSoundChips) window.postWasmSoundChips(UTF8ToString($0));
-            }, chip_list);
+                const s = UTF8ToString($0);
+                if (window.postWasmMachineInfo)  window.postWasmMachineInfo(s);
+                if (window.postWasmSoundChips) {
+                    const m = s.match(/\|snd=([^|]+)/);
+                    if (m) window.postWasmSoundChips(m[1].replace(/\+/g, ', '));
+                }
+            }, info);
         }
 
         uint16_t* vfd_export = (uint16_t*)g_shared_corridor;

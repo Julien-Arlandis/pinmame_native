@@ -702,7 +702,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.51';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.52';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();
@@ -730,10 +730,21 @@ function connectMaster(master, display) {
             handleDriverLine(line);
         } else if (line.startsWith('@status:')) {
             handleStatusLine(line);
+        } else if (line.startsWith('@machine:')) {
+            const raw = line.slice(9);
+            const p2  = new URLSearchParams(raw.replace(/\|/g, '&'));
+            const cpu    = (p2.get('cpu')    || '').replace(/\+/g, '  ');
+            const snd    = (p2.get('snd')    || '').replace(/\+/g, ', ');
+            const stereo = p2.get('stereo') === '1';
+            const rate   = p2.get('rate') || '?';
+            logToTerminal(`CPU : ${cpu}`);
+            logToTerminal(`Son : ${snd} | ${stereo ? 'Stéréo' : 'Mono'} | ${rate} Hz`);
+            // AY-8910 déclaré à volume=25% dans PinMAME vs YM2151 à 75% → compenser ×3
+            const chipGain = snd.includes('AY8910') ? 3.0 : 1.0;
+            window.setAudioMix?.(chipGain, 1.0);
         } else if (line.startsWith('@sound:chips=')) {
+            // conservé pour compatibilité Node.js
             const chips = decodeURIComponent(line.slice(13));
-            logToTerminal(`🎵 Son: ${chips}`);
-            // AY-8910 est déclaré à volume=25% dans PinMAME vs YM2151 à 75% → compenser ×3
             const chipGain = chips.includes('AY8910') ? 3.0 : 1.0;
             window.setAudioMix?.(chipGain, 1.0);
         } else if (line.startsWith('@roms:list=')) {

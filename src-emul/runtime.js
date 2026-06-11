@@ -121,6 +121,11 @@ function createEmulator({ sendLine, sendAudio, sendCapture, loadRom }) {
         sendLine('status', `@sound:chips=${chips}`);
     };
 
+    globalThis.postWasmMachineInfo = function(info) {
+        if (generation !== _emulatorGeneration) return;
+        sendLine('status', `@machine:${info}`);
+    };
+
     async function initialiserMoteur(customRomBytes, customRomName, baseUrl) {
         sendLine('status', '@status:state=loading');
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.70</title>
+    <title>PinMAME Workbench v3.71</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -797,8 +797,8 @@
                         <div style="display:flex; justify-content:space-between; align-items:center;">
                             <div style="font-size:0.65rem; color:#555; text-transform:uppercase; font-weight:bold; letter-spacing:1px;">Mix Audio</div>
                             <div style="display:flex; border:1px solid #333; border-radius:4px; overflow:hidden;">
-                                <button id="btnMix" class="mode-btn active" style="font-size:0.65rem; padding:3px 10px;">MIX</button>
-                                <button id="btnSep" class="mode-btn"        style="font-size:0.65rem; padding:3px 10px;">L / R</button>
+                                <button id="btnMix" class="mode-btn"        style="font-size:0.65rem; padding:3px 10px;">MIX</button>
+                                <button id="btnSep" class="mode-btn active" style="font-size:0.65rem; padding:3px 10px;">L / R</button>
                             </div>
                         </div>
                         <div style="display:flex; align-items:center; gap:10px;">
@@ -899,6 +899,7 @@
             }
             btnMix.addEventListener('click', () => setSepMode(false));
             btnSep.addEventListener('click', () => setSepMode(true));
+            setSepMode(true);
 
             const captureBtn = document.getElementById('captureBtn');
             let capturing = false;

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.71</title>
+    <title>PinMAME Workbench v3.72</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -899,7 +899,11 @@
             }
             btnMix.addEventListener('click', () => setSepMode(false));
             btnSep.addEventListener('click', () => setSepMode(true));
-            setSepMode(true);
+            let _defaultSepApplied = false;
+            window._onMasterReady = function() {
+                if (!_defaultSepApplied) { _defaultSepApplied = true; setSepMode(true); }
+                else if (window.setAudioSep) window.setAudioSep(btnSep.classList.contains('active'));
+            };
 
             const captureBtn = document.getElementById('captureBtn');
             let capturing = false;

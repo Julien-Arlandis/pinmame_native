@@ -708,7 +708,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.71';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.72';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();
@@ -1060,6 +1060,7 @@ async function bootstrap() {
     window.stopCapture  = () => _masterRef.current?.send('@capture:action=stop');
 
     window._onScopeReady?.(master);
+    window._onMasterReady?.();
 
     master.onCapture((d) => {
         const bytes = matWrite({ ym_L: d.ym_L, ym_R: d.ym_R, dac: d.dac });
@@ -1116,6 +1117,7 @@ async function bootstrap() {
         if (!newMaster.isLocal) newMaster.send('@connect:input=1&display=1&driver=1');
         window._onScopeReady?.(newMaster);
         if (document.getElementById('scopeOverlay')?.style.display !== 'none') newMaster.send('@scope:on=1');
+        window._onMasterReady?.();
         if (type === 'node') {
             const url = newMaster._reconnectUrl;
             newMaster.onDisconnect(async () => {

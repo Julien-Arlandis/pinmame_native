@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.74</title>
+    <title>PinMAME Workbench v3.75</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -852,26 +852,24 @@
     </div>
 
     <!-- ── Scope popup ─────────────────────────────────────────────────── -->
-    <div id="scopeOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.88); z-index:9999; align-items:center; justify-content:center; padding:12px; box-sizing:border-box;">
-        <div style="background:#0e0e0e; border:1px solid #222; border-radius:8px; padding:14px; width:100%; max-width:820px; box-sizing:border-box;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <span style="color:#0af; font-family:monospace; font-size:0.85rem; font-weight:bold; letter-spacing:2px;">&#9638; SCOPE</span>
-                    <button id="scopeModeRaw" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#444; color:#666;">BRUT</button>
-                    <button id="scopeModeHp"  class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#f6a; color:#f6a;">HP</button>
-                </div>
-                <div style="display:flex; gap:10px; align-items:center;">
-                    <label style="font-family:monospace; font-size:0.7rem; color:#666; display:flex; align-items:center; gap:6px;">
-                        <span id="scopeWinLabel" style="color:#aaa; min-width:48px;">100 ms</span>
-                        <input id="scopeWinSlider" type="range" min="10" max="500" value="100" step="10" style="width:110px; accent-color:#0af;">
-                    </label>
-                    <button id="scopePauseBtn" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#0af; color:#0af;">&#9646;&#9646; PAUSE</button>
-                    <button id="scopeCloseBtn" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#444; color:#888;">&#10005;</button>
-                </div>
+    <div id="scopeOverlay" style="display:none; position:fixed; bottom:0; left:0; right:0; background:#0e0e0e; border-top:1px solid #222; z-index:9999; padding:8px 14px 10px; box-sizing:border-box;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
+            <div style="display:flex; align-items:center; gap:10px;">
+                <span style="color:#0af; font-family:monospace; font-size:0.85rem; font-weight:bold; letter-spacing:2px;">&#9638; SCOPE</span>
+                <button id="scopeModeRaw" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#444; color:#666;">BRUT</button>
+                <button id="scopeModeHp"  class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#f6a; color:#f6a;">HP</button>
             </div>
-            <canvas id="scopeCanvas" style="width:100%; height:auto; display:block; border:1px solid #1a1a1a; border-radius:4px;"></canvas>
-            <div id="scopeInfo" style="font-family:monospace; font-size:0.68rem; color:#444; margin-top:5px; text-align:right;"></div>
+            <div style="display:flex; gap:10px; align-items:center;">
+                <label style="font-family:monospace; font-size:0.7rem; color:#666; display:flex; align-items:center; gap:6px;">
+                    <span id="scopeWinLabel" style="color:#aaa; min-width:48px;">100 ms</span>
+                    <input id="scopeWinSlider" type="range" min="10" max="500" value="100" step="10" style="width:110px; accent-color:#0af;">
+                </label>
+                <button id="scopePauseBtn" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#0af; color:#0af;">&#9646;&#9646; PAUSE</button>
+                <button id="scopeCloseBtn" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#444; color:#888;">&#10005;</button>
+            </div>
         </div>
+        <canvas id="scopeCanvas" style="width:100%; height:auto; display:block; border:1px solid #1a1a1a; border-radius:4px;"></canvas>
+        <div id="scopeInfo" style="font-family:monospace; font-size:0.68rem; color:#444; margin-top:4px; text-align:right;"></div>
     </div>
 
     <script src="interface.js?v=3.34"></script>
@@ -942,15 +940,16 @@
                 { key: 'spk_L', label: 'HP L',   color: '#ff66aa' },
                 { key: 'spk_R', label: 'HP R',   color: '#aa66ff' },
             ];
-            const SCOPE_ROW_H = 120;
-            const SCOPE_W     = 800;
+            const SCOPE_ROW_H = 110;
             const RING_SIZE   = Math.round(44100 * 0.5); // 500 ms max
 
             let scopeMode      = 'hp';
             let activeChannels = HP_CHANNELS;
 
-            scopeCanvas.width  = SCOPE_W;
-            scopeCanvas.height = SCOPE_ROW_H * activeChannels.length;
+            function resizeScopeCanvas() {
+                scopeCanvas.width  = scopeCanvas.offsetWidth || 1200;
+                scopeCanvas.height = SCOPE_ROW_H * activeChannels.length;
+            }
 
             const ring = {
                 ym_L:  new Float32Array(RING_SIZE),
@@ -974,7 +973,8 @@
             function setScopeMode(mode) {
                 scopeMode      = mode;
                 activeChannels = mode === 'raw' ? RAW_CHANNELS : HP_CHANNELS;
-                scopeCanvas.height = SCOPE_ROW_H * activeChannels.length;
+                resizeScopeCanvas();
+                if (scopeOverlay.style.display !== 'none') document.body.style.paddingBottom = scopePanelHeight() + 'px';
                 scopeModeRawBtn.style.borderColor = mode === 'raw' ? '#0af' : '#444';
                 scopeModeRawBtn.style.color       = mode === 'raw' ? '#0af' : '#666';
                 scopeModeHpBtn.style.borderColor  = mode === 'hp'  ? '#f6a' : '#444';
@@ -1008,7 +1008,7 @@
 
             function drawScopeFrame() {
                 const ctx  = scopeCanvas.getContext('2d');
-                const W    = SCOPE_W;
+                const W    = scopeCanvas.width;
                 const rowH = SCOPE_ROW_H;
                 ctx.fillStyle = '#080808';
                 ctx.fillRect(0, 0, W, scopeCanvas.height);
@@ -1071,8 +1071,13 @@
                 if (scopeOverlay.style.display !== 'none') scopeRafId = requestAnimationFrame(drawScopeFrame);
             }
 
+            function scopePanelHeight() {
+                return SCOPE_ROW_H * activeChannels.length + 60; // header + info
+            }
             document.getElementById('scopeBtn').addEventListener('click', () => {
-                scopeOverlay.style.display = 'flex';
+                scopeOverlay.style.display = 'block';
+                resizeScopeCanvas();
+                document.body.style.paddingBottom = scopePanelHeight() + 'px';
                 scopePaused = false;
                 scopePauseBtn.innerHTML       = '&#9646;&#9646; PAUSE';
                 scopePauseBtn.style.color       = '#0af';
@@ -1082,6 +1087,7 @@
             });
             document.getElementById('scopeCloseBtn').addEventListener('click', () => {
                 scopeOverlay.style.display = 'none';
+                document.body.style.paddingBottom = '';
                 window._masterRef?.current?.send('@scope:on=0');
                 if (scopeRafId) { cancelAnimationFrame(scopeRafId); scopeRafId = null; }
             });

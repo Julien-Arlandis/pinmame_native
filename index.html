@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.75</title>
+    <title>PinMAME Workbench v3.76</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -899,6 +899,10 @@
             btnSep.addEventListener('click', () => setSepMode(true));
             window._onEngineReady = function() {
                 if (window.setAudioSep) window.setAudioSep(btnSep.classList.contains('active'));
+                if (scopeOverlay.style.display !== 'none') {
+                    window._masterRef?.current?.send('@scope:on=1');
+                    if (!scopeRafId) scopeRafId = requestAnimationFrame(drawScopeFrame);
+                }
             };
 
             const captureBtn = document.getElementById('captureBtn');

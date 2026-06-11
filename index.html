@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.68</title>
+    <title>PinMAME Workbench v3.69</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -857,8 +857,8 @@
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
                 <div style="display:flex; align-items:center; gap:10px;">
                     <span style="color:#0af; font-family:monospace; font-size:0.85rem; font-weight:bold; letter-spacing:2px;">&#9638; SCOPE</span>
-                    <button id="scopeModeRaw" class="btn-system active" style="font-size:0.65rem; padding:3px 10px; border-color:#0af; color:#0af;">BRUT</button>
-                    <button id="scopeModeHp"  class="btn-system"        style="font-size:0.65rem; padding:3px 10px; border-color:#444; color:#666;">HP</button>
+                    <button id="scopeModeRaw" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#444; color:#666;">BRUT</button>
+                    <button id="scopeModeHp"  class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#f6a; color:#f6a;">HP</button>
                 </div>
                 <div style="display:flex; gap:10px; align-items:center;">
                     <label style="font-family:monospace; font-size:0.7rem; color:#666; display:flex; align-items:center; gap:6px;">
@@ -943,8 +943,8 @@
             const SCOPE_W     = 800;
             const RING_SIZE   = Math.round(44100 * 0.5); // 500 ms max
 
-            let scopeMode      = 'raw';
-            let activeChannels = RAW_CHANNELS;
+            let scopeMode      = 'hp';
+            let activeChannels = HP_CHANNELS;
 
             scopeCanvas.width  = SCOPE_W;
             scopeCanvas.height = SCOPE_ROW_H * activeChannels.length;
@@ -1039,7 +1039,8 @@
                         const v = buf[(startIdx + i) % RING_SIZE];
                         if (v < mn) mn = v; if (v > mx) mx = v;
                     }
-                    const amp = rowH / 2 - 6; // échelle fixe : 1.0 = bord du canal
+                    const peak = Math.max(Math.abs(mn), Math.abs(mx));
+                    const amp  = peak > 0.001 ? (rowH / 2 - 6) / peak : (rowH / 2 - 6);
 
                     ctx.fillStyle = ch.color;
                     ctx.font = 'bold 11px monospace';

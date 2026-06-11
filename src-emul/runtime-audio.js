@@ -39,7 +39,7 @@ function createAudioProcessor({ pinmameInstance: P, sendAudio, sendCapture, send
             const b = P._api_get_dac_buffer(c) >>> 2, sc = nd / n;
             for (let i = 0; i < n; i++) {
                 const idx = i * sc, i0 = 0 | idx, i1 = Math.min(i0 + 1, nd - 1), frac = idx - i0;
-                const raw = (P.HEAP32[b + i0] * (1 - frac) + P.HEAP32[b + i1] * frac) / 32768;
+                const raw = (P.HEAP32[b + i0] * (1 - frac) + P.HEAP32[b + i1] * frac) / 65536;
                 dac[i] = (raw * K1 + dacPrev1 * K2 + dacPrev2 * K3);
                 dacPrev2 = dacPrev1; dacPrev1 = raw;
             }
@@ -62,7 +62,7 @@ function createAudioProcessor({ pinmameInstance: P, sendAudio, sendCapture, send
 
         if (sendScope && globalThis._scopeActive && ++scopeThrottle >= 4) {
             scopeThrottle = 0;
-            sendScope({ ym_L: ym_L.slice(), ym_R: ym_R.slice(), dac: dac.slice() });
+            sendScope({ ym_L: ym_L.slice(), ym_R: ym_R.slice(), dac: dac.slice(), spk_L: L.slice(), spk_R: R.slice() });
         }
 
         if (capBuf) {

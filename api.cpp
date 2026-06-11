@@ -37,6 +37,8 @@ extern "C" {
 static INT16 g_ring[ABMAX], g_lin[DMAX];
 static int   g_wi = 0, g_ri = 0;
 static int   g_dac[2][DMAX], g_dn[2] = {};
+static int   g_dac_min = INT32_MAX, g_dac_max = INT32_MIN, g_dac_log_n = 0;
+static int   g_dac_abs_max = INT32_MIN;
 
 extern "C" void stream_update(int, int);
 
@@ -753,5 +755,13 @@ extern "C" {
 extern "C" void __wrap_DAC_DC_offset_correction_data_16_w(int n, int d) {
     if ((unsigned)n < 2 && g_dn[n] < DMAX)
         g_dac[n][g_dn[n]++] = d;
+    if (d < g_dac_min) g_dac_min = d;
+    if (d > g_dac_max) g_dac_max = d;
+    if (d > g_dac_abs_max) g_dac_abs_max = d;
+    if (++g_dac_log_n >= 44100) {
+        g_dac_log_n = 0;
+        EM_ASM({ if (window.postWasmDacRange) window.postWasmDacRange($0, $1, $2); }, g_dac_min, g_dac_max, g_dac_abs_max);
+        g_dac_min = INT32_MAX; g_dac_max = INT32_MIN;
+    }
 }
 

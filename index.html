@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.62</title>
+    <title>PinMAME Workbench v3.68</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -855,7 +855,11 @@
     <div id="scopeOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.88); z-index:9999; align-items:center; justify-content:center; padding:12px; box-sizing:border-box;">
         <div style="background:#0e0e0e; border:1px solid #222; border-radius:8px; padding:14px; width:100%; max-width:820px; box-sizing:border-box;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                <span style="color:#0af; font-family:monospace; font-size:0.85rem; font-weight:bold; letter-spacing:2px;">&#9638; AUDIO SCOPE — RAW</span>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span style="color:#0af; font-family:monospace; font-size:0.85rem; font-weight:bold; letter-spacing:2px;">&#9638; SCOPE</span>
+                    <button id="scopeModeRaw" class="btn-system active" style="font-size:0.65rem; padding:3px 10px; border-color:#0af; color:#0af;">BRUT</button>
+                    <button id="scopeModeHp"  class="btn-system"        style="font-size:0.65rem; padding:3px 10px; border-color:#444; color:#666;">HP</button>
+                </div>
                 <div style="display:flex; gap:10px; align-items:center;">
                     <label style="font-family:monospace; font-size:0.7rem; color:#666; display:flex; align-items:center; gap:6px;">
                         <span id="scopeWinLabel" style="color:#aaa; min-width:48px;">100 ms</span>
@@ -926,22 +930,31 @@
             const scopeWinLabel  = document.getElementById('scopeWinLabel');
             const scopePauseBtn  = document.getElementById('scopePauseBtn');
 
-            const SCOPE_CHANNELS = [
-                { key: 'ym_L', label: 'CHIP L', color: '#00ffcc' },
-                { key: 'ym_R', label: 'CHIP R', color: '#33aaff' },
-                { key: 'dac',  label: 'DAC',    color: '#ffaa00' },
+            const RAW_CHANNELS = [
+                { key: 'ym_L',  label: 'CHIP L', color: '#00ffcc' },
+                { key: 'ym_R',  label: 'CHIP R', color: '#33aaff' },
+                { key: 'dac',   label: 'DAC',    color: '#ffaa00' },
+            ];
+            const HP_CHANNELS = [
+                { key: 'spk_L', label: 'HP L',   color: '#ff66aa' },
+                { key: 'spk_R', label: 'HP R',   color: '#aa66ff' },
             ];
             const SCOPE_ROW_H = 120;
             const SCOPE_W     = 800;
             const RING_SIZE   = Math.round(44100 * 0.5); // 500 ms max
 
+            let scopeMode      = 'raw';
+            let activeChannels = RAW_CHANNELS;
+
             scopeCanvas.width  = SCOPE_W;
-            scopeCanvas.height = SCOPE_ROW_H * SCOPE_CHANNELS.length;
+            scopeCanvas.height = SCOPE_ROW_H * activeChannels.length;
 
             const ring = {
-                ym_L: new Float32Array(RING_SIZE),
-                ym_R: new Float32Array(RING_SIZE),
-                dac:  new Float32Array(RING_SIZE),
+                ym_L:  new Float32Array(RING_SIZE),
+                ym_R:  new Float32Array(RING_SIZE),
+                dac:   new Float32Array(RING_SIZE),
+                spk_L: new Float32Array(RING_SIZE),
+                spk_R: new Float32Array(RING_SIZE),
             };
             let ringWrite  = 0;
             let scopeRafId = null;
@@ -952,6 +965,20 @@
                 scopeWindowMs = +scopeWinSlider.value;
                 scopeWinLabel.textContent = scopeWindowMs + ' ms';
             });
+
+            const scopeModeRawBtn = document.getElementById('scopeModeRaw');
+            const scopeModeHpBtn  = document.getElementById('scopeModeHp');
+            function setScopeMode(mode) {
+                scopeMode      = mode;
+                activeChannels = mode === 'raw' ? RAW_CHANNELS : HP_CHANNELS;
+                scopeCanvas.height = SCOPE_ROW_H * activeChannels.length;
+                scopeModeRawBtn.style.borderColor = mode === 'raw' ? '#0af' : '#444';
+                scopeModeRawBtn.style.color       = mode === 'raw' ? '#0af' : '#666';
+                scopeModeHpBtn.style.borderColor  = mode === 'hp'  ? '#f6a' : '#444';
+                scopeModeHpBtn.style.color        = mode === 'hp'  ? '#f6a' : '#666';
+            }
+            scopeModeRawBtn.addEventListener('click', () => setScopeMode('raw'));
+            scopeModeHpBtn.addEventListener ('click', () => setScopeMode('hp'));
 
             scopePauseBtn.addEventListener('click', () => {
                 scopePaused = !scopePaused;
@@ -966,9 +993,11 @@
                     const n = d.ym_L.length;
                     for (let i = 0; i < n; i++) {
                         const pos = (ringWrite + i) % RING_SIZE;
-                        ring.ym_L[pos] = d.ym_L[i];
-                        ring.ym_R[pos] = d.ym_R[i];
-                        ring.dac[pos]  = d.dac[i];
+                        ring.ym_L[pos]  = d.ym_L[i];
+                        ring.ym_R[pos]  = d.ym_R[i];
+                        ring.dac[pos]   = d.dac[i];
+                        ring.spk_L[pos] = d.spk_L ? d.spk_L[i] : 0;
+                        ring.spk_R[pos] = d.spk_R ? d.spk_R[i] : 0;
                     }
                     ringWrite = (ringWrite + n) % RING_SIZE;
                 });
@@ -985,7 +1014,7 @@
                 // début de fenêtre = ringWrite - winSamples (en annulaire)
                 const startIdx = (ringWrite - winSamples + RING_SIZE * 4) % RING_SIZE;
 
-                SCOPE_CHANNELS.forEach((ch, ri) => {
+                activeChannels.forEach((ch, ri) => {
                     const y0  = ri * rowH;
                     const mid = y0 + rowH / 2;
                     const buf = ring[ch.key];

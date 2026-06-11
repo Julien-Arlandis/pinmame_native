@@ -121,6 +121,10 @@ function createEmulator({ sendLine, sendAudio, sendCapture, sendScope, loadRom }
         sendLine('status', `@sound:chips=${chips}`);
     };
 
+    globalThis.postWasmDacRange = function(min, max, absMax) {
+        sendLine('status', `@dacrange:min=${min}&max=${max}&absmax=${absMax}`);
+    };
+
     globalThis.postWasmMachineInfo = function(info) {
         if (generation !== _emulatorGeneration) return;
         sendLine('status', `@machine:${info}`);
@@ -229,7 +233,7 @@ if (isWorker) {
                 sendLine:    (ch, line) => self.postMessage({ channel: ch, line }),
                 sendAudio:   (l, r)     => self.postMessage({ channel: 'audio', left: l, right: r }),
                 sendCapture: (d)        => self.postMessage({ channel: 'capture', ym_L: d.ym_L, ym_R: d.ym_R, dac: d.dac }, [d.ym_L.buffer, d.ym_R.buffer, d.dac.buffer]),
-                sendScope:   (d)        => self.postMessage({ channel: 'scope',   ym_L: d.ym_L, ym_R: d.ym_R, dac: d.dac }),
+                sendScope:   (d)        => self.postMessage({ channel: 'scope',   ym_L: d.ym_L, ym_R: d.ym_R, dac: d.dac, spk_L: d.spk_L, spk_R: d.spk_R }),
                 loadRom:   async (romName, baseUrl) => {
                     const url = baseUrl ? new URL(`roms/${romName}.zip`, baseUrl).href : `roms/${romName}.zip`;
                     const resp = await fetch(url);

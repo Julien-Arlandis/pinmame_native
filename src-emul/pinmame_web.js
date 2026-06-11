@@ -5132,15 +5132,16 @@ function checkIncomingModuleAPI() {
   ignoredModuleProp('onSbrkGrow');
 }
 var ASM_CONSTS = {
-  368564: () => { if (window.postWasmLog) window.postWasmLog("osd_exit called"); },  
- 368631: () => { throw new Error("PinMAME: emulation stopped"); },  
- 368682: ($0, $1, $2) => { if (window.pushWasmAudio) window.pushWasmAudio($0, $1, $2); },  
- 368746: ($0) => { if (window.postWasmMachineInfo) window.postWasmMachineInfo(UTF8ToString($0)); },  
- 368828: ($0, $1) => { if (window.pushWasmDisplay) window.pushWasmDisplay($0, $1); },  
- 368892: ($0, $1) => { if (window.pushWasmDisplayText) window.pushWasmDisplayText(UTF8ToString($0), $1); },  
- 368978: ($0, $1) => { if (window.pushWasmLamps) window.pushWasmLamps($0, $1); },  
- 369038: ($0, $1) => { if (window.pushWasmSolens) window.pushWasmSolens($0, $1); },  
- 369100: ($0, $1) => { if (window.postWasmLog) { window.postWasmLog($0, $1); } }
+  368580: () => { if (window.postWasmLog) window.postWasmLog("osd_exit called"); },  
+ 368647: () => { throw new Error("PinMAME: emulation stopped"); },  
+ 368698: ($0, $1, $2) => { if (window.pushWasmAudio) window.pushWasmAudio($0, $1, $2); },  
+ 368762: ($0) => { if (window.postWasmMachineInfo) window.postWasmMachineInfo(UTF8ToString($0)); },  
+ 368844: ($0, $1) => { if (window.pushWasmDisplay) window.pushWasmDisplay($0, $1); },  
+ 368908: ($0, $1) => { if (window.pushWasmDisplayText) window.pushWasmDisplayText(UTF8ToString($0), $1); },  
+ 368994: ($0, $1) => { if (window.pushWasmLamps) window.pushWasmLamps($0, $1); },  
+ 369054: ($0, $1) => { if (window.pushWasmSolens) window.pushWasmSolens($0, $1); },  
+ 369116: ($0, $1) => { if (window.postWasmLog) { window.postWasmLog($0, $1); } },  
+ 369176: ($0, $1, $2) => { if (window.postWasmDacRange) window.postWasmDacRange($0, $1, $2); }
 };
 
 // Imports from the Wasm binary.

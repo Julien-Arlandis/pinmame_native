@@ -708,7 +708,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.62';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.68';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();
@@ -745,6 +745,9 @@ function connectMaster(master, display) {
             const rate   = p2.get('rate') || '?';
             logToTerminal(`CPU : ${cpu}`);
             logToTerminal(`Son : ${snd} | ${stereo ? 'Stéréo' : 'Mono'} | ${rate} Hz`);
+        } else if (line.startsWith('@dacrange:')) {
+            const p3 = new URLSearchParams(line.slice(10));
+            logToTerminal(`DAC range: min=${p3.get('min')} max=${p3.get('max')} absmax=${p3.get('absmax')}`);
         } else if (line.startsWith('@sound:chips=')) {
             // conservé pour compatibilité Node.js
         } else if (line.startsWith('@roms:list=')) {
@@ -1114,6 +1117,8 @@ async function bootstrap() {
         _audioMaster = newMaster;
         connectMaster(newMaster, display);
         if (!newMaster.isLocal) newMaster.send('@connect:input=1&display=1&driver=1');
+        window._onScopeReady?.(newMaster);
+        if (document.getElementById('scopeOverlay')?.style.display !== 'none') newMaster.send('@scope:on=1');
         if (type === 'node') {
             const url = newMaster._reconnectUrl;
             newMaster.onDisconnect(async () => {

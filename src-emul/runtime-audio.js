@@ -62,7 +62,13 @@ function createAudioProcessor({ pinmameInstance: P, sendAudio, sendCapture, send
 
         if (sendScope && globalThis._scopeActive && ++scopeThrottle >= 4) {
             scopeThrottle = 0;
-            sendScope({ ym_L: ym_L.slice(), ym_R: ym_R.slice(), dac: dac.slice() });
+            // envoyer les signaux post-gain : chip gainé, dac gainé, et le mix final L
+            const chip = new Float32Array(n), dacG = new Float32Array(n);
+            for (let i = 0; i < n; i++) {
+                chip[i] = coeff_CHIP * (ym_L[i] + ym_R[i]) / 2;
+                dacG[i] = coeff_DAC  * dac[i];
+            }
+            sendScope({ ym_L: chip, ym_R: L.slice(), dac: dacG });
         }
 
         if (capBuf) {

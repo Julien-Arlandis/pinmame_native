@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.58</title>
+    <title>PinMAME Workbench v3.59</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -927,9 +927,9 @@
             const scopePauseBtn  = document.getElementById('scopePauseBtn');
 
             const SCOPE_CHANNELS = [
-                { key: 'ym_L', label: 'YM/AY L (brut)', color: '#00ffcc' },
-                { key: 'ym_R', label: 'YM/AY R (brut)', color: '#33aaff' },
-                { key: 'dac',  label: 'DAC (brut)',      color: '#ffaa00' },
+                { key: 'ym_L', label: 'CHIP L', color: '#00ffcc' },
+                { key: 'ym_R', label: 'CHIP R', color: '#33aaff' },
+                { key: 'dac',  label: 'DAC',    color: '#ffaa00' },
             ];
             const SCOPE_ROW_H = 120;
             const SCOPE_W     = 800;
@@ -988,7 +988,6 @@
                 SCOPE_CHANNELS.forEach((ch, ri) => {
                     const y0  = ri * rowH;
                     const mid = y0 + rowH / 2;
-                    const amp = rowH / 2 - 6;
                     const buf = ring[ch.key];
 
                     ctx.fillStyle = ri % 2 === 0 ? '#0a0a0a' : '#080808';
@@ -1005,20 +1004,23 @@
                         ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y0 + rowH); ctx.stroke();
                     }
 
-                    ctx.fillStyle = ch.color;
-                    ctx.font = 'bold 11px monospace';
-                    ctx.fillText(ch.label, 8, y0 + 15);
-
-                    // stats sur la fenêtre affichée
+                    // stats + auto-scale : peak de la fenêtre visible
                     let mn = Infinity, mx = -Infinity, rms = 0;
                     for (let i = 0; i < winSamples; i++) {
                         const v = buf[(startIdx + i) % RING_SIZE];
                         if (v < mn) mn = v; if (v > mx) mx = v; rms += v * v;
                     }
                     rms = Math.sqrt(rms / winSamples);
+                    const peak = Math.max(Math.abs(mn), Math.abs(mx), 1e-6);
+                    const amp  = (rowH / 2 - 6) / peak; // auto-scale : peak = bord du canal
+
+                    ctx.fillStyle = ch.color;
+                    ctx.font = 'bold 11px monospace';
+                    ctx.fillText(ch.label, 8, y0 + 15);
+
                     ctx.fillStyle = '#555';
                     ctx.font = '10px monospace';
-                    ctx.fillText(`min:${mn.toFixed(3)}  max:${mx.toFixed(3)}  rms:${rms.toFixed(3)}`, 8, y0 + rowH - 6);
+                    ctx.fillText(`peak:${peak.toFixed(4)}  rms:${rms.toFixed(4)}  ×${(1/peak).toFixed(1)}`, 8, y0 + rowH - 6);
 
                     ctx.strokeStyle = ch.color;
                     ctx.lineWidth = 1;

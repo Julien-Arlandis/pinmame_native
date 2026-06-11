@@ -708,7 +708,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.61';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.62';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();
@@ -745,14 +745,8 @@ function connectMaster(master, display) {
             const rate   = p2.get('rate') || '?';
             logToTerminal(`CPU : ${cpu}`);
             logToTerminal(`Son : ${snd} | ${stereo ? 'Stéréo' : 'Mono'} | ${rate} Hz`);
-            // AY-8910 déclaré à volume=25% dans PinMAME vs YM2151 à 75% → compenser ×3
-            const chipGain = snd.includes('AY8910') ? 3.0 : 1.0;
-            window.setAudioMix?.(chipGain, 1.0);
         } else if (line.startsWith('@sound:chips=')) {
             // conservé pour compatibilité Node.js
-            const chips = decodeURIComponent(line.slice(13));
-            const chipGain = chips.includes('AY8910') ? 3.0 : 1.0;
-            window.setAudioMix?.(chipGain, 1.0);
         } else if (line.startsWith('@roms:list=')) {
             const names = line.slice(11).split(',').map(decodeURIComponent).filter(Boolean);
             romSelector.innerHTML = '<option value=""></option>' + names.map(n => `<option value="${n}">${stripExt(n)}</option>`).join('');

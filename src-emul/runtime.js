@@ -124,6 +124,9 @@ function createEmulator({ sendLine, sendAudio, sendCapture, loadRom }) {
     globalThis.postWasmMachineInfo = function(info) {
         if (generation !== _emulatorGeneration) return;
         sendLine('status', `@machine:${info}`);
+        // compatibilité Node.js : extraire snd= et l'envoyer séparément
+        const m = info.split('|').find(s => s.startsWith('snd='));
+        if (m) sendLine('status', `@sound:chips=${m.slice(4).split('+').join(', ')}`);
     };
 
     async function initialiserMoteur(customRomBytes, customRomName, baseUrl) {

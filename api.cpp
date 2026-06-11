@@ -389,12 +389,7 @@ extern "C" {
             len += snprintf(info + len, sizeof(info) - len, "|stereo=%d|rate=%d", g_stereo, options.samplerate);
 
             EM_ASM({
-                const s = UTF8ToString($0);
-                if (window.postWasmMachineInfo)  window.postWasmMachineInfo(s);
-                if (window.postWasmSoundChips) {
-                    const m = s.match(/\|snd=([^|]+)/);
-                    if (m) window.postWasmSoundChips(m[1].replace(/\+/g, ', '));
-                }
+                if (window.postWasmMachineInfo) window.postWasmMachineInfo(UTF8ToString($0));
             }, info);
         }
 

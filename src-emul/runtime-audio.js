@@ -1,9 +1,10 @@
-function createAudioProcessor({ pinmameInstance: P, sendAudio, sendCapture, generation: G, getEmulatorGeneration: GEG }) {
+function createAudioProcessor({ pinmameInstance: P, sendAudio, sendCapture, sendScope, generation: G, getEmulatorGeneration: GEG }) {
 
     let coeff_CHIP = 1.0;
     let coeff_DAC  = 1.0;
     let sep_mode   = false;
     let K1 = 3/6; let K2 = 2/6; let K3 = 1/6; // 3-point moving average coefficients
+    let scopeThrottle = 0;
 
     globalThis.setAudioMix = (chip, dac) => { coeff_CHIP = chip; coeff_DAC = dac; };
     globalThis.setAudioSep = (s)         => { sep_mode = s; };
@@ -59,7 +60,10 @@ function createAudioProcessor({ pinmameInstance: P, sendAudio, sendCapture, gene
         sendAudio(L, R);
         prod += n;
 
-        if (globalThis._scopeTap) globalThis._scopeTap(ym_L, ym_R, dac);
+        if (sendScope && globalThis._scopeActive && ++scopeThrottle >= 4) {
+            scopeThrottle = 0;
+            sendScope({ ym_L: ym_L.slice(), ym_R: ym_R.slice(), dac: dac.slice() });
+        }
 
         if (capBuf) {
             for (let i = 0; i < n; i++) {

@@ -76,6 +76,7 @@ async function createWorkerPort() {
     const worker = new Worker(URL.createObjectURL(blob));
     let audioCallback   = null;
     let captureCallback = null;
+    let scopeCallback   = null;
 
     if (wasmBytes) {
         const buf = wasmBytes.buffer.slice(wasmBytes.byteOffset, wasmBytes.byteOffset + wasmBytes.byteLength);
@@ -90,6 +91,8 @@ async function createWorkerPort() {
             audioCallback?.(msg.left, msg.right);
         } else if (msg.channel === 'capture') {
             captureCallback?.(msg);
+        } else if (msg.channel === 'scope') {
+            scopeCallback?.(msg);
         } else if (msg.line) {
             lineWriter.write(msg.line).catch(() => {});
         }
@@ -112,7 +115,8 @@ async function createWorkerPort() {
         terminate()   { worker.terminate(); },
         disconnect()  { worker.terminate(); },
         onAudio(cb)    { audioCallback   = cb; },
-        onCapture(cb)  { captureCallback = cb; }
+        onCapture(cb)  { captureCallback = cb; },
+        onScope(cb)    { scopeCallback   = cb; }
     };
 }
 
@@ -226,6 +230,7 @@ class SerialMaster {
 
         if (port.onAudio)   port.onAudio((l, r) => this._audioCallback?.(l, r));
         if (port.onCapture) port.onCapture((d)    => this._captureCallback?.(d));
+        if (port.onScope)   port.onScope((d)      => this._scopeCallback?.(d));
         this._pump(port.readable);
     }
 
@@ -245,6 +250,7 @@ class SerialMaster {
     onMessage(cb)      { this._callbacks.push(cb); }
     onAudio(cb)        { this._audioCallback   = cb; }
     onCapture(cb)      { this._captureCallback = cb; }
+    onScope(cb)        { this._scopeCallback   = cb; }
     onDisconnect(cb)   { this._disconnectCallback = cb; }
     get name()         { return this._port.name; }
 }
@@ -702,7 +708,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.55';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.56';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();
@@ -1052,11 +1058,14 @@ async function bootstrap() {
     _masterRef.isLocal = master.isLocal;
     _audioMaster = master;
     connectMaster(master, display);
+    window._masterRef = _masterRef;
 
     window.setAudioMix = (chip, dac) => _masterRef.current?.send(`@audio:chip=${chip}&dac=${dac}`);
     window.setAudioSep = (s)         => _masterRef.current?.send(`@audio:sep=${s ? 1 : 0}`);
     window.startCapture = () => _masterRef.current?.send('@capture:action=start');
     window.stopCapture  = () => _masterRef.current?.send('@capture:action=stop');
+
+    window._onScopeReady?.(master);
 
     master.onCapture((d) => {
         const bytes = matWrite({ ym_L: d.ym_L, ym_R: d.ym_R, dac: d.dac });

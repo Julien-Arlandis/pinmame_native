@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.55</title>
+    <title>PinMAME Workbench v3.56</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -938,18 +938,19 @@
             let ringWrite = 0;
             let scopeRafId = null;
 
-            // appelé par runtime-audio.js à chaque bloc audio
-            globalThis._scopeTap = null;
-
-            function scopeTap(ym_L, ym_R, dac) {
-                const n = ym_L.length;
-                for (let i = 0; i < n; i++) {
-                    ring.ym_L[ringWrite] = ym_L[i];
-                    ring.ym_R[ringWrite] = ym_R[i];
-                    ring.dac[ringWrite]  = dac[i];
-                    ringWrite = (ringWrite + 1) % RING_SIZE;
-                }
-            }
+            // appelé depuis interface.js via master.onScope (canal Worker → main thread)
+            window._onScopeReady = function(master) {
+                master.onScope((d) => {
+                    const keys = ['ym_L', 'ym_R', 'dac'];
+                    for (const k of keys) {
+                        const src = d[k]; if (!src) continue;
+                        for (let i = 0; i < src.length; i++) {
+                            ring[k][ringWrite % RING_SIZE] = src[i];
+                            ringWrite++;
+                        }
+                    }
+                });
+            };
 
             function drawScopeFrame() {
                 const ctx  = scopeCanvas.getContext('2d');
@@ -957,6 +958,8 @@
                 const rowH = SCOPE_ROW_H;
                 ctx.fillStyle = '#080808';
                 ctx.fillRect(0, 0, W, scopeCanvas.height);
+
+                const readHead = ringWrite % RING_SIZE;
 
                 SCOPE_CHANNELS.forEach((ch, ri) => {
                     const y0  = ri * rowH;
@@ -982,7 +985,6 @@
                     ctx.font = 'bold 11px monospace';
                     ctx.fillText(ch.label, 8, y0 + 15);
 
-                    // stats sur la fenêtre affichée
                     let mn = buf[0], mx = buf[0], rms = 0;
                     for (let i = 0; i < RING_SIZE; i++) {
                         const v = buf[i];
@@ -993,14 +995,13 @@
                     ctx.font = '10px monospace';
                     ctx.fillText(`min:${mn.toFixed(3)}  max:${mx.toFixed(3)}  rms:${rms.toFixed(3)}`, 8, y0 + rowH - 6);
 
-                    // courbe — lit le ring dans l'ordre chronologique
                     ctx.strokeStyle = ch.color;
                     ctx.lineWidth = 1;
                     ctx.shadowBlur = 3;
                     ctx.shadowColor = ch.color;
                     ctx.beginPath();
                     for (let x = 0; x < W; x++) {
-                        const idx = (ringWrite + Math.round(x * RING_SIZE / W)) % RING_SIZE;
+                        const idx = (readHead + Math.round(x * RING_SIZE / W)) % RING_SIZE;
                         const y   = mid - buf[idx] * amp;
                         x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
                     }
@@ -1008,18 +1009,18 @@
                     ctx.shadowBlur = 0;
                 });
 
-                scopeInfo.textContent = `${RING_SIZE} samples · 500 ms`;
+                scopeInfo.textContent = `500 ms · ~66 ms/refresh`;
                 if (scopeOverlay.style.display !== 'none') scopeRafId = requestAnimationFrame(drawScopeFrame);
             }
 
             document.getElementById('scopeBtn').addEventListener('click', () => {
                 scopeOverlay.style.display = 'flex';
-                globalThis._scopeTap = scopeTap;
+                window._masterRef?.current?.send('@scope:on=1');
                 scopeRafId = requestAnimationFrame(drawScopeFrame);
             });
             document.getElementById('scopeCloseBtn').addEventListener('click', () => {
                 scopeOverlay.style.display = 'none';
-                globalThis._scopeTap = null;
+                window._masterRef?.current?.send('@scope:on=0');
                 if (scopeRafId) { cancelAnimationFrame(scopeRafId); scopeRafId = null; }
             });
         })();

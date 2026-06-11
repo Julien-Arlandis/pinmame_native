@@ -57,7 +57,7 @@ function normalizeRomBytes(customRomBytes) {
 // sendLine(channel, line)  — envoie une ligne texte vers l'hôte
 // sendAudio(left, right)   — envoie des frames Float32Array vers l'hôte
 // loadRom(romName, baseUrl) → Promise<ArrayBuffer>
-function createEmulator({ sendLine, sendAudio, sendCapture, loadRom }) {
+function createEmulator({ sendLine, sendAudio, sendCapture, sendScope, loadRom }) {
     const generation = ++_emulatorGeneration;
     let pinmameInstance = null;
     let vfdMemoryPointer = 0;
@@ -139,6 +139,7 @@ function createEmulator({ sendLine, sendAudio, sendCapture, loadRom }) {
             pinmameInstance: instance,
             sendAudio,
             sendCapture,
+            sendScope,
             generation,
             getEmulatorGeneration: () => _emulatorGeneration
         });
@@ -198,6 +199,9 @@ function createEmulator({ sendLine, sendAudio, sendCapture, loadRom }) {
             if (!isNaN(chip) && !isNaN(dac) && globalThis.setAudioMix) globalThis.setAudioMix(chip, dac);
             const sep = p.get('sep');
             if (sep !== null && globalThis.setAudioSep) globalThis.setAudioSep(sep === '1');
+        } else if (line.startsWith('@scope:')) {
+            p = new URLSearchParams(line.slice(7));
+            globalThis._scopeActive = p.get('on') === '1';
         } else if (line.startsWith('@capture:')) {
             p = new URLSearchParams(line.slice(9));
             const action = p.get('action');
@@ -225,6 +229,7 @@ if (isWorker) {
                 sendLine:    (ch, line) => self.postMessage({ channel: ch, line }),
                 sendAudio:   (l, r)     => self.postMessage({ channel: 'audio', left: l, right: r }),
                 sendCapture: (d)        => self.postMessage({ channel: 'capture', ym_L: d.ym_L, ym_R: d.ym_R, dac: d.dac }, [d.ym_L.buffer, d.ym_R.buffer, d.dac.buffer]),
+                sendScope:   (d)        => self.postMessage({ channel: 'scope',   ym_L: d.ym_L, ym_R: d.ym_R, dac: d.dac }),
                 loadRom:   async (romName, baseUrl) => {
                     const url = baseUrl ? new URL(`roms/${romName}.zip`, baseUrl).href : `roms/${romName}.zip`;
                     const resp = await fetch(url);

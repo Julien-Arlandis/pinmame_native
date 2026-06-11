@@ -121,10 +121,6 @@ function createEmulator({ sendLine, sendAudio, sendCapture, sendScope, loadRom }
         sendLine('status', `@sound:chips=${chips}`);
     };
 
-    globalThis.postWasmDacRange = function(min, max, absMax) {
-        sendLine('status', `@dacrange:min=${min}&max=${max}&absmax=${absMax}`);
-    };
-
     globalThis.postWasmMachineInfo = function(info) {
         if (generation !== _emulatorGeneration) return;
         sendLine('status', `@machine:${info}`);

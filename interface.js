@@ -702,7 +702,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.53';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.54';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();
@@ -1059,6 +1059,13 @@ async function bootstrap() {
     window.stopCapture  = () => _masterRef.current?.send('@capture:action=stop');
 
     master.onCapture((d) => {
+        if (window._scopeCaptureCallback) {
+            const cb = window._scopeCaptureCallback;
+            window._scopeCaptureCallback = null;
+            cb(d);
+            window.dispatchEvent(new Event('captureComplete'));
+            return;
+        }
         const bytes = matWrite({ ym_L: d.ym_L, ym_R: d.ym_R, dac: d.dac });
         const url = URL.createObjectURL(new Blob([bytes], { type: 'application/octet-stream' }));
         const a = document.createElement('a');

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.53</title>
+    <title>PinMAME Workbench v3.54</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -811,7 +811,8 @@
                             <input id="sliderDAC" type="range" min="0" max="100" value="100" style="flex:1; accent-color:var(--neon-amber);">
                             <span id="valDAC" style="font-size:0.75rem; color:var(--neon-amber); width:36px; text-align:right;">100%</span>
                         </div>
-                        <div style="display:flex; justify-content:flex-end;">
+                        <div style="display:flex; justify-content:flex-end; gap:6px;">
+                            <button id="scopeBtn" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#0af; color:#0af;">&#9638; SCOPE</button>
                             <button id="captureBtn" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#c00; color:#ff4444;">&#9679; REC</button>
                         </div>
                     </div>
@@ -847,6 +848,21 @@
                     </table>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- ── Scope popup ─────────────────────────────────────────────────── -->
+    <div id="scopeOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.88); z-index:9999; align-items:center; justify-content:center; padding:12px; box-sizing:border-box;">
+        <div style="background:#0e0e0e; border:1px solid #222; border-radius:8px; padding:14px; width:100%; max-width:820px; box-sizing:border-box;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <span style="color:#0af; font-family:monospace; font-size:0.85rem; font-weight:bold; letter-spacing:2px;">&#9638; AUDIO SCOPE</span>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <span id="scopeInfo" style="font-family:monospace; font-size:0.7rem; color:#555;"></span>
+                    <button id="scopeRefreshBtn" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#0af; color:#0af;">&#9100; CAPTURE</button>
+                    <button id="scopeCloseBtn" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#444; color:#888;">&#10005;</button>
+                </div>
+            </div>
+            <canvas id="scopeCanvas" style="width:100%; height:auto; display:block; border:1px solid #1a1a1a; border-radius:4px;"></canvas>
         </div>
     </div>
 
@@ -897,6 +913,118 @@
                 else            { setCapturing(false); window.stopCapture?.();  }
             });
             window.addEventListener('captureComplete', () => setCapturing(false));
+
+            // ── Scope ──────────────────────────────────────────────────────────
+            const scopeOverlay     = document.getElementById('scopeOverlay');
+            const scopeCanvas      = document.getElementById('scopeCanvas');
+            const scopeRefreshBtn  = document.getElementById('scopeRefreshBtn');
+            const scopeCloseBtn    = document.getElementById('scopeCloseBtn');
+            const scopeInfo        = document.getElementById('scopeInfo');
+
+            const SCOPE_CHANNELS = [
+                { key: 'ym_L', label: 'CHIP L', color: '#00ffcc' },
+                { key: 'ym_R', label: 'CHIP R', color: '#33aaff' },
+                { key: 'dac',  label: 'DAC',    color: '#ffaa00' },
+            ];
+            const SCOPE_ROW_H = 120;
+            const SCOPE_W     = 800;
+
+            scopeCanvas.width  = SCOPE_W;
+            scopeCanvas.height = SCOPE_ROW_H * SCOPE_CHANNELS.length;
+
+            function drawScope(d) {
+                const ctx  = scopeCanvas.getContext('2d');
+                const W    = scopeCanvas.width;
+                const rowH = SCOPE_ROW_H;
+                ctx.fillStyle = '#080808';
+                ctx.fillRect(0, 0, W, scopeCanvas.height);
+
+                SCOPE_CHANNELS.forEach((ch, ri) => {
+                    const y0  = ri * rowH;
+                    const mid = y0 + rowH / 2;
+                    const data = d[ch.key];
+                    const n    = data ? data.length : 0;
+                    const amp  = rowH / 2 - 6;
+
+                    // fond row
+                    ctx.fillStyle = ri % 2 === 0 ? '#0a0a0a' : '#080808';
+                    ctx.fillRect(0, y0, W, rowH);
+
+                    // ligne 0
+                    ctx.strokeStyle = '#1e1e1e';
+                    ctx.lineWidth = 1;
+                    ctx.beginPath(); ctx.moveTo(0, mid); ctx.lineTo(W, mid); ctx.stroke();
+
+                    // séparateur haut
+                    ctx.strokeStyle = '#1a1a1a';
+                    ctx.beginPath(); ctx.moveTo(0, y0); ctx.lineTo(W, y0); ctx.stroke();
+
+                    // grille verticale
+                    ctx.strokeStyle = '#141414';
+                    for (let gx = 1; gx < 8; gx++) {
+                        const x = (gx / 8) * W;
+                        ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y0 + rowH); ctx.stroke();
+                    }
+
+                    // label
+                    ctx.fillStyle = ch.color;
+                    ctx.font = 'bold 11px monospace';
+                    ctx.fillText(ch.label, 8, y0 + 15);
+
+                    // stats
+                    if (n) {
+                        let mn = data[0], mx = data[0], rms = 0;
+                        for (let i = 0; i < n; i++) { if (data[i] < mn) mn = data[i]; if (data[i] > mx) mx = data[i]; rms += data[i] * data[i]; }
+                        rms = Math.sqrt(rms / n);
+                        ctx.fillStyle = '#555';
+                        ctx.font = '10px monospace';
+                        ctx.fillText(`min:${mn.toFixed(3)}  max:${mx.toFixed(3)}  rms:${rms.toFixed(3)}`, 8, y0 + rowH - 6);
+                    }
+
+                    // courbe
+                    if (!n) return;
+                    const step = n / W;
+                    ctx.strokeStyle = ch.color;
+                    ctx.lineWidth = 1;
+                    ctx.shadowBlur = 3;
+                    ctx.shadowColor = ch.color;
+                    ctx.beginPath();
+                    for (let x = 0; x < W; x++) {
+                        const i  = Math.min(0 | (x * step), n - 1);
+                        const y  = mid - data[i] * amp;
+                        x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+                    }
+                    ctx.stroke();
+                    ctx.shadowBlur = 0;
+                });
+            }
+
+            function doScopeCapture(ms) {
+                ms = ms || 500;
+                scopeRefreshBtn.textContent = '...';
+                scopeRefreshBtn.disabled    = true;
+                scopeInfo.textContent       = '';
+                window._scopeCaptureCallback = (d) => {
+                    drawScope(d);
+                    const total = d.ym_L ? d.ym_L.length : 0;
+                    scopeInfo.textContent    = `${total} samples · ${(total / 44100 * 1000).toFixed(0)} ms`;
+                    scopeRefreshBtn.textContent = '&#9100; CAPTURE';
+                    scopeRefreshBtn.innerHTML   = '&#9100; CAPTURE';
+                    scopeRefreshBtn.disabled    = false;
+                };
+                window.startCapture?.();
+                setTimeout(() => window.stopCapture?.(), ms);
+            }
+
+            document.getElementById('scopeBtn').addEventListener('click', () => {
+                scopeOverlay.style.display = 'flex';
+                doScopeCapture(500);
+            });
+            scopeCloseBtn.addEventListener('click', () => {
+                scopeOverlay.style.display = 'none';
+                window._scopeCaptureCallback = null;
+            });
+            scopeRefreshBtn.addEventListener('click', () => doScopeCapture(500));
         })();
     </script>
 </body>

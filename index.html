@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.60</title>
+    <title>PinMAME Workbench v3.61</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -1004,20 +1004,13 @@
                         ctx.beginPath(); ctx.moveTo(x, y0); ctx.lineTo(x, y0 + rowH); ctx.stroke();
                     }
 
-                    // moyenne DC + stats sur la fenêtre visible
-                    let mean = 0;
-                    for (let i = 0; i < winSamples; i++) mean += buf[(startIdx + i) % RING_SIZE];
-                    mean /= winSamples;
-
-                    let pk = 1e-6, rms = 0;
+                    // min/max bruts sur la fenêtre visible
+                    let mn = Infinity, mx = -Infinity;
                     for (let i = 0; i < winSamples; i++) {
-                        const v = buf[(startIdx + i) % RING_SIZE] - mean;
-                        const a = Math.abs(v);
-                        if (a > pk) pk = a;
-                        rms += v * v;
+                        const v = buf[(startIdx + i) % RING_SIZE];
+                        if (v < mn) mn = v; if (v > mx) mx = v;
                     }
-                    rms = Math.sqrt(rms / winSamples);
-                    const amp = (rowH / 2 - 6) / pk; // auto-scale sur le signal centré
+                    const amp = rowH / 2 - 6; // échelle fixe : 1.0 = bord du canal
 
                     ctx.fillStyle = ch.color;
                     ctx.font = 'bold 11px monospace';
@@ -1025,7 +1018,7 @@
 
                     ctx.fillStyle = '#555';
                     ctx.font = '10px monospace';
-                    ctx.fillText(`pk:${pk.toFixed(4)}  rms:${rms.toFixed(4)}  dc:${mean.toFixed(4)}  ×${(1/pk).toFixed(1)}`, 8, y0 + rowH - 6);
+                    ctx.fillText(`min:${mn.toFixed(4)}  max:${mx.toFixed(4)}`, 8, y0 + rowH - 6);
 
                     ctx.strokeStyle = ch.color;
                     ctx.lineWidth = 1;
@@ -1034,7 +1027,7 @@
                     ctx.beginPath();
                     for (let x = 0; x < W; x++) {
                         const si  = (startIdx + Math.round(x * (winSamples - 1) / (W - 1))) % RING_SIZE;
-                        const y   = mid - (buf[si] - mean) * amp;
+                        const y   = mid - buf[si] * amp;
                         x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
                     }
                     ctx.stroke();

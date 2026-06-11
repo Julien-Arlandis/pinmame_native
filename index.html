@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.57</title>
+    <title>PinMAME Workbench v3.58</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -855,13 +855,18 @@
     <div id="scopeOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.88); z-index:9999; align-items:center; justify-content:center; padding:12px; box-sizing:border-box;">
         <div style="background:#0e0e0e; border:1px solid #222; border-radius:8px; padding:14px; width:100%; max-width:820px; box-sizing:border-box;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-                <span style="color:#0af; font-family:monospace; font-size:0.85rem; font-weight:bold; letter-spacing:2px;">&#9638; AUDIO SCOPE</span>
-                <div style="display:flex; gap:8px; align-items:center;">
-                    <span id="scopeInfo" style="font-family:monospace; font-size:0.7rem; color:#555;"></span>
+                <span style="color:#0af; font-family:monospace; font-size:0.85rem; font-weight:bold; letter-spacing:2px;">&#9638; AUDIO SCOPE — RAW</span>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <label style="font-family:monospace; font-size:0.7rem; color:#666; display:flex; align-items:center; gap:6px;">
+                        <span id="scopeWinLabel" style="color:#aaa; min-width:48px;">100 ms</span>
+                        <input id="scopeWinSlider" type="range" min="10" max="500" value="100" step="10" style="width:110px; accent-color:#0af;">
+                    </label>
+                    <button id="scopePauseBtn" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#0af; color:#0af;">&#9646;&#9646; PAUSE</button>
                     <button id="scopeCloseBtn" class="btn-system" style="font-size:0.65rem; padding:3px 10px; border-color:#444; color:#888;">&#10005;</button>
                 </div>
             </div>
             <canvas id="scopeCanvas" style="width:100%; height:auto; display:block; border:1px solid #1a1a1a; border-radius:4px;"></canvas>
+            <div id="scopeInfo" style="font-family:monospace; font-size:0.68rem; color:#444; margin-top:5px; text-align:right;"></div>
         </div>
     </div>
 
@@ -914,18 +919,21 @@
             window.addEventListener('captureComplete', () => setCapturing(false));
 
             // ── Scope temps réel ───────────────────────────────────────────────
-            const scopeOverlay = document.getElementById('scopeOverlay');
-            const scopeCanvas  = document.getElementById('scopeCanvas');
-            const scopeInfo    = document.getElementById('scopeInfo');
+            const scopeOverlay   = document.getElementById('scopeOverlay');
+            const scopeCanvas    = document.getElementById('scopeCanvas');
+            const scopeInfo      = document.getElementById('scopeInfo');
+            const scopeWinSlider = document.getElementById('scopeWinSlider');
+            const scopeWinLabel  = document.getElementById('scopeWinLabel');
+            const scopePauseBtn  = document.getElementById('scopePauseBtn');
 
             const SCOPE_CHANNELS = [
-                { key: 'ym_L', label: 'CHIP (gainé)', color: '#00ffcc' },
-                { key: 'ym_R', label: 'MIX OUT L',    color: '#33aaff' },
-                { key: 'dac',  label: 'DAC (gainé)',   color: '#ffaa00' },
+                { key: 'ym_L', label: 'YM/AY L (brut)', color: '#00ffcc' },
+                { key: 'ym_R', label: 'YM/AY R (brut)', color: '#33aaff' },
+                { key: 'dac',  label: 'DAC (brut)',      color: '#ffaa00' },
             ];
             const SCOPE_ROW_H = 120;
             const SCOPE_W     = 800;
-            const RING_SIZE   = 44100 / 2; // 500 ms
+            const RING_SIZE   = Math.round(44100 * 0.5); // 500 ms max
 
             scopeCanvas.width  = SCOPE_W;
             scopeCanvas.height = SCOPE_ROW_H * SCOPE_CHANNELS.length;
@@ -935,20 +943,34 @@
                 ym_R: new Float32Array(RING_SIZE),
                 dac:  new Float32Array(RING_SIZE),
             };
-            let ringWrite = 0;
+            let ringWrite  = 0;
             let scopeRafId = null;
+            let scopePaused = false;
+            let scopeWindowMs = 100;
 
-            // appelé depuis interface.js via master.onScope (canal Worker → main thread)
+            scopeWinSlider.addEventListener('input', () => {
+                scopeWindowMs = +scopeWinSlider.value;
+                scopeWinLabel.textContent = scopeWindowMs + ' ms';
+            });
+
+            scopePauseBtn.addEventListener('click', () => {
+                scopePaused = !scopePaused;
+                scopePauseBtn.innerHTML      = scopePaused ? '&#9654; LIVE' : '&#9646;&#9646; PAUSE';
+                scopePauseBtn.style.color      = scopePaused ? '#0f0' : '#0af';
+                scopePauseBtn.style.borderColor= scopePaused ? '#0f0' : '#0af';
+            });
+
             window._onScopeReady = function(master) {
                 master.onScope((d) => {
-                    const keys = ['ym_L', 'ym_R', 'dac'];
-                    for (const k of keys) {
-                        const src = d[k]; if (!src) continue;
-                        for (let i = 0; i < src.length; i++) {
-                            ring[k][ringWrite % RING_SIZE] = src[i];
-                            ringWrite++;
-                        }
+                    if (scopePaused) return;
+                    const n = d.ym_L.length;
+                    for (let i = 0; i < n; i++) {
+                        const pos = (ringWrite + i) % RING_SIZE;
+                        ring.ym_L[pos] = d.ym_L[i];
+                        ring.ym_R[pos] = d.ym_R[i];
+                        ring.dac[pos]  = d.dac[i];
                     }
+                    ringWrite = (ringWrite + n) % RING_SIZE;
                 });
             };
 
@@ -959,7 +981,9 @@
                 ctx.fillStyle = '#080808';
                 ctx.fillRect(0, 0, W, scopeCanvas.height);
 
-                const readHead = ringWrite % RING_SIZE;
+                const winSamples = Math.round(scopeWindowMs / 1000 * 44100);
+                // début de fenêtre = ringWrite - winSamples (en annulaire)
+                const startIdx = (ringWrite - winSamples + RING_SIZE * 4) % RING_SIZE;
 
                 SCOPE_CHANNELS.forEach((ch, ri) => {
                     const y0  = ri * rowH;
@@ -985,12 +1009,13 @@
                     ctx.font = 'bold 11px monospace';
                     ctx.fillText(ch.label, 8, y0 + 15);
 
-                    let mn = buf[0], mx = buf[0], rms = 0;
-                    for (let i = 0; i < RING_SIZE; i++) {
-                        const v = buf[i];
+                    // stats sur la fenêtre affichée
+                    let mn = Infinity, mx = -Infinity, rms = 0;
+                    for (let i = 0; i < winSamples; i++) {
+                        const v = buf[(startIdx + i) % RING_SIZE];
                         if (v < mn) mn = v; if (v > mx) mx = v; rms += v * v;
                     }
-                    rms = Math.sqrt(rms / RING_SIZE);
+                    rms = Math.sqrt(rms / winSamples);
                     ctx.fillStyle = '#555';
                     ctx.font = '10px monospace';
                     ctx.fillText(`min:${mn.toFixed(3)}  max:${mx.toFixed(3)}  rms:${rms.toFixed(3)}`, 8, y0 + rowH - 6);
@@ -1001,22 +1026,26 @@
                     ctx.shadowColor = ch.color;
                     ctx.beginPath();
                     for (let x = 0; x < W; x++) {
-                        const idx = (readHead + Math.round(x * RING_SIZE / W)) % RING_SIZE;
-                        const y   = mid - buf[idx] * amp;
+                        const si  = (startIdx + Math.round(x * (winSamples - 1) / (W - 1))) % RING_SIZE;
+                        const y   = mid - buf[si] * amp;
                         x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
                     }
                     ctx.stroke();
                     ctx.shadowBlur = 0;
                 });
 
-                scopeInfo.textContent = `500 ms · ~66 ms/refresh`;
+                scopeInfo.textContent = `fenêtre : ${scopeWindowMs} ms · ${winSamples} samples${scopePaused ? ' · ⏸ PAUSE' : ''}`;
                 if (scopeOverlay.style.display !== 'none') scopeRafId = requestAnimationFrame(drawScopeFrame);
             }
 
             document.getElementById('scopeBtn').addEventListener('click', () => {
                 scopeOverlay.style.display = 'flex';
+                scopePaused = false;
+                scopePauseBtn.innerHTML       = '&#9646;&#9646; PAUSE';
+                scopePauseBtn.style.color       = '#0af';
+                scopePauseBtn.style.borderColor = '#0af';
                 window._masterRef?.current?.send('@scope:on=1');
-                scopeRafId = requestAnimationFrame(drawScopeFrame);
+                if (!scopeRafId) scopeRafId = requestAnimationFrame(drawScopeFrame);
             });
             document.getElementById('scopeCloseBtn').addEventListener('click', () => {
                 scopeOverlay.style.display = 'none';

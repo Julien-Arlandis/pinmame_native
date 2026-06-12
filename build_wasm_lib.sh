@@ -69,12 +69,7 @@ for cpu_dir in "$BUILD_WORKSPACE/src/cpu"/*/; do
     [ "$(basename "$cpu_dir")" != "m6502" ] && find "$cpu_dir" -name "*.c" -delete
 done
 
-# Headers sound/ des chips non compilés
-SOUND_H_KEEP="2151intf.h ay8910.h dac.h filter.h fm.h mixer.h samples.h sp0250.h streams.h votrax.h ym2151.h"
-for f in "$BUILD_WORKSPACE/src/sound"/*.h; do
-    fname=$(basename "$f")
-    echo "$SOUND_H_KEEP" | grep -qw "$fname" || rm -f "$f"
-done
+# sound/*.h : tous conservés — sndintrf.h les inclut tous sans exception
 
 # Whitelist des .c autorisés (chemins relatifs à BUILD_WORKSPACE)
 WHITELIST_FILE="$WASM_TEMP_OBJ_DIR/whitelist_c.txt"

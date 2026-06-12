@@ -35,7 +35,7 @@ mkdir -p "$WASM_TEMP_OBJ_DIR/include"
 # 🧹 WORKSPACE ÉPURÉ — copie temporaire sans les fichiers inutiles
 #    L'original pinmame_workspace/ n'est jamais modifié.
 # =========================================================================
-BUILD_WORKSPACE="/tmp/pinmame_stripped"
+BUILD_WORKSPACE="$BASE_DIR/pinmame_stripped"
 echo "[*] Création du workspace épuré → $BUILD_WORKSPACE"
 rm -rf "$BUILD_WORKSPACE"
 cp -r "$NATIVE_WORKSPACE" "$BUILD_WORKSPACE"

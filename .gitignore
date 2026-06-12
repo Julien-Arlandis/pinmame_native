@@ -26,3 +26,4 @@ pinmame_workspace_wasm/
 *.a
 core.*
 vgcore.*
+pinmame_stripped/

@@ -98,12 +98,25 @@ src/sound/votrax.c
 src/unix/fileio.c
 WEOF
 
-# Supprimer tout fichier qui n'est ni un .h ni un .c de la whitelist
+# Whitelist des .h GTS80 dans wpc/ (analyse des includes directs + transitifs)
+WPC_H_KEEP="bulb.h core.h gen.h gts3.h gts80.h gts80s.h mech.h sim.h snd_cmd.h sndbrd.h vpintf.h wmssnd.h wpc.h wpcsam.h"
+
+# Supprimer tout fichier superflu (.h non-GTS80 dans wpc/, .c hors whitelist, non-.h/.c)
 while IFS= read -r -d '' f; do
-    case "$f" in
-        *.h) continue ;;
-    esac
     rel="${f#$BUILD_WORKSPACE/}"
+    case "$f" in
+        *.h)
+            # wpc/ : whitelist stricte des headers GTS80
+            case "$rel" in
+                src/wpc/*.h)
+                    fname=$(basename "$f")
+                    echo "$WPC_H_KEEP" | grep -qw "$fname" || rm -f "$f"
+                    ;;
+            esac
+            continue
+            ;;
+    esac
+    # Fichiers .c : whitelist stricte
     case "$rel" in
         src/zlib/*.c) continue ;;
         ext/*) continue ;;              # .c inclus via #include dans mame.c

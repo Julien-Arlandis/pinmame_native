@@ -32,7 +32,9 @@ rm -rf "$WASM_TEMP_OBJ_DIR"
 mkdir -p "$WASM_TEMP_OBJ_DIR/include"
 
 # =========================================================================
-# 🧹 WORKSPACE ÉPURÉ — copie temporaire sans les fichiers inutiles
+# 🧹 WORKSPACE ÉPURÉ — whitelist stricte
+#    Seuls les .c de COEUR_PILES + zlib survivent.
+#    Les .h sont conservés partout (nécessaires aux includes).
 #    L'original pinmame_workspace/ n'est jamais modifié.
 # =========================================================================
 BUILD_WORKSPACE="$BASE_DIR/pinmame_stripped"
@@ -40,27 +42,41 @@ echo "[*] Création du workspace épuré → $BUILD_WORKSPACE"
 rm -rf "$BUILD_WORKSPACE"
 cp -r "$NATIVE_WORKSPACE" "$BUILD_WORKSPACE"
 
-# Plateformes non-WASM — supprimer uniquement les .c, garder les .h (includes potentiels)
-for dir in win32com windows ios lisy p-roc ppuc instvpm xml2info dbgfonts vidhrdw ui vc; do
-    find "$BUILD_WORKSPACE/src/$dir" -name "*.c" -delete 2>/dev/null || true
+# Répertoires 100% inutiles (pas de .h requis par le cœur GTS80)
+for dir in win32com windows ios lisy p-roc ppuc instvpm xml2info dbgfonts vc; do
+    rm -rf "$BUILD_WORKSPACE/src/$dir"
 done
 
-# CPUs : garder uniquement m6502 (seul CPU GTS80) — supprimer les .c des autres
+# CPUs : supprimer tout sauf m6502
 for cpu_dir in "$BUILD_WORKSPACE/src/cpu"/*/; do
-    case "$(basename "$cpu_dir")" in
-        m6502) ;;
-        *) find "$cpu_dir" -name "*.c" -delete ;;
-    esac
+    [ "$(basename "$cpu_dir")" != "m6502" ] && rm -rf "$cpu_dir"
 done
 
-# Chips sonores non compilés (garder ce qui est dans COEUR_PILES + les .h)
-SOUND_KEEP="dac ym2151 2151intf fm streams mixer filter ay8910 sp0250 samples votrax"
-for f in "$BUILD_WORKSPACE/src/sound"/*.c; do
-    base=$(basename "$f" .c)
-    keep=0
-    for k in $SOUND_KEEP; do [ "$base" = "$k" ] && keep=1 && break; done
-    [ $keep -eq 0 ] && rm -f "$f"
+# Whitelist des .c autorisés (chemins relatifs à BUILD_WORKSPACE)
+declare -A ALLOWED_C
+for rel in \
+    src/mame.c src/common.c src/cpuintrf.c src/memory.c \
+    src/timer.c src/palette.c src/state.c src/cpuexec.c \
+    src/sndintrf.c src/fileio.c src/inptport.c src/hash.c \
+    src/cpuint.c src/unzip.c src/md5.c src/sha1.c src/config.c src/input.c \
+    src/cpu/m6502/m6502.c \
+    src/wpc/gts80.c src/wpc/gts80s.c src/wpc/gts80games.c src/wpc/core.c \
+    src/wpc/sim.c src/wpc/sndbrd.c src/wpc/snd_cmd.c src/wpc/mech.c \
+    src/machine/6532riot.c src/machine/6530riot.c \
+    src/sound/dac.c src/sound/ym2151.c src/sound/2151intf.c src/sound/fm.c \
+    src/sound/streams.c src/sound/mixer.c src/sound/filter.c \
+    src/sound/ay8910.c src/sound/sp0250.c src/sound/samples.c src/sound/votrax.c \
+    src/unix/fileio.c; do
+    ALLOWED_C["$rel"]=1
 done
+
+# Supprimer tout .c hors whitelist (zlib exclu : compilé en glob)
+while IFS= read -r -d '' cfile; do
+    rel="${cfile#$BUILD_WORKSPACE/}"
+    if [[ "$rel" != src/zlib/* ]] && [[ -z "${ALLOWED_C[$rel]}" ]]; then
+        rm -f "$cfile"
+    fi
+done < <(find "$BUILD_WORKSPACE/src" -name "*.c" -print0)
 
 echo "[*] Workspace épuré : $(du -sh "$BUILD_WORKSPACE/src" | cut -f1) (original : $(du -sh "$NATIVE_WORKSPACE/src" | cut -f1))"
 

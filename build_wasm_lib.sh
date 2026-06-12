@@ -106,7 +106,8 @@ while IFS= read -r -d '' f; do
     rel="${f#$BUILD_WORKSPACE/}"
     case "$rel" in
         src/zlib/*.c) continue ;;
-        ext/*) continue ;;          # .c inclus via #include dans mame.c
+        ext/*) continue ;;              # .c inclus via #include dans mame.c
+        src/cpu/m6502/*) continue ;;    # .c inclus via #include dans m6502.c
     esac
     grep -qxF "$rel" "$WHITELIST_FILE" || rm -f "$f"
 done < <(find "$BUILD_WORKSPACE" -type f -print0)

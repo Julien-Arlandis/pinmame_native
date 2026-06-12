@@ -53,29 +53,56 @@ for cpu_dir in "$BUILD_WORKSPACE/src/cpu"/*/; do
 done
 
 # Whitelist des .c autorisés (chemins relatifs à BUILD_WORKSPACE)
-declare -A ALLOWED_C
-for rel in \
-    src/mame.c src/common.c src/cpuintrf.c src/memory.c \
-    src/timer.c src/palette.c src/state.c src/cpuexec.c \
-    src/sndintrf.c src/fileio.c src/inptport.c src/hash.c \
-    src/cpuint.c src/unzip.c src/md5.c src/sha1.c src/config.c src/input.c \
-    src/cpu/m6502/m6502.c \
-    src/wpc/gts80.c src/wpc/gts80s.c src/wpc/gts80games.c src/wpc/core.c \
-    src/wpc/sim.c src/wpc/sndbrd.c src/wpc/snd_cmd.c src/wpc/mech.c \
-    src/machine/6532riot.c src/machine/6530riot.c \
-    src/sound/dac.c src/sound/ym2151.c src/sound/2151intf.c src/sound/fm.c \
-    src/sound/streams.c src/sound/mixer.c src/sound/filter.c \
-    src/sound/ay8910.c src/sound/sp0250.c src/sound/samples.c src/sound/votrax.c \
-    src/unix/fileio.c; do
-    ALLOWED_C["$rel"]=1
-done
+WHITELIST_FILE="$WASM_TEMP_OBJ_DIR/whitelist_c.txt"
+cat > "$WHITELIST_FILE" << 'WEOF'
+src/mame.c
+src/common.c
+src/cpuintrf.c
+src/memory.c
+src/timer.c
+src/palette.c
+src/state.c
+src/cpuexec.c
+src/sndintrf.c
+src/fileio.c
+src/inptport.c
+src/hash.c
+src/cpuint.c
+src/unzip.c
+src/md5.c
+src/sha1.c
+src/config.c
+src/input.c
+src/cpu/m6502/m6502.c
+src/wpc/gts80.c
+src/wpc/gts80s.c
+src/wpc/gts80games.c
+src/wpc/core.c
+src/wpc/sim.c
+src/wpc/sndbrd.c
+src/wpc/snd_cmd.c
+src/wpc/mech.c
+src/machine/6532riot.c
+src/machine/6530riot.c
+src/sound/dac.c
+src/sound/ym2151.c
+src/sound/2151intf.c
+src/sound/fm.c
+src/sound/streams.c
+src/sound/mixer.c
+src/sound/filter.c
+src/sound/ay8910.c
+src/sound/sp0250.c
+src/sound/samples.c
+src/sound/votrax.c
+src/unix/fileio.c
+WEOF
 
 # Supprimer tout .c hors whitelist (zlib exclu : compilé en glob)
 while IFS= read -r -d '' cfile; do
     rel="${cfile#$BUILD_WORKSPACE/}"
-    if [[ "$rel" != src/zlib/* ]] && [[ -z "${ALLOWED_C[$rel]}" ]]; then
-        rm -f "$cfile"
-    fi
+    case "$rel" in src/zlib/*) continue ;; esac
+    grep -qxF "$rel" "$WHITELIST_FILE" || rm -f "$cfile"
 done < <(find "$BUILD_WORKSPACE/src" -name "*.c" -print0)
 
 echo "[*] Workspace épuré : $(du -sh "$BUILD_WORKSPACE/src" | cut -f1) (original : $(du -sh "$NATIVE_WORKSPACE/src" | cut -f1))"

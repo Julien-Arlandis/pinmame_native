@@ -49,8 +49,8 @@ done
 rm -rf "$BUILD_WORKSPACE/src/ui"
 rm -rf "$BUILD_WORKSPACE/src/unix/contrib"
 rm -rf "$BUILD_WORKSPACE/src/unix/video-drivers"
-rm -rf "$BUILD_WORKSPACE/src/unix/sysdep"
 rm -rf "$BUILD_WORKSPACE/src/unix/joystick-drivers"
+# sysdep/ conservé : xmame.h → sysdep/sysdep_palette.h etc.
 rm -rf "$BUILD_WORKSPACE/xpinmame.obj"
 
 # Répertoires ext/ inutiles

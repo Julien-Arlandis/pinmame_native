@@ -31,6 +31,48 @@ rm -f "libpinmame_wasm.a"
 rm -rf "$WASM_TEMP_OBJ_DIR"
 mkdir -p "$WASM_TEMP_OBJ_DIR/include"
 
+# =========================================================================
+# 🧹 WORKSPACE ÉPURÉ — copie temporaire sans les fichiers inutiles
+#    L'original pinmame_workspace/ n'est jamais modifié.
+# =========================================================================
+BUILD_WORKSPACE="/tmp/pinmame_stripped"
+echo "[*] Création du workspace épuré → $BUILD_WORKSPACE"
+rm -rf "$BUILD_WORKSPACE"
+cp -r "$NATIVE_WORKSPACE" "$BUILD_WORKSPACE"
+
+# Plateformes non-WASM
+rm -rf "$BUILD_WORKSPACE/src/win32com"
+rm -rf "$BUILD_WORKSPACE/src/windows"
+rm -rf "$BUILD_WORKSPACE/src/ios"
+rm -rf "$BUILD_WORKSPACE/src/lisy"
+rm -rf "$BUILD_WORKSPACE/src/p-roc"
+rm -rf "$BUILD_WORKSPACE/src/ppuc"
+rm -rf "$BUILD_WORKSPACE/src/instvpm"
+rm -rf "$BUILD_WORKSPACE/src/xml2info"
+rm -rf "$BUILD_WORKSPACE/src/dbgfonts"
+rm -rf "$BUILD_WORKSPACE/src/vidhrdw"
+rm -rf "$BUILD_WORKSPACE/src/ui"
+rm -rf "$BUILD_WORKSPACE/src/vc"
+
+# CPUs : on garde uniquement m6502 (seul CPU GTS80)
+for cpu_dir in "$BUILD_WORKSPACE/src/cpu"/*/; do
+    case "$(basename "$cpu_dir")" in
+        m6502) ;;
+        *) rm -rf "$cpu_dir" ;;
+    esac
+done
+
+# Chips sonores non compilés (garder ce qui est dans COEUR_PILES + les .h)
+SOUND_KEEP="dac ym2151 2151intf fm streams mixer filter ay8910 sp0250 samples votrax"
+for f in "$BUILD_WORKSPACE/src/sound"/*.c; do
+    base=$(basename "$f" .c)
+    keep=0
+    for k in $SOUND_KEEP; do [ "$base" = "$k" ] && keep=1 && break; done
+    [ $keep -eq 0 ] && rm -f "$f"
+done
+
+echo "[*] Workspace épuré : $(du -sh "$BUILD_WORKSPACE/src" | cut -f1) (original : $(du -sh "$NATIVE_WORKSPACE/src" | cut -f1))"
+
 cat << 'EOF' > "$WASM_TEMP_OBJ_DIR/include/osd_cpu.h"
 #ifndef OSD_CPU_H_V112
 #define OSD_CPU_H_V112
@@ -139,13 +181,13 @@ EMCC_FLAGS=(
     "-O3"
     "-include" "$WASM_TEMP_OBJ_DIR/emscripten_macros.h"
     "-I$WASM_TEMP_OBJ_DIR/include"
-    "-I$NATIVE_WORKSPACE/src"
-    "-I$NATIVE_WORKSPACE/src/wpc"
-    "-I$NATIVE_WORKSPACE/src/machine"
-    "-I$NATIVE_WORKSPACE/src/unix"
-    "-I$NATIVE_WORKSPACE/src/cores"
-    "-I$NATIVE_WORKSPACE/src/cpu"
-    "-I$NATIVE_WORKSPACE/src/sound"
+    "-I$BUILD_WORKSPACE/src"
+    "-I$BUILD_WORKSPACE/src/wpc"
+    "-I$BUILD_WORKSPACE/src/machine"
+    "-I$BUILD_WORKSPACE/src/unix"
+    "-I$BUILD_WORKSPACE/src/cores"
+    "-I$BUILD_WORKSPACE/src/cpu"
+    "-I$BUILD_WORKSPACE/src/sound"
     "-DINLINE=static inline"
     "-Wno-implicit-function-declaration"
     "-Wno-static-in-inline"
@@ -168,22 +210,22 @@ COEUR_PILES=(
 
 echo "[*] [V113.00] Compilation STRICTE du cœur de l'émulateur..."
 for f in "${COEUR_PILES[@]}"; do
-    if [ -f "$NATIVE_WORKSPACE/$f" ]; then
+    if [ -f "$BUILD_WORKSPACE/$f" ]; then
         dir_obj="$WASM_TEMP_OBJ_DIR/$(dirname "$f")"
         mkdir -p "$dir_obj"
         b=$(basename "$f" .c)
         echo "   -> [V113.00] Compilation de $f..."
-        emcc "${EMCC_FLAGS[@]}" -c "$NATIVE_WORKSPACE/$f" -o "$dir_obj/$b.o"
+        emcc "${EMCC_FLAGS[@]}" -c "$BUILD_WORKSPACE/$f" -o "$dir_obj/$b.o"
     else
-        echo "❌ [V113.00] Erreur fatale : Le fichier $NATIVE_WORKSPACE/$f est introuvable !"
+        echo "❌ [V113.00] Erreur fatale : Le fichier $BUILD_WORKSPACE/$f est introuvable !"
         exit 1
     fi
 done
 
 echo "[*] [V113.00] Compilation de la Zlib interne..."
-if [ -d "$NATIVE_WORKSPACE/src/zlib" ]; then
+if [ -d "$BUILD_WORKSPACE/src/zlib" ]; then
     mkdir -p "$WASM_TEMP_OBJ_DIR/zlib"
-    for f in "$NATIVE_WORKSPACE/src/zlib"/*.c; do
+    for f in "$BUILD_WORKSPACE/src/zlib"/*.c; do
         if [ -f "$f" ]; then
             b=$(basename "$f" .c)
             emcc "${EMCC_FLAGS[@]}" -c "$f" -o "$WASM_TEMP_OBJ_DIR/zlib/$b.o"
@@ -192,9 +234,9 @@ if [ -d "$NATIVE_WORKSPACE/src/zlib" ]; then
 fi
 
 echo "[*] [V113.00] Compilation du module d'E/S fileio..."
-if [ -f "$NATIVE_WORKSPACE/src/unix/fileio.c" ]; then
+if [ -f "$BUILD_WORKSPACE/src/unix/fileio.c" ]; then
     mkdir -p "$WASM_TEMP_OBJ_DIR/src/unix"
-    emcc "${EMCC_FLAGS[@]}" -Dosd_display_loading_rom_message=native_broken_osd_msg -c "$NATIVE_WORKSPACE/src/unix/fileio.c" -o "$WASM_TEMP_OBJ_DIR/src/unix/fileio.o"
+    emcc "${EMCC_FLAGS[@]}" -Dosd_display_loading_rom_message=native_broken_osd_msg -c "$BUILD_WORKSPACE/src/unix/fileio.c" -o "$WASM_TEMP_OBJ_DIR/src/unix/fileio.o"
 fi
 
 echo "[*] [V113.00] Assemblage final de l'archive statique..."

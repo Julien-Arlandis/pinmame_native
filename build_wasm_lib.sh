@@ -40,25 +40,16 @@ echo "[*] Création du workspace épuré → $BUILD_WORKSPACE"
 rm -rf "$BUILD_WORKSPACE"
 cp -r "$NATIVE_WORKSPACE" "$BUILD_WORKSPACE"
 
-# Plateformes non-WASM
-rm -rf "$BUILD_WORKSPACE/src/win32com"
-rm -rf "$BUILD_WORKSPACE/src/windows"
-rm -rf "$BUILD_WORKSPACE/src/ios"
-rm -rf "$BUILD_WORKSPACE/src/lisy"
-rm -rf "$BUILD_WORKSPACE/src/p-roc"
-rm -rf "$BUILD_WORKSPACE/src/ppuc"
-rm -rf "$BUILD_WORKSPACE/src/instvpm"
-rm -rf "$BUILD_WORKSPACE/src/xml2info"
-rm -rf "$BUILD_WORKSPACE/src/dbgfonts"
-rm -rf "$BUILD_WORKSPACE/src/vidhrdw"
-rm -rf "$BUILD_WORKSPACE/src/ui"
-rm -rf "$BUILD_WORKSPACE/src/vc"
+# Plateformes non-WASM — supprimer uniquement les .c, garder les .h (includes potentiels)
+for dir in win32com windows ios lisy p-roc ppuc instvpm xml2info dbgfonts vidhrdw ui vc; do
+    find "$BUILD_WORKSPACE/src/$dir" -name "*.c" -delete 2>/dev/null || true
+done
 
-# CPUs : on garde uniquement m6502 (seul CPU GTS80)
+# CPUs : garder uniquement m6502 (seul CPU GTS80) — supprimer les .c des autres
 for cpu_dir in "$BUILD_WORKSPACE/src/cpu"/*/; do
     case "$(basename "$cpu_dir")" in
         m6502) ;;
-        *) rm -rf "$cpu_dir" ;;
+        *) find "$cpu_dir" -name "*.c" -delete ;;
     esac
 done
 

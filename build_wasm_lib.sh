@@ -71,6 +71,14 @@ done
 
 # sound/*.h : tous conservés — sndintrf.h les inclut tous sans exception
 
+# Supprimer tous les fichiers non-source (licences, docs, binaires Windows)
+find "$BUILD_WORKSPACE" -type f \( \
+    -name "*.txt" -o -name "*.md" -o -name "*.MD" \
+    -o -name "LICENSE" -o -name "COPYING*" -o -name "README*" \
+    -o -name "*.lib" -o -name "*.dll" -o -name "*.a" \
+    -o -name "*.sln" -o -name "*.vcxproj" -o -name "*.obj" \
+\) -delete
+
 # Whitelist des .c autorisés (chemins relatifs à BUILD_WORKSPACE)
 WHITELIST_FILE="$WASM_TEMP_OBJ_DIR/whitelist_c.txt"
 cat > "$WHITELIST_FILE" << 'WEOF'

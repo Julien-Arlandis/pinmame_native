@@ -98,12 +98,18 @@ src/sound/votrax.c
 src/unix/fileio.c
 WEOF
 
-# Supprimer tout .c hors whitelist (zlib exclu : compilé en glob)
-while IFS= read -r -d '' cfile; do
-    rel="${cfile#$BUILD_WORKSPACE/}"
-    case "$rel" in src/zlib/*) continue ;; esac
-    grep -qxF "$rel" "$WHITELIST_FILE" || rm -f "$cfile"
-done < <(find "$BUILD_WORKSPACE/src" -name "*.c" -print0)
+# Supprimer tout fichier qui n'est ni un .h ni un .c de la whitelist
+while IFS= read -r -d '' f; do
+    case "$f" in
+        *.h) continue ;;
+    esac
+    rel="${f#$BUILD_WORKSPACE/}"
+    case "$rel" in src/zlib/*.c) continue ;; esac
+    grep -qxF "$rel" "$WHITELIST_FILE" || rm -f "$f"
+done < <(find "$BUILD_WORKSPACE" -type f -print0)
+
+# Supprimer les répertoires vides restants
+find "$BUILD_WORKSPACE" -type d -empty -delete 2>/dev/null || true
 
 echo "[*] Workspace épuré : $(du -sh "$BUILD_WORKSPACE/src" | cut -f1) (original : $(du -sh "$NATIVE_WORKSPACE/src" | cut -f1))"
 

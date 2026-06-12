@@ -47,9 +47,9 @@ for dir in win32com windows ios lisy p-roc ppuc instvpm xml2info dbgfonts vc; do
     rm -rf "$BUILD_WORKSPACE/src/$dir"
 done
 
-# CPUs : supprimer tout sauf m6502
+# CPUs : supprimer les .c des CPUs inutiles (les .h sont gardés par la boucle whitelist)
 for cpu_dir in "$BUILD_WORKSPACE/src/cpu"/*/; do
-    [ "$(basename "$cpu_dir")" != "m6502" ] && rm -rf "$cpu_dir"
+    [ "$(basename "$cpu_dir")" != "m6502" ] && find "$cpu_dir" -name "*.c" -delete
 done
 
 # Whitelist des .c autorisés (chemins relatifs à BUILD_WORKSPACE)

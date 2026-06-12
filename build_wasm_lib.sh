@@ -42,14 +42,38 @@ echo "[*] Création du workspace épuré → $BUILD_WORKSPACE"
 rm -rf "$BUILD_WORKSPACE"
 cp -r "$NATIVE_WORKSPACE" "$BUILD_WORKSPACE"
 
-# Répertoires 100% inutiles (pas de .h requis par le cœur GTS80)
+# Répertoires src/ inutiles
 for dir in win32com windows ios lisy p-roc ppuc instvpm xml2info dbgfonts vc; do
     rm -rf "$BUILD_WORKSPACE/src/$dir"
 done
+rm -rf "$BUILD_WORKSPACE/src/ui"
+rm -rf "$BUILD_WORKSPACE/src/unix/contrib"
+rm -rf "$BUILD_WORKSPACE/src/unix/video-drivers"
+rm -rf "$BUILD_WORKSPACE/src/unix/sysdep"
+rm -rf "$BUILD_WORKSPACE/src/unix/joystick-drivers"
+rm -rf "$BUILD_WORKSPACE/xpinmame.obj"
 
-# CPUs : supprimer les .c des CPUs inutiles (les .h sont gardés par la boucle whitelist)
+# Répertoires ext/ inutiles
+rm -rf "$BUILD_WORKSPACE/ext/dinput"
+rm -rf "$BUILD_WORKSPACE/ext/htmlhelp"
+rm -rf "$BUILD_WORKSPACE/ext/pinproc"
+rm -rf "$BUILD_WORKSPACE/ext/yaml-cpp"
+rm -rf "$BUILD_WORKSPACE/ext/miniaudio"
+rm -rf "$BUILD_WORKSPACE/ext/ymfm"
+# dmddevice : garder uniquement les 2 headers référencés
+find "$BUILD_WORKSPACE/ext/dmddevice" -not -name "dmddevice.h" -not -name "usbalphanumeric.h" -not -type d -delete
+find "$BUILD_WORKSPACE/ext/dmddevice" -type d -empty -delete 2>/dev/null || true
+
+# CPUs : supprimer les .c des CPUs inutiles (les .h restent pour les includes transitifs)
 for cpu_dir in "$BUILD_WORKSPACE/src/cpu"/*/; do
     [ "$(basename "$cpu_dir")" != "m6502" ] && find "$cpu_dir" -name "*.c" -delete
+done
+
+# Headers sound/ des chips non compilés
+SOUND_H_KEEP="2151intf.h ay8910.h dac.h filter.h fm.h mixer.h samples.h sp0250.h streams.h votrax.h ym2151.h"
+for f in "$BUILD_WORKSPACE/src/sound"/*.h; do
+    fname=$(basename "$f")
+    echo "$SOUND_H_KEEP" | grep -qw "$fname" || rm -f "$f"
 done
 
 # Whitelist des .c autorisés (chemins relatifs à BUILD_WORKSPACE)

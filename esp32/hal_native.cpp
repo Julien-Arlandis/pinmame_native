@@ -1,8 +1,8 @@
 // =========================================================================
 // HAL — implémentation native Mac/Linux
 // Audio : PCM INT16 stéréo 44100Hz sur stdout
-//   pipe : ./pinmame_native bonebstr 2>/dev/null | aplay -f S16_LE -r 44100 -c 2
-//   macOS: ./pinmame_native bonebstr 2>/dev/null | ffplay -f s16le -ar 44100 -ac 2 -i pipe:0
+//   pipe : ./tilt_esp32 bonebstr 2>/dev/null | aplay -f S16_LE -r 44100 -c 2
+//   macOS: ./tilt_esp32 bonebstr 2>/dev/null | ffplay -f s16le -ar 44100 -ac 2 -i pipe:0
 // =========================================================================
 
 #include <stdio.h>

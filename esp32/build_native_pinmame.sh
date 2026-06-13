@@ -3,16 +3,16 @@ set -e
 
 # =========================================================================
 # BUILD NATIF PINMAME — Mac/Linux
-# Produit : ./pinmame_native <rom>
+# Produit : ./tilt_esp32 <rom>
 # 🏷️ VERSION : NATIVE-V1.0
-# Usage  : ./pinmame_native bonebstr 2>/dev/null | aplay -f S16_LE -r 44100 -c 2
-# macOS  : ./pinmame_native bonebstr 2>/dev/null | ffplay -f s16le -ar 44100 -ac 2 -i pipe:0
+# Usage  : ./tilt_esp32 bonebstr 2>/dev/null | aplay -f S16_LE -r 44100 -c 2
+# macOS  : ./tilt_esp32 bonebstr 2>/dev/null | ffplay -f s16le -ar 44100 -ac 2 -i pipe:0
 # =========================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(dirname "$SCRIPT_DIR")"
-OBJ_DIR="$SCRIPT_DIR/pinmame_native_objs"
-OUTPUT="$SCRIPT_DIR/pinmame_native"
+OBJ_DIR="$SCRIPT_DIR/tilt_esp32_objs"
+OUTPUT="$SCRIPT_DIR/tilt_esp32"
 
 if [ -d "$ROOT_DIR/pinmame_stripped/src" ]; then
     BUILD_WORKSPACE="$ROOT_DIR/pinmame_stripped"
@@ -205,6 +205,6 @@ echo "=================================================="
 echo "✅ [NATIVE-V1.0] $OUTPUT généré ($SIZE)"
 echo "=================================================="
 echo "Usage:"
-echo "  ./pinmame_native bonebstr 2>/dev/null | ffplay -f s16le -ar 44100 -ac 2 -i pipe:0"
-echo "  ./pinmame_native bonebstr 2>/dev/null | aplay -f S16_LE -r 44100 -c 2"
+echo "  ./tilt_esp32 bonebstr 2>/dev/null | ffplay -f s16le -ar 44100 -ac 2 -i pipe:0"
+echo "  ./tilt_esp32 bonebstr 2>/dev/null | aplay -f S16_LE -r 44100 -c 2"
 echo "=================================================="

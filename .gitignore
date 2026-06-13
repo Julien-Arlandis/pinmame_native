@@ -32,4 +32,8 @@ pinmame_stripped/
 esp32/esp_project/build/
 esp32/esp_project/.cache/
 esp32/esp_project/managed_components/
+esp32/tilt_esp32
+esp32/tilt_esp32_objs/
+esp32/tilt_esp32_dbg
+esp32/tilt_esp32_objs_dbg/
 capture_*.mat

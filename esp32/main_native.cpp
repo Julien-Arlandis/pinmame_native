@@ -1,7 +1,7 @@
 // =========================================================================
 // main_native.cpp — point d'entrée natif Mac/Linux
 // Équivalent du Worker Node.js de tilt
-// Usage : ./pinmame_native <rom>   ex: ./pinmame_native bonebstr
+// Usage : ./tilt_esp32 <rom>   ex: ./tilt_esp32 bonebstr
 // =========================================================================
 #include <stdio.h>
 #include <string.h>

@@ -708,7 +708,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.81';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.82';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();
@@ -1012,10 +1012,9 @@ async function bootstrap() {
         });
 
         const fullscreenBtn = document.getElementById('fullscreenBtn');
-        const canvasWrapper = fullscreenBtn.closest('.canvas-wrapper');
         fullscreenBtn.addEventListener('click', () => {
             if (!document.fullscreenElement) {
-                canvasWrapper.requestFullscreen();
+                document.documentElement.requestFullscreen();
             } else {
                 document.exitFullscreen();
             }

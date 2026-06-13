@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.81</title>
+    <title>PinMAME Workbench v3.82</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -289,25 +289,7 @@
             width: 100%;
             max-width: 1120px;
         }
-        #fullscreenBtn {
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            height: 28px;
-            padding: 0 10px;
-            font-size: 0.72rem;
-            font-family: monospace;
-            font-weight: bold;
-            background: rgba(0,255,204,0.08);
-            border: 1px solid #00ffcc;
-            color: #00ffcc;
-            border-radius: 4px;
-            cursor: pointer;
-            z-index: 10;
-            transition: background 0.15s;
-        }
-        #fullscreenBtn:hover { background: rgba(0,255,204,0.22); }
-        #overrideBtn {
+#overrideBtn {
             position: absolute;
             bottom: 8px;
             right: 8px;
@@ -687,6 +669,7 @@
     <button id="modeBle"   class="mode-btn" disabled>ᛒ</button>
 </div>
 <button id="rebootBtn" class="btn-system">🔄 Hard Reboot</button>
+<button id="fullscreenBtn" class="btn-system" title="Plein écran">⛶</button>
         </div>
     </div>
 
@@ -699,7 +682,6 @@
     <div class="display-container">
         <div class="canvas-wrapper">
             <canvas id="vfdCanvas" width="1120" height="220"></canvas>
-            <button id="fullscreenBtn" title="Plein écran">⛶</button>
             <button id="overrideBtn">✏️ TEXTE</button>
         </div>
         <div id="overridePanel" class="display-override-panel" style="display:none;">

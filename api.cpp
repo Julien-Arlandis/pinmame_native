@@ -6,11 +6,74 @@
 #include <iostream>
 #include <cstdio>
 #include <stdint.h>
-#include <chrono>
 #include <cstdlib>
 #include <cstring>
-#include <cstdarg> 
+#include <cstdarg>
+// -------------------------------------------------------------------------
+// HAL — code spécifique à la plateforme, inline ici
+// -------------------------------------------------------------------------
+#ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+#include <chrono>
+
+typedef int64_t hal_cycles_t;
+static hal_cycles_t hal_cycles(void) {
+    static auto t0 = std::chrono::steady_clock::now();
+    return (hal_cycles_t)std::chrono::duration_cast<std::chrono::nanoseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+}
+static hal_cycles_t hal_cycles_per_second(void) { return 1000000000LL; }
+static void hal_sleep_ms(int ms) { emscripten_sleep(ms); }
+static void hal_osd_exit(void) {
+    EM_ASM({ if (window.postWasmLog) window.postWasmLog("osd_exit called"); });
+    EM_ASM({ throw new Error("PinMAME: emulation stopped"); });
+}
+static void hal_push_audio(uint32_t ptr, int count, uint32_t gen) {
+    EM_ASM({ if (window.pushWasmAudio) window.pushWasmAudio($0, $1, $2); }, ptr, count, gen);
+}
+static void hal_push_display(uint32_t ptr, uint32_t gen) {
+    EM_ASM({ if (window.pushWasmDisplay) window.pushWasmDisplay($0, $1); }, ptr, gen);
+}
+static void hal_push_display_text(const char* text, uint32_t gen) {
+    EM_ASM({ if (window.pushWasmDisplayText) window.pushWasmDisplayText(UTF8ToString($0), $1); }, text, gen);
+}
+static void hal_push_lamps(uint32_t ptr, uint32_t gen) {
+    EM_ASM({ if (window.pushWasmLamps) window.pushWasmLamps($0, $1); }, ptr, gen);
+}
+static void hal_push_solens(uint32_t state, uint32_t gen) {
+    EM_ASM({ if (window.pushWasmSolens) window.pushWasmSolens($0, $1); }, state, gen);
+}
+static void hal_post_machine_info(const char* info) {
+    EM_ASM({ if (window.postWasmMachineInfo) window.postWasmMachineInfo(UTF8ToString($0)); }, info);
+}
+static void hal_post_log(uint32_t cmd, uint32_t gen) {
+    EM_ASM({ if (window.postWasmLog) window.postWasmLog($0, $1); }, cmd, gen);
+}
+static const char* hal_rompath(void) { return "/roms"; }
+
+#else
+// ESP32 / natif — fonctions fournies par esp32/hal_native.cpp ou esp32/hal_esp32.cpp
+#include <stdint.h>
+typedef int64_t hal_cycles_t;
+extern "C" {
+    hal_cycles_t hal_cycles(void);
+    hal_cycles_t hal_cycles_per_second(void);
+    void hal_sleep_ms(int ms);
+    void hal_osd_exit(void);
+    void hal_push_audio(uintptr_t ptr, int count, uint32_t gen);
+    void hal_push_display(uintptr_t ptr, uint32_t gen);
+    void hal_push_display_text(const char* text, uint32_t gen);
+    void hal_push_lamps(uintptr_t ptr, uint32_t gen);
+    void hal_push_solens(uint32_t state, uint32_t gen);
+    void hal_post_machine_info(const char* info);
+    void hal_post_log(uint32_t cmd, uint32_t gen);
+    const char* hal_rompath(void);
+}
+#endif
+
+#ifndef EMSCRIPTEN_KEEPALIVE
+#define EMSCRIPTEN_KEEPALIVE __attribute__((used))
+#endif
 
 #ifndef __rolq
 #define __rolq(x,c) (((unsigned long long)(x) << (c)) | ((unsigned long long)(x) >> (64 - (c))))
@@ -34,16 +97,26 @@ extern "C" {
 #define SPF   735
 #define DMAX  4096
 
-static INT16 g_ring[ABMAX], g_lin[DMAX];
+// PSRAM_BSS_ATTR : défini dans pinmame_config.h (ESP32) → .ext_ram.bss
+// Vide sur natif/WASM → pas d'effet
+#ifndef PSRAM_BSS_ATTR
+#define PSRAM_BSS_ATTR
+#endif
+
+// Gros buffers : 256KB + 8KB + 32KB → PSRAM sur ESP32, SRAM sur natif/WASM
+static PSRAM_BSS_ATTR INT16 g_ring[ABMAX];
+static INT16 g_lin[DMAX];
 static int   g_wi = 0, g_ri = 0;
 static int   g_dac[2][DMAX], g_dn[2] = {};
 
 extern "C" void stream_update(int, int);
 
-static uint8_t g_dummy_buffer[1024 * 1024] = {0}; 
-static uint8_t g_shared_corridor[4096] = {0};      
+// 1MB utilisé comme bitmap scratch + ui_bitmap → obligatoirement en PSRAM
+static PSRAM_BSS_ATTR uint8_t g_dummy_buffer[1024 * 1024];
+static uint8_t g_shared_corridor[4096] = {0};
 static char g_display_text[100] = "Analyseur Global Actif";
-static uint32_t g_font_security_anchor[10000] = {0}; 
+// 40KB retourné par decodegfx() comme GfxElement factice → PSRAM
+static PSRAM_BSS_ATTR uint32_t g_font_security_anchor[10000]; 
 static int g_selected_game_index = 0;
 
 // =========================================================================
@@ -136,28 +209,19 @@ extern "C" {
     int frameskip = 0;
     int he_did_cheat = 0;
     int g_low_latency_throttle = 0;
-    void* driver_0 = nullptr;
-    
     struct Samplesinterface samples_interface;
 
     int pdrawgfx_shadow_lowpri = 0; 
 
     struct mame_bitmap *priority_bitmap = (struct mame_bitmap *)g_dummy_buffer; 
-    char* rompath_extra = (char*)"/roms";
+    char* rompath_extra = nullptr;  // initialisé à hal_rompath() au boot
 
-    cycles_t osd_cycles(void) {
-        static auto start_time = std::chrono::steady_clock::now();
-        auto current_time = std::chrono::steady_clock::now();
-        return (cycles_t)std::chrono::duration_cast<std::chrono::nanoseconds>(current_time - start_time).count();
-    }
-    cycles_t osd_cycles_per_second(void) { return (cycles_t)1000000000; }
+    cycles_t osd_cycles(void)            { return (cycles_t)hal_cycles(); }
+    cycles_t osd_cycles_per_second(void) { return (cycles_t)hal_cycles_per_second(); }
     
     int osd_init(void) { return 0; }
     void osd_exit(void) {
-        // Do NOT use emscripten_sleep here: if init_machine fails, ASYNCIFY would
-        // save state here, then rewind through memory_init again causing abort.
-        EM_ASM({ if (window.postWasmLog) window.postWasmLog("osd_exit called"); });
-        EM_ASM({ throw new Error("PinMAME: emulation stopped"); });
+        hal_osd_exit();
     }
     void osd_pause(int paused) {}
     int osd_skip_this_frame(void) { return 0; }
@@ -171,12 +235,25 @@ extern "C" {
     void osd_free_colors(void) {}
     int osd_display_loading_rom_message(const char *name, struct rom_load_data *romdata) { return 0; }
     
-    struct GfxElement *builduifont(void) { return (struct GfxElement *)g_font_security_anchor; }
+    struct GfxElement *builduifont(void) {
+        // GfxElement factice avec colortable valide (4 slots pour pens 0-3)
+        // palette_init() écrit colortable[0..3] — NULL causerait un SIGSEGV
+        static pen_t g_ui_colortable[4] = {0, 1, 2, 3};
+        static struct GfxElement g_uifont = {};
+        if (!g_uifont.colortable) {
+            g_uifont.colortable = g_ui_colortable;
+            g_uifont.total_colors = 4;
+            g_uifont.color_granularity = 4;
+        }
+        return &g_uifont;
+    }
     struct osd_bitmap* artwork_get_ui_bitmap(void) { return (struct osd_bitmap*)g_dummy_buffer; }
     void init_user_interface(void) {} 
 
     void pic8259_0_config(int p1, int p2) {}
+#ifndef ESP_PLATFORM
     int sem_timedwait(void* sem, const void* abs_timeout) { return 0; }
+#endif
     void bulb_init(void) {}
     float bulb_heat_up_factor(int p1, float p2, float p3, float p4) { return 0.0f; }
     float bulb_filament_temperature_to_emission(int p1, float p2) { return 0.0f; }
@@ -205,8 +282,12 @@ extern "C" {
     void osd_trak_read(int player, int *deltax, int *deltay) {}
     void osd_lightgun_read(int player, int *deltax, int *deltay) {}
     
-    const struct KeyboardInfo *osd_get_key_list(void) { return nullptr; }
-    const struct JoystickInfo *osd_get_joy_list(void) { return nullptr; }
+    // Listes vides avec sentinelle {nullptr,0,0} — MAME itère dessus avec while(name)
+    // Retourner nullptr causerait un SIGSEGV dans input.c:internal_oscode_find_keyboard
+    static const struct KeyboardInfo g_empty_keylist[] = {{ nullptr, 0, 0 }};
+    static const struct JoystickInfo g_empty_joylist[] = {{ nullptr, 0, 0 }};
+    const struct KeyboardInfo *osd_get_key_list(void) { return g_empty_keylist; }
+    const struct JoystickInfo *osd_get_joy_list(void) { return g_empty_joylist; }
     
     int osd_is_key_pressed(int keycode) { return 0; }
     int osd_is_joy_pressed(int joycode) { return 0; }
@@ -286,7 +367,13 @@ extern "C" {
     }
 
     static int g_stereo = 1;
-    int osd_start_audio_stream(int stereo) { g_stereo = stereo; return SPF; }
+    int osd_start_audio_stream(int stereo) {
+#ifdef ESP_PLATFORM
+        (void)stereo; return 0; // sample_rate=0 → pas de streams, pas de mixing
+#else
+        g_stereo = stereo; return SPF;
+#endif
+    }
     int osd_update_audio_stream(INT16 *b) {
         if (g_stereo) {
             for (int i = 0; i < SPF * 2; i++) { g_ring[g_wi] = b[i]; g_wi = (g_wi + 1) % ABMAX; }
@@ -301,7 +388,13 @@ extern "C" {
     }
     void osd_stop_audio_stream() {}
     void osd_sound_enable(int) {}
-    int  osd_init_sound() { return 0; }
+    int  osd_init_sound() {
+#ifdef ESP_PLATFORM
+        return 1; // désactive tout le sous-système audio (test perf)
+#else
+        return 0;
+#endif
+    }
     void proc_mechsounds(int, int) {}
     int  YM2203_sh_start(const struct MachineSound *) { return 0; }
     void YM2203_sh_stop() {} void YM2203_sh_reset() {}
@@ -313,7 +406,7 @@ extern "C" {
         if (!n) return;
         if (n > DMAX) n = DMAX;
         for (int i = 0; i < n; i++) { g_lin[i] = g_ring[g_ri]; g_ri = (g_ri + 1) % ABMAX; }
-        EM_ASM({ if (window.pushWasmAudio) window.pushWasmAudio($0, $1, $2); }, (uint32_t)g_lin, n, gen);
+        hal_push_audio((uintptr_t)g_lin, n, gen);
     }
 
     static void (*g_irq)(int, int) = nullptr;
@@ -323,7 +416,16 @@ extern "C" {
     }
     void OPMShutdown() { YM2151Shutdown(); }
     void OPMResetChip(int n) { YM2151ResetChip(n); }
-    void OPMUpdateOne(int n, INT16 **b, int l) { YM2151UpdateOne(n, b, l); }
+    void OPMUpdateOne(int n, INT16 **b, int l) {
+#ifdef ESP_PLATFORM
+        // Pas de speaker — on zappe la synthèse FM (coût ~90ms/frame en PSRAM)
+        (void)n;
+        if (b) { if (b[0]) memset(b[0], 0, (size_t)l * sizeof(INT16));
+                 if (b[1]) memset(b[1], 0, (size_t)l * sizeof(INT16)); }
+#else
+        YM2151UpdateOne(n, b, l);
+#endif
+    }
     void OPMSetPortHander(int, void (*)(unsigned, unsigned char)) {}
     int  YM2151TimerOver(int, int) { return 0; }
     static int g_reg = 0;
@@ -342,6 +444,21 @@ extern "C" {
         static uint32_t prev_solenoids    = 0xFFFFFFFF;
         static bool     machine_info_posted = false;
 
+#ifdef ESP_PLATFORM
+        // Compteur FPS réel (cadence d'émulation, pas de changement d'affichage)
+        static int64_t fps_t0 = 0;
+        static int fps_count = 0;
+        fps_count++;
+        int64_t now_us = (int64_t)(hal_cycles() / 1000LL);
+        if (now_us - fps_t0 >= 5000000LL) {
+            float fps = fps_count * 1000000.0f / (float)(now_us - fps_t0);
+            extern void esp_loge_fps(float fps);
+            esp_loge_fps(fps);
+            fps_t0 = now_us;
+            fps_count = 0;
+        }
+#endif
+
         // Generation written by JS at boot (slot 1076). Passed to every callback so JS
         // can reject calls from stale Wasm instances that are still looping after ROM change.
         uint32_t emulator_generation = 0;
@@ -350,8 +467,21 @@ extern "C" {
         // Post full machine info once on first frame: CPUs + sound chips + stereo + rate.
         if (!machine_info_posted && Machine && Machine->drv) {
             machine_info_posted = true;
+#ifdef ESP_PLATFORM
+            // Suspend audio CPUs — ils tournent même avec le son désactivé
+            for (int i = 0; i < MAX_CPU; i++) {
+                if (!Machine->drv->cpu[i].cpu_type) break;
+                if (Machine->drv->cpu[i].cpu_flags & CPU_AUDIO_CPU)
+                    cpunum_suspend(i, SUSPEND_REASON_DISABLE, 1);
+            }
+#endif
             char info[512] = {0};
             int len = 0;
+
+            // ROM name (pour handleStatusLine côté browser)
+            const char* rom_name_st = (const char*)&g_shared_corridor[1000];
+            if (rom_name_st[0])
+                len += snprintf(info + len, sizeof(info) - len, "rom=%s&", rom_name_st);
 
             // CPUs
             len += snprintf(info + len, sizeof(info) - len, "cpu=");
@@ -388,9 +518,7 @@ extern "C" {
             // Stereo + rate
             len += snprintf(info + len, sizeof(info) - len, "|stereo=%d|rate=%d", g_stereo, options.samplerate);
 
-            EM_ASM({
-                if (window.postWasmMachineInfo) window.postWasmMachineInfo(UTF8ToString($0));
-            }, info);
+            hal_post_machine_info(info);
         }
 
         uint16_t* vfd_export = (uint16_t*)g_shared_corridor;
@@ -400,8 +528,7 @@ extern "C" {
         }
         if (memcmp(prev_segments, vfd_export, 40 * sizeof(uint16_t)) != 0) {
             memcpy(prev_segments, vfd_export, 40 * sizeof(uint16_t));
-            EM_ASM({ if (window.pushWasmDisplay) window.pushWasmDisplay($0, $1); },
-                   (uint32_t)g_shared_corridor, emulator_generation);
+            hal_push_display((uintptr_t)g_shared_corridor, emulator_generation);
             // Decode segments → ASCII text via core_ascii2seg16 reverse scan
             char display_text[41];
             for (int i = 0; i < 40; i++) {
@@ -414,8 +541,7 @@ extern "C" {
                 }
             }
             display_text[40] = '\0';
-            EM_ASM({ if (window.pushWasmDisplayText) window.pushWasmDisplayText(UTF8ToString($0), $1); },
-                   display_text, emulator_generation);
+            hal_push_display_text(display_text, emulator_generation);
         }
 
         for (int sw = 0; sw < 80; sw++) { core_setSw(sw, g_shared_corridor[100 + sw]); }
@@ -437,29 +563,29 @@ extern "C" {
         for (int l = 0; l < 12; l++) { g_shared_corridor[300 + l] = coreGlobals.lampMatrix[l]; }
         if (memcmp(prev_lamps, (const void*)coreGlobals.lampMatrix, 12) != 0) {
             memcpy(prev_lamps, (const void*)coreGlobals.lampMatrix, 12);
-            EM_ASM({ if (window.pushWasmLamps) window.pushWasmLamps($0, $1); },
-                   (uint32_t)(g_shared_corridor + 300), emulator_generation);
+            hal_push_lamps((uintptr_t)(g_shared_corridor + 300), emulator_generation);
         }
 
         uint32_t solenoids_state = coreGlobals.solenoids;
         if (solenoids_state != prev_solenoids) {
             prev_solenoids = solenoids_state;
-            EM_ASM({ if (window.pushWasmSolens) window.pushWasmSolens($0, $1); },
-                   solenoids_state, emulator_generation);
+            hal_push_solens(solenoids_state, emulator_generation);
         }
 
         uint8_t sound_user_cmd = g_shared_corridor[1060];
         if (sound_user_cmd > 0) {
             g_shared_corridor[1060] = 0;
             sndbrd_0_data_w(0, sound_user_cmd);
-            EM_ASM({ if (window.postWasmLog) { window.postWasmLog($0, $1); } }, sound_user_cmd, emulator_generation);
+            hal_post_log(sound_user_cmd, emulator_generation);
         }
 
         audio_push_frame(emulator_generation);
 
+#ifndef ESP_PLATFORM
         uint32_t js_buffer_dist = 0;
         memcpy(&js_buffer_dist, &g_shared_corridor[1070], 4);
-        emscripten_sleep(8 + js_buffer_dist / 512);
+        hal_sleep_ms(8 + js_buffer_dist / 512);
+#endif
     }
 
     void osd_update_video_and_audio(struct mame_display *display) {
@@ -487,6 +613,15 @@ extern "C" {
     
     EMSCRIPTEN_KEEPALIVE
     void pinmame_web_tick(int cycles) {}
+
+    // ── driver_0 : racine factice requise par clone_of dans les GameDrivers ──
+    // Sans const : linkage externe en C++ (const namespace = interne par défaut)
+    // Sur ESP32, driver_0 est fourni par driver0_native.c — pas ici.
+#ifndef ESP_PLATFORM
+    __attribute__((used)) struct GameDriver driver_0 = {
+        __FILE__, 0, "", 0, 0, 0, 0, 0, 0, 0, 0, 0x4000 /* NOT_A_DRIVER */
+    };
+#endif
 
     // ── Drivers Gottlieb System 80B ─────────────────────────────────────────
     // Chicago Cubs Triple Play (#696)
@@ -742,7 +877,12 @@ extern "C" {
         // memory_init (appelé par run_game avant driver_init).
         if (drivers[game_index]->driver_init)
             drivers[game_index]->driver_init();
+        if (!rompath_extra) rompath_extra = (char*)hal_rompath();
+#ifdef ESP_PLATFORM
+        options.samplerate = 0; // désactive streams_sh_update (Machine->sample_rate=0 → retour immédiat)
+#else
         options.samplerate = 44100;
+#endif
         options.gui_host = 1;
         bailing = 0;
         run_game(game_index);

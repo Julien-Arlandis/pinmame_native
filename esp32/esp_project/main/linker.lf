@@ -1,0 +1,18 @@
+[scheme:psram_bss]
+entries:
+    bss -> extern_ram
+    common -> extern_ram
+
+[mapping:main]
+archive: libmain.a
+entries:
+    m6502 (noflash)
+    cpuexec (noflash)
+    timer (noflash)
+    memory (noflash)
+    cpuint (noflash_text)
+    gts80 (noflash_text)
+    gts80s (noflash_text)
+    core (noflash_text)
+    inptport (noflash_text)
+    * (psram_bss)

@@ -3,11 +3,11 @@ set -e
 
 # =========================================================================
 # ⚙️ INFRASTRUCTURE PINMAME WASM - SCRIPT COMPILATION LIB STATIQUE
-# 🏷️ VERSION : WASM-GTS80B-STRICT-SEQUENTIAL-V113.00 (THE ABSOLUTE FIX)
+# 🏷️ VERSION : WASM-GTS80B-STRICT-SEQUENTIAL-V116.00 (WHITELIST SOUND H + SUPPRESSION DMDDEVICE + NETTOYAGE CLANG-M)
 # =========================================================================
 
 echo "=================================================="
-echo "⚙️ COMPILATION PURIFIÉE PINMAME WASM - VERSION V113.00"
+echo "⚙️ COMPILATION PURIFIÉE PINMAME WASM - VERSION V116.00"
 echo "=================================================="
 
 EMSDK_DIR="/home/julien/emsdk"
@@ -19,143 +19,29 @@ elif [ -f "/etc/profile.d/emscripten.sh" ]; then
 fi
 
 if ! command -v emcc &> /dev/null; then
-    echo "❌ [V113.00] Erreur : emcc est introuvable."
+    echo "❌ [V116.00] Erreur : emcc est introuvable."
     exit 1
 fi
 
 BASE_DIR=$(pwd)
-NATIVE_WORKSPACE="$BASE_DIR/pinmame_workspace/pinmame_stock"
 WASM_TEMP_OBJ_DIR="$BASE_DIR/pinmame_workspace_wasm_objs"
+
+# Cherche la source PinMAME : pinmame_stripped (si existant) ou pinmame_workspace/pinmame_stock
+if [ -d "$BASE_DIR/pinmame_stripped/src" ]; then
+    BUILD_WORKSPACE="$BASE_DIR/pinmame_stripped"
+elif [ -d "$BASE_DIR/pinmame_workspace/pinmame_stock/src" ]; then
+    BUILD_WORKSPACE="$BASE_DIR/pinmame_workspace/pinmame_stock"
+else
+    echo "❌ [V116.00] Erreur : ni pinmame_stripped ni pinmame_workspace/pinmame_stock introuvable."
+    exit 1
+fi
 
 rm -f "libpinmame_wasm.a"
 rm -rf "$WASM_TEMP_OBJ_DIR"
 mkdir -p "$WASM_TEMP_OBJ_DIR/include"
 
-# =========================================================================
-# 🧹 WORKSPACE ÉPURÉ — whitelist stricte
-#    Seuls les .c de COEUR_PILES + zlib survivent.
-#    Les .h sont conservés partout (nécessaires aux includes).
-#    L'original pinmame_workspace/ n'est jamais modifié.
-# =========================================================================
-BUILD_WORKSPACE="$BASE_DIR/pinmame_stripped"
-echo "[*] Création du workspace épuré → $BUILD_WORKSPACE"
-rm -rf "$BUILD_WORKSPACE"
-cp -r "$NATIVE_WORKSPACE" "$BUILD_WORKSPACE"
-
 # Répertoires src/ inutiles
-for dir in win32com windows ios lisy p-roc ppuc instvpm xml2info dbgfonts vc; do
-    rm -rf "$BUILD_WORKSPACE/src/$dir"
-done
-rm -rf "$BUILD_WORKSPACE/src/ui"
-rm -rf "$BUILD_WORKSPACE/src/unix/contrib"
-rm -rf "$BUILD_WORKSPACE/src/unix/video-drivers"
-rm -rf "$BUILD_WORKSPACE/src/unix/joystick-drivers"
-# sysdep/ conservé : xmame.h → sysdep/sysdep_palette.h etc.
-rm -rf "$BUILD_WORKSPACE/xpinmame.obj"
-
-# Répertoires ext/ inutiles
-rm -rf "$BUILD_WORKSPACE/ext/dinput"
-rm -rf "$BUILD_WORKSPACE/ext/htmlhelp"
-rm -rf "$BUILD_WORKSPACE/ext/pinproc"
-rm -rf "$BUILD_WORKSPACE/ext/yaml-cpp"
-rm -rf "$BUILD_WORKSPACE/ext/miniaudio"
-rm -rf "$BUILD_WORKSPACE/ext/ymfm"
-# dmddevice : garder uniquement les 2 headers référencés
-find "$BUILD_WORKSPACE/ext/dmddevice" -not -name "dmddevice.h" -not -name "usbalphanumeric.h" -not -type d -delete
-find "$BUILD_WORKSPACE/ext/dmddevice" -type d -empty -delete 2>/dev/null || true
-
-# CPUs : supprimer les .c des CPUs inutiles (les .h restent pour les includes transitifs)
-for cpu_dir in "$BUILD_WORKSPACE/src/cpu"/*/; do
-    [ "$(basename "$cpu_dir")" != "m6502" ] && find "$cpu_dir" -name "*.c" -delete
-done
-
-# sound/*.h : tous conservés — sndintrf.h les inclut tous sans exception
-
-# Supprimer tous les fichiers non-source (licences, docs, binaires Windows)
-find "$BUILD_WORKSPACE" -type f \( \
-    -name "*.txt" -o -name "*.md" -o -name "*.MD" \
-    -o -name "LICENSE" -o -name "COPYING*" -o -name "README*" \
-    -o -name "*.lib" -o -name "*.dll" -o -name "*.a" \
-    -o -name "*.sln" -o -name "*.vcxproj" -o -name "*.obj" \
-\) -delete
-
-# Whitelist des .c autorisés (chemins relatifs à BUILD_WORKSPACE)
-WHITELIST_FILE="$WASM_TEMP_OBJ_DIR/whitelist_c.txt"
-cat > "$WHITELIST_FILE" << 'WEOF'
-src/mame.c
-src/common.c
-src/cpuintrf.c
-src/memory.c
-src/timer.c
-src/palette.c
-src/state.c
-src/cpuexec.c
-src/sndintrf.c
-src/fileio.c
-src/inptport.c
-src/hash.c
-src/cpuint.c
-src/unzip.c
-src/md5.c
-src/sha1.c
-src/config.c
-src/input.c
-src/cpu/m6502/m6502.c
-src/wpc/gts80.c
-src/wpc/gts80s.c
-src/wpc/gts80games.c
-src/wpc/core.c
-src/wpc/sim.c
-src/wpc/sndbrd.c
-src/wpc/snd_cmd.c
-src/wpc/mech.c
-src/machine/6532riot.c
-src/machine/6530riot.c
-src/sound/dac.c
-src/sound/ym2151.c
-src/sound/2151intf.c
-src/sound/fm.c
-src/sound/streams.c
-src/sound/mixer.c
-src/sound/filter.c
-src/sound/ay8910.c
-src/sound/sp0250.c
-src/sound/samples.c
-src/sound/votrax.c
-src/unix/fileio.c
-WEOF
-
-# Whitelist des .h GTS80 dans wpc/ (analyse des includes directs + transitifs)
-WPC_H_KEEP="bulb.h core.h gen.h gts3.h gts80.h gts80s.h mech.h sim.h snd_cmd.h sndbrd.h vpintf.h wmssnd.h wpc.h wpcsam.h"
-
-# Supprimer tout fichier superflu (.h non-GTS80 dans wpc/, .c hors whitelist, non-.h/.c)
-while IFS= read -r -d '' f; do
-    rel="${f#$BUILD_WORKSPACE/}"
-    case "$f" in
-        *.h)
-            # wpc/ : whitelist stricte des headers GTS80
-            case "$rel" in
-                src/wpc/*.h)
-                    fname=$(basename "$f")
-                    echo "$WPC_H_KEEP" | grep -qw "$fname" || rm -f "$f"
-                    ;;
-            esac
-            continue
-            ;;
-    esac
-    # Fichiers .c : whitelist stricte
-    case "$rel" in
-        src/zlib/*.c) continue ;;
-        ext/*) continue ;;              # .c inclus via #include dans mame.c
-        src/cpu/m6502/*) continue ;;    # .c inclus via #include dans m6502.c
-    esac
-    grep -qxF "$rel" "$WHITELIST_FILE" || rm -f "$f"
-done < <(find "$BUILD_WORKSPACE" -type f -print0)
-
-# Supprimer les répertoires vides restants
-find "$BUILD_WORKSPACE" -type d -empty -delete 2>/dev/null || true
-
-echo "[*] Workspace épuré : $(du -sh "$BUILD_WORKSPACE/src" | cut -f1) (original : $(du -sh "$NATIVE_WORKSPACE/src" | cut -f1))"
+echo "[*] Workspace source : $(du -sh "$BUILD_WORKSPACE/src" | cut -f1)"
 
 cat << 'EOF' > "$WASM_TEMP_OBJ_DIR/include/osd_cpu.h"
 #ifndef OSD_CPU_H_V112
@@ -292,21 +178,21 @@ COEUR_PILES=(
     "src/sound/votrax.c"
 )
 
-echo "[*] [V113.00] Compilation STRICTE du cœur de l'émulateur..."
+echo "[*] [V116.00] Compilation STRICTE du cœur de l'émulateur..."
 for f in "${COEUR_PILES[@]}"; do
     if [ -f "$BUILD_WORKSPACE/$f" ]; then
         dir_obj="$WASM_TEMP_OBJ_DIR/$(dirname "$f")"
         mkdir -p "$dir_obj"
         b=$(basename "$f" .c)
-        echo "   -> [V113.00] Compilation de $f..."
+        echo "   -> [V116.00] Compilation de $f..."
         emcc "${EMCC_FLAGS[@]}" -c "$BUILD_WORKSPACE/$f" -o "$dir_obj/$b.o"
     else
-        echo "❌ [V113.00] Erreur fatale : Le fichier $BUILD_WORKSPACE/$f est introuvable !"
+        echo "❌ [V116.00] Erreur fatale : Le fichier $BUILD_WORKSPACE/$f est introuvable !"
         exit 1
     fi
 done
 
-echo "[*] [V113.00] Compilation de la Zlib interne..."
+echo "[*] [V116.00] Compilation de la Zlib interne..."
 if [ -d "$BUILD_WORKSPACE/src/zlib" ]; then
     mkdir -p "$WASM_TEMP_OBJ_DIR/zlib"
     for f in "$BUILD_WORKSPACE/src/zlib"/*.c; do
@@ -317,16 +203,16 @@ if [ -d "$BUILD_WORKSPACE/src/zlib" ]; then
     done
 fi
 
-echo "[*] [V113.00] Compilation du module d'E/S fileio..."
+echo "[*] [V116.00] Compilation du module d'E/S fileio..."
 if [ -f "$BUILD_WORKSPACE/src/unix/fileio.c" ]; then
     mkdir -p "$WASM_TEMP_OBJ_DIR/src/unix"
     emcc "${EMCC_FLAGS[@]}" -Dosd_display_loading_rom_message=native_broken_osd_msg -c "$BUILD_WORKSPACE/src/unix/fileio.c" -o "$WASM_TEMP_OBJ_DIR/src/unix/fileio.o"
 fi
 
-echo "[*] [V113.00] Assemblage final de l'archive statique..."
+echo "[*] [V116.00] Assemblage final de l'archive statique..."
 find "$WASM_TEMP_OBJ_DIR" -name "*.o" | xargs emar rcs "libpinmame_wasm.a"
 
 FILE_SIZE=$(du -sh "libpinmame_wasm.a" | cut -f1)
 echo "=================================================="
-echo "🟢 [V113.00] libpinmame_wasm.a généré avec succès ! ($FILE_SIZE)"
+echo "🟢 [V116.00] libpinmame_wasm.a généré avec succès ! ($FILE_SIZE)"
 echo "=================================================="

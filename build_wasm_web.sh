@@ -3,11 +3,11 @@ set -e
 
 # =========================================================================
 # 🕸️ INFRASTRUCTURE PINMAME WASM - SCRIPT D'ASSEMBLAGE WEB FINAL
-# 🏷️ VERSION : WEBLINK-V93.4 (BUILD SIZE REPORTING)
+# 🏷️ VERSION : WEBLINK-V94.0 (BUILD SIZE REPORTING)
 # =========================================================================
 
 echo "=================================================="
-echo "🕵️ MODE DIAGNOSTIC STRICT : MULTIPLEXEUR MAME V93.4"
+echo "🕵️ MODE DIAGNOSTIC STRICT : MULTIPLEXEUR MAME V94.0"
 echo "=================================================="
 
 # 1. Vérification de l'environnement Emscripten
@@ -20,25 +20,28 @@ elif [ -f "/etc/profile.d/emscripten.sh" ]; then
 fi
 
 if ! command -v emcc &> /dev/null; then
-    echo "❌ [V93.4] ERREUR CRITIQUE : Compilateur 'emcc' introuvable."
+    echo "❌ [V94.0] ERREUR CRITIQUE : Compilateur 'emcc' introuvable."
     exit 1
 fi
 
 BASE_DIR=$(pwd)
-NATIVE_WORKSPACE="$BASE_DIR/pinmame_workspace/pinmame_stock"
+if [ -d "$BASE_DIR/pinmame_stripped/src" ]; then
+    NATIVE_WORKSPACE="$BASE_DIR/pinmame_stripped"
+else
+    NATIVE_WORKSPACE="$BASE_DIR/pinmame_workspace/pinmame_stock"
+fi
 WASM_TEMP_OBJ_DIR="$BASE_DIR/pinmame_workspace_wasm_objs"
 
 # Vérification de l'archive statique
 if [ ! -f "libpinmame_wasm.a" ]; then
-    echo "❌ [V93.4] ERREUR : libpinmame_wasm.a introuvable. Compile d'abord la lib statique."
+    echo "❌ [V94.0] ERREUR : libpinmame_wasm.a introuvable. Compile d'abord la lib statique."
     exit 1
 fi
 
 mkdir -p "$WASM_TEMP_OBJ_DIR"
 
 API_FLAGS=(
-    "-O0"
-    "-g"
+    "-O2"
     "-I$NATIVE_WORKSPACE/src"
     "-I$NATIVE_WORKSPACE/src/wpclib"
     "-I$NATIVE_WORKSPACE/src/wpc"
@@ -50,15 +53,14 @@ API_FLAGS=(
     "-Wno-implicit-function-declaration"
 )
 
-echo "[*] [V93.4] Compilation du pont API C++..."
+echo "[*] [V94.0] Compilation du pont API C++..."
 emcc "${API_FLAGS[@]}" -c api.cpp -o "$WASM_TEMP_OBJ_DIR/api.o"
 
 # =========================================================================
 # 🔗 ÉDITION DES LIENS ET GÉNÉRATION WEBASSEMBLY
 # =========================================================================
 LINK_FLAGS=(
-    "-O0"
-    "-g"
+    "-O2"
     "-s" "WASM=1"
     "-s" "MODULARIZE=1"
     "-s" "EXPORT_NAME='createPinMAME'"
@@ -76,7 +78,7 @@ LINK_FLAGS=(
     "-s" "EXPORTED_FUNCTIONS=['_pinmame_get_version','_pinmame_get_gprom_ptr','_pinmame_get_dsprom_ptr','_pinmame_get_display','_pinmame_web_entry','_pinmame_web_boot','_pinmame_web_tick','_api_pop_ascii_event','_api_hook_gottlieb_display_write','_api_get_dac_count','_api_get_dac_buffer','_api_reset_dac_buffer']"
 )
 
-echo "[*] [V93.4] Liaison des archives et injection des symboles modulaire..."
+echo "[*] [V94.0] Liaison des archives et injection des symboles modulaire..."
 emcc "$WASM_TEMP_OBJ_DIR/api.o" libpinmame_wasm.a "${LINK_FLAGS[@]}" \
     -Wl,--wrap=run_machine \
     -Wl,--wrap=DAC_DC_offset_correction_data_16_w \
@@ -92,7 +94,7 @@ if [ -f "src-emul/pinmame_web.js" ] && [ -f "src-emul/pinmame_web.wasm" ]; then
 
     echo ""
     echo "=================================================="
-    echo "📊 RAPPORT DE BUILD V93.4"
+    echo "📊 RAPPORT DE BUILD V94.0"
     echo "=================================================="
     echo "✅ src-emul/pinmame_web.js   : $JS_SIZE ($JS_SIZE_BYTES bytes)"
     echo "✅ src-emul/pinmame_web.wasm : $WASM_SIZE ($WASM_SIZE_BYTES bytes)"
@@ -109,6 +111,6 @@ if [ -f "src-emul/pinmame_web.js" ] && [ -f "src-emul/pinmame_web.wasm" ]; then
     node build_bundle.js
     echo "=================================================="
 else
-    echo "⚠️  [V93.4] Certains fichiers n'ont pas été générés correctement."
+    echo "⚠️  [V94.0] Certains fichiers n'ont pas été générés correctement."
     exit 1
 fi

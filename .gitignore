@@ -27,3 +27,9 @@ pinmame_workspace_wasm/
 core.*
 vgcore.*
 pinmame_stripped/
+
+# Build ESP32
+esp32/esp_project/build/
+esp32/esp_project/.cache/
+esp32/esp_project/managed_components/
+capture_*.mat

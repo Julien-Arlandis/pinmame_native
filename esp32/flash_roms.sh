@@ -26,11 +26,25 @@ if [[ ${#ROMS[@]} -eq 0 ]]; then
     exit 1
 fi
 
-ROM="${ROMS[1]}"
-NAME=$(basename "$ROM" .zip)
+echo ""
 [[ -f "$LAST_ROM_FILE" ]] && echo "→ ROM actuelle : $(cat $LAST_ROM_FILE)"
-echo -n "→ Flash $NAME ? [Entrée pour confirmer / Ctrl+C pour annuler] "
-read
+echo "ROMs disponibles :"
+for i in {1..${#ROMS[@]}}; do
+    name=$(basename "${ROMS[$i]}" .zip)
+    size=$(du -h "${ROMS[$i]}" | awk '{print $1}')
+    echo "  $i) $name  ($size)"
+done
+echo ""
+echo -n "Choix : "
+read CHOICE
+
+if [[ $CHOICE -ge 1 && $CHOICE -le ${#ROMS[@]} ]]; then
+    ROM="${ROMS[$CHOICE]}"
+    NAME=$(basename "$ROM" .zip)
+else
+    echo "❌ Choix invalide"
+    exit 1
+fi
 
 mkdir -p "$TMP_DIR/roms"
 cp "$ROM" "$TMP_DIR/roms/"

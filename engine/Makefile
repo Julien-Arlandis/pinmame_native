@@ -1,9 +1,10 @@
-PINMAME_URL := https://github.com/vpinball/pinmame.git
-WORKSPACE   := workspace/pinmame_stock
+PINMAME_URL  := https://github.com/vpinball/pinmame.git
+WORKSPACE    := workspace/pinmame_stock
+PROJECT_ROOT := $(shell dirname $(realpath $(firstword $(MAKEFILE_LIST))))
 
-.PHONY: all wasm native clean
+.PHONY: all native clean
 
-all: $(WORKSPACE) node_modules
+all: $(WORKSPACE) node/node_modules
 	./build/wasm_lib.sh
 	./build/wasm.sh
 
@@ -13,8 +14,8 @@ native: $(WORKSPACE)
 $(WORKSPACE):
 	git clone $(PINMAME_URL) $(WORKSPACE)
 
-node_modules:
+node/node_modules:
 	cd node && npm install --silent
 
 clean:
-	rm -rf out/
+	rm -rf out/ node/node_modules/

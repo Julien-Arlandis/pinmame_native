@@ -11,11 +11,10 @@ const OUT_DIR     = path.join(ENGINE_DIR, 'out');
 const NODE_DIR    = path.join(ENGINE_DIR, 'node');
 const OUT         = path.join(PROJECT_ROOT, 'tilt');
 
-const wasmBuf    = fs.readFileSync(path.join(OUT_DIR, 'pinmame_web.wasm'));
-const webJs      = fs.readFileSync(path.join(OUT_DIR, 'pinmame_web.js'),  'utf8');
-const audioJs    = fs.readFileSync(path.join(NODE_DIR, 'runtime-audio.js'), 'utf8');
-const runtimeJs  = fs.readFileSync(path.join(NODE_DIR, 'runtime.js'),  'utf8');
-const nodeMainJs = fs.readFileSync(path.join(NODE_DIR, 'main.js'), 'utf8');
+const wasmBuf   = fs.readFileSync(path.join(OUT_DIR, 'pinmame_web.wasm'));
+const webJs     = fs.readFileSync(path.join(OUT_DIR, 'pinmame_web.js'),  'utf8');
+const audioJs   = fs.readFileSync(path.join(NODE_DIR, 'runtime-audio.js'), 'utf8');
+const runtimeJs = fs.readFileSync(path.join(NODE_DIR, 'runtime.js'),  'utf8');
 
 // Escape */ (0x2A 0x2F) sequences in WASM so they can't close the JS block comment
 function escapeWasm(buf) {
@@ -63,49 +62,20 @@ if (typeof process !== 'undefined' && typeof __filename !== 'undefined') {
     }
 }`;
 
-const jsText = `#!/usr/bin/env node
-/* ================================================================
-   PinMAME — bundle universel (navigateur Worker + Node.js CLI)
+const jsText = `/* ================================================================
+   PinMAME — librairie partagée (navigateur Worker + Node.js)
    Généré le ${new Date().toISOString()}
-   Sources : src-emul/pinmame_web.js + pinmame_web.wasm + runtime-audio.js + runtime.js
+   Sources : pinmame_web.js + pinmame_web.wasm + runtime-audio.js + runtime.js
    ================================================================ */
 ${nodeExtract}
 
 (function () {
-
-// Filtre les logs natifs BLE (CoreBluetooth/bleno) en se respawnant
-// avec stderr pipé. Désactivé si --ble-log est passé.
-if (typeof process !== 'undefined' && typeof require !== 'undefined' &&
-    require.main === module && !process.env._TILT_RUNNING &&
-    !process.argv.includes('--ble-log')) {
-    const { spawn } = require('child_process');
-    const child = spawn(process.execPath, process.argv.slice(1), {
-        env: { ...process.env, _TILT_RUNNING: '1' },
-        stdio: ['inherit', 'inherit', 'pipe']
-    });
-    const BLE_RE = /BlenoMac|CoreBluetooth|napiToCB|napiArray|peripheralManager|CBMutable/;
-    let buf = '';
-    child.stderr.on('data', chunk => {
-        buf += chunk.toString();
-        let i;
-        while ((i = buf.indexOf('\\n')) >= 0) {
-            const line = buf.slice(0, i + 1);
-            buf = buf.slice(i + 1);
-            if (!BLE_RE.test(line)) process.stderr.write(line);
-        }
-    });
-    child.stderr.on('end', () => { if (buf) process.stderr.write(buf); });
-    child.on('exit', (code, sig) => { process.exitCode = code ?? (sig ? 1 : 0); });
-    return; // Le parent n'exécute pas la suite
-}
 
 ${webJs}
 
 ${audioJs}
 
 ${bundledRuntimeJs}
-
-${nodeMainJs}
 
 })();`;
 

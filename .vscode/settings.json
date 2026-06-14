@@ -1,15 +1,9 @@
 {
+  "liveServer.settings.root": "/web",
   "liveServer.settings.ignoreFiles": [
     "roms/**",
     "**/*.zip",
     "tilt",
-    "pinmame_workspace/**",
-    "pinmame_workspace_wasm_objs/**",
-    "node_modules/**",
-    "esp32/**",
-    "node/**",
-    "out/**",
-    "workspace/**",
-    "build/**"
+    "node_modules/**"
   ]
 }

@@ -25,17 +25,4 @@ Se connecte via BLE ou WebSocket depuis l'interface web.
 
 == Firmware ESP32 ==
 
-Compiler et flasher (ESP32-S3 branché en USB) :
-
-    engine/esp32/flash.sh
-
-Détecte automatiquement le port /dev/cu.usbmodem*, compile si nécessaire,
-puis flashe. Requiert ESP-IDF 5.4 installé dans ~/esp/v5.4/esp-idf/.
-
-Monitor série (logs temps réel, quitter : Ctrl+]) :
-
-    engine/esp32/listen.sh
-
-Compiler sans flasher :
-
-    cd engine && make esp32
+Voir engine/esp32/README.txt

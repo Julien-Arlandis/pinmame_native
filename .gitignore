@@ -6,7 +6,7 @@ engine/node/package-lock.json
 .DS_Store
 
 # Dossiers de travail volumineux (à compiler localement)
-pinmame_workspace/
+engine/workspace/
 pinmame_workspace_wasm/
 
 # Sauvegardes

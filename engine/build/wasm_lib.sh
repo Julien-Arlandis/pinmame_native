@@ -28,13 +28,13 @@ ENGINE_DIR="$(dirname "$SCRIPT_DIR")"
 PROJECT_ROOT="$(dirname "$ENGINE_DIR")"
 WASM_TEMP_OBJ_DIR="$ENGINE_DIR/out/wasm_objs"
 
-# Cherche la source PinMAME : pinmame_stripped (si existant) ou pinmame_workspace/pinmame_stock
+# Cherche la source PinMAME : pinmame_stripped (si existant) ou workspace/pinmame_stock
 if [ -d "$PROJECT_ROOT/pinmame_stripped/src" ]; then
     BUILD_WORKSPACE="$PROJECT_ROOT/pinmame_stripped"
-elif [ -d "$PROJECT_ROOT/pinmame_workspace/pinmame_stock/src" ]; then
-    BUILD_WORKSPACE="$PROJECT_ROOT/pinmame_workspace/pinmame_stock"
+elif [ -d "$ENGINE_DIR/workspace/pinmame_stock/src" ]; then
+    BUILD_WORKSPACE="$ENGINE_DIR/workspace/pinmame_stock"
 else
-    echo "❌ [V116.00] Erreur : ni pinmame_stripped ni pinmame_workspace/pinmame_stock introuvable."
+    echo "❌ [V116.00] Erreur : ni pinmame_stripped ni workspace/pinmame_stock introuvable."
     exit 1
 fi
 

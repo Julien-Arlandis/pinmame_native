@@ -17,10 +17,10 @@ OUTPUT="$SCRIPT_DIR/tilt_esp32"
 
 if [ -d "$PROJECT_ROOT/pinmame_stripped/src" ]; then
     BUILD_WORKSPACE="$PROJECT_ROOT/pinmame_stripped"
-elif [ -d "$PROJECT_ROOT/pinmame_workspace/pinmame_stock/src" ]; then
-    BUILD_WORKSPACE="$PROJECT_ROOT/pinmame_workspace/pinmame_stock"
+elif [ -d "$ENGINE_DIR/workspace/pinmame_stock/src" ]; then
+    BUILD_WORKSPACE="$ENGINE_DIR/workspace/pinmame_stock"
 else
-    echo "❌ [NATIVE-V1.0] ni pinmame_stripped ni pinmame_workspace/pinmame_stock introuvable."
+    echo "❌ [NATIVE-V1.0] ni pinmame_stripped ni workspace/pinmame_stock introuvable."
     exit 1
 fi
 

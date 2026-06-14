@@ -26,6 +26,7 @@ pinmame_stripped/
 
 # Artefacts de build
 out/
+node/tilt_node
 
 # Build ESP32
 esp32/esp_project/build/

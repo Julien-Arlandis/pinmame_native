@@ -203,7 +203,7 @@ Logs
                 else bleno.stopAdvertising();
             });
             bleno.on('advertisingStart', err => {
-                if (!err) { bleno.setServices([service]); info('  BLE      : advertising PinMAME'); }
+                if (!err) { bleno.setServices([service]); info('  BLE      : advertising PINMAME_node'); }
             });
         } catch {
             info('⚠️  BLE indisponible — npm install @abandonware/bleno  (ou --no-ble)');

@@ -6,9 +6,9 @@ Installation et compilation :
 make all clone automatiquement la source PinMAME, installe les dépendances
 Node, compile le WASM et génère l'exécutable tilt à la racine du projet.
 
-Pour le build natif Mac/Linux :
+Pour le firmware ESP32 :
 
-    make native
+    cd engine && make native
 
 ------------------
 

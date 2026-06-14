@@ -14,7 +14,7 @@ Pour le build natif Mac/Linux :
 
 Lancer l'émulateur Node (BLE + WebSocket) :
 
-    ./tilt bonebstr
+    node engine/node/main.js bonebstr
 
 Depuis le navigateur (interface web workbench) :
     https://julien-arlandis.github.io/pinmame_native/

@@ -1,12 +1,12 @@
 # Dépendances Node
-engine/node/node_modules/
-engine/node/package-lock.json
+node/node_modules/
+node/package-lock.json
 
 # macOS
 .DS_Store
 
 # Dossiers de travail volumineux (à compiler localement)
-engine/workspace/
+workspace/
 pinmame_workspace_wasm/
 
 # Sauvegardes
@@ -14,8 +14,8 @@ pinmame_workspace_wasm/
 
 # Archives ZIP sauf les ROMs du projet
 *.zip
-!engine/node/roms/*.zip
-!engine/web/roms/*.zip
+!node/roms/*.zip
+!web/roms/*.zip
 
 # Résidus de build et logs
 *.o
@@ -24,16 +24,16 @@ core.*
 vgcore.*
 pinmame_stripped/
 
-# Artefacts de build engine
-engine/out/
+# Artefacts de build
+out/
 
 # Build ESP32
-engine/esp32/esp_project/build/
-engine/esp32/esp_project/.cache/
-engine/esp32/esp_project/managed_components/
-engine/esp32/esp_project/sdkconfig.old
-engine/esp32/tilt_esp32
-engine/esp32/tilt_esp32_objs/
-engine/esp32/tilt_esp32_dbg
-engine/esp32/tilt_esp32_objs_dbg/
+esp32/esp_project/build/
+esp32/esp_project/.cache/
+esp32/esp_project/managed_components/
+esp32/esp_project/sdkconfig.old
+esp32/tilt_esp32
+esp32/tilt_esp32_objs/
+esp32/tilt_esp32_dbg
+esp32/tilt_esp32_objs_dbg/
 capture_*.mat

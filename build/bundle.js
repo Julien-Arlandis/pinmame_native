@@ -137,5 +137,5 @@ fs.chmodSync(OUT_NODE, 0o755);
 
 const mb = n => (n / 1024 / 1024).toFixed(2) + ' MB';
 const extra = escapedWasm.length - wasmBuf.length;
-console.log(`✅ tilt_web  → engine/web/tilt_web   : ${mb(webBundle.length)}`);
-console.log(`✅ tilt_node → engine/node/tilt_node : ${mb(nodeBundle.length)}  (WASM brut: ${mb(wasmBuf.length)}, échappements: +${extra} octets)`);
+console.log(`✅ tilt_web  → web/tilt_web   : ${mb(webBundle.length)}`);
+console.log(`✅ tilt_node → node/tilt_node : ${mb(nodeBundle.length)}  (WASM brut: ${mb(wasmBuf.length)}, échappements: +${extra} octets)`);

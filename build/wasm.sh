@@ -100,8 +100,8 @@ if [ -f "$OUT_DIR/pinmame_web.js" ] && [ -f "$OUT_DIR/pinmame_web.wasm" ]; then
     echo "=================================================="
     echo "📊 RAPPORT DE BUILD V94.0"
     echo "=================================================="
-    echo "✅ engine/out/pinmame_web.js   : $JS_SIZE ($JS_SIZE_BYTES bytes)"
-    echo "✅ engine/out/pinmame_web.wasm : $WASM_SIZE ($WASM_SIZE_BYTES bytes)"
+    echo "✅ out/pinmame_web.js   : $JS_SIZE ($JS_SIZE_BYTES bytes)"
+    echo "✅ out/pinmame_web.wasm : $WASM_SIZE ($WASM_SIZE_BYTES bytes)"
     echo "───────────────────────────────────────────────────"
     printf "📦 TOTAL WASM+JS   : "
     if [ $TOTAL_BYTES -lt 1048576 ]; then

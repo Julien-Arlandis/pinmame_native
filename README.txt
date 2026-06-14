@@ -1,27 +1,27 @@
 == Build ==
 
     git clone https://github.com/Julien-Arlandis/pinmame_native.git
-    cd pinmame_native/engine && make all
+    cd pinmame_native && make all
 
-Génère engine/web/tilt_web (navigateur) et engine/node/tilt_node (Node.js).
+Génère web/tilt_web (navigateur) et node/tilt_node (Node.js).
 
 
 == Environnement web ==
 
-    cd engine/web && python3 -m http.server 8080
+    cd web && python3 -m http.server 8080
 
 Ouvrir http://localhost:8080 dans le navigateur.
-ROMs : engine/web/roms/
+ROMs : web/roms/
 
 
 == Environnement Node (BLE + WebSocket) ==
 
-    node engine/node/tilt_node [--rom=<nom>] [--port=<n>]
+    node node/tilt_node [--rom=<nom>] [--port=<n>]
 
 Lance l'émulateur sur le port WebSocket 8765.
-ROMs : engine/node/roms/
+ROMs : node/roms/
 
 
 == Firmware ESP32 ==
 
-Voir engine/esp32/README.txt
+Voir esp32/README.txt

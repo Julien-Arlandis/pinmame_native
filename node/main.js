@@ -22,7 +22,7 @@ if (!process.env._TILT_RUNNING && !process.argv.includes('--ble-log')) {
     return;
 }
 
-const { createEmulator } = require('../../tilt');
+const { createEmulator } = require('../web/tilt_web');
 
 (async function main() {
     const fs     = require('node:fs');
@@ -32,8 +32,8 @@ const { createEmulator } = require('../../tilt');
     const HELP = `
 PinMAME Node Runtime
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Usage: node engine/node/tilt_node  [options]
-       node engine/node/main.js   [options]
+Usage: node node/tilt_node  [options]
+       node node/main.js   [options]
 
 ROM
   --rom=<name>           Nom de la ROM intégrée    (défaut: bonebstr)

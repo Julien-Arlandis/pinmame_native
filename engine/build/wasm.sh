@@ -105,9 +105,9 @@ if [ -f "$OUT_DIR/pinmame_web.js" ] && [ -f "$OUT_DIR/pinmame_web.wasm" ]; then
     echo "───────────────────────────────────────────────────"
     printf "📦 TOTAL WASM+JS   : "
     if [ $TOTAL_BYTES -lt 1048576 ]; then
-        printf "%.2f KB\n" $(echo "scale=2; $TOTAL_BYTES / 1024" | bc)
+        LC_ALL=C printf "%.2f KB\n" $(echo "scale=2; $TOTAL_BYTES / 1024" | bc)
     else
-        printf "%.2f MB\n" $(echo "scale=2; $TOTAL_BYTES / 1048576" | bc)
+        LC_ALL=C printf "%.2f MB\n" $(echo "scale=2; $TOTAL_BYTES / 1048576" | bc)
     fi
     echo "=================================================="
 

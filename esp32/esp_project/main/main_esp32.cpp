@@ -248,18 +248,24 @@ static int gap_event_cb(struct ble_gap_event* event, void* arg) {
 }
 
 static void start_advertising(void) {
+    // Nom seul dans l'adv (UUID → scan response pour rester ≤31 octets)
     struct ble_hs_adv_fields fields = {};
-    const char* name           = "PINMAME_esp32";
+    const char* name           = "pinmame_esp32";
     fields.flags               = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
     fields.name                = (const uint8_t*)name;
     fields.name_len            = (uint8_t)strlen(name);
     fields.name_is_complete    = 1;
-    fields.uuids128            = &ble_svc_uuid;
-    fields.num_uuids128        = 1;
-    fields.uuids128_is_complete = 1;
 
     int rc = ble_gap_adv_set_fields(&fields);
     if (rc) { ESP_LOGE(TAG, "ble_gap_adv_set_fields: %d", rc); return; }
+
+    // UUID128 dans la scan response
+    struct ble_hs_adv_fields rsp = {};
+    rsp.uuids128            = &ble_svc_uuid;
+    rsp.num_uuids128        = 1;
+    rsp.uuids128_is_complete = 1;
+    rc = ble_gap_adv_rsp_set_fields(&rsp);
+    if (rc) { ESP_LOGE(TAG, "ble_gap_adv_rsp_set_fields: %d", rc); return; }
 
     struct ble_gap_adv_params adv_params = {};
     adv_params.conn_mode = BLE_GAP_CONN_MODE_UND;
@@ -268,7 +274,7 @@ static void start_advertising(void) {
     rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER,
                            &adv_params, gap_event_cb, NULL);
     if (rc) { ESP_LOGE(TAG, "ble_gap_adv_start: %d", rc); return; }
-    ESP_LOGI(TAG, "BLE advertising 'PinMAME'");
+    ESP_LOGI(TAG, "BLE advertising 'pinmame_esp32'");
 }
 
 static void ble_sync_cb(void) {

@@ -144,7 +144,7 @@ const BLE_IN_UUID  = 'ab120003-b5a3-f393-e0a9-e50e24dcca9e'; // write  ← brows
 
 async function createBluetoothPort() {
     const device = await navigator.bluetooth.requestDevice({
-        filters: [{ namePrefix: 'pinmame' }],
+        filters: [{ namePrefix: 'pinmame' }, { name: 'PinMAME' }],
         optionalServices: [BLE_SVC_UUID]
     });
 

@@ -1,31 +1,20 @@
-Pour compiler le projet et son binaire xpinmame.x11 :
-./build_native_exec.sh
+Installation et compilation :
 
-Pour générer la librairie libpinmame_native.a :
-./build_native_lib.sh
+    git clone https://github.com/Julien-Arlandis/pinmame_native.git
+    cd pinmame_native/engine && make all
 
-Pour générer la librairie libpinmame_wasm.a :
-./build_wasm_lib.sh
+make all clone automatiquement la source PinMAME, installe les dépendances
+Node, compile le WASM et génère l'exécutable tilt à la racine du projet.
 
-Pour générer pinmame_web.js et pinmame_web.wasm
-./build_wasm_web.sh
+Pour le build natif Mac/Linux :
 
-
------------------
-
-
-Pour lancer l'émulateur :
-./test_native_exec/xpinmame.x11 -rompath ./roms bonebstr
-./test_pure_lib_exec/test_pure_lib -rompath ./roms bonebstr
-
-
-Pour générer un binaire d'exécution à partir de la librairie :
-./build_exec_with_lib.sh
-
-Pour lancer l'émulateur js :
-node launcher.js bonebstr
-
+    make native
 
 ------------------
-Depuis le navigateur :
-https://julien-arlandis.github.io/pinmame_native/
+
+Lancer l'émulateur Node (BLE + WebSocket) :
+
+    ./tilt bonebstr
+
+Depuis le navigateur (interface web workbench) :
+    https://julien-arlandis.github.io/pinmame_native/

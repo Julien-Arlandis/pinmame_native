@@ -85,48 +85,14 @@ Logs
                 });
             }
 
-            let audioSink = null, audioLabel = 'désactivé  →  npm install speaker';
+            let audioSink = null, audioLabel = 'désactivé';
 
             if (options.audioOut) {
                 const stream = fs.createWriteStream(path.resolve(process.cwd(), options.audioOut));
                 audioSink  = { write: buf => stream.write(buf) };
                 audioLabel = `fichier → ${options.audioOut}`;
             } else if (!options.noSpeaker) {
-                try {
-                    const Speaker = require('speaker');
-                    let spk = null;
-                    const queue = [];
-                    let draining = false;
-                    let queuedSamples = 0;
-
-                    const flush = () => {
-                        while (queue.length > 0 && spk) {
-                            const buf = queue.shift();
-                            queuedSamples -= buf.length / 4;
-                            const ok = spk.write(buf);
-                            if (!ok) { draining = true; spk.once('drain', () => { draining = false; flush(); }); return; }
-                        }
-                    };
-
-                    const makeSpk = () => {
-                        spk = new Speaker({ channels: 2, bitDepth: 16, sampleRate: 44100, signed: true });
-                        spk.on('error', () => { spk = null; setTimeout(makeSpk, 200); });
-                        spk.on('close', () => { spk = null; setTimeout(makeSpk, 200); });
-                    };
-                    makeSpk();
-
-                    audioSink = {
-                        write(buf) {
-                            queue.push(buf);
-                            queuedSamples += buf.length / 4;
-                            if (!draining) flush();
-                        },
-                        get queued() { return queuedSamples; }
-                    };
-                    audioLabel = 'speaker (npm)';
-                } catch (e) { info(`  Audio    : speaker non chargé — ${e.message}`); }
-
-                if (!audioSink && process.platform === 'darwin') {
+                if (process.platform === 'darwin') {
                     audioSink = await trySpawnSink('play', ['-r','44100','-b','16','-c','2','-e','signed-integer','-t','raw','-']);
                     if (audioSink) audioLabel = 'play (SoX)';
                 }
@@ -134,12 +100,7 @@ Logs
                     audioSink = await trySpawnSink('aplay', ['-f','S16_LE','-r','44100','-c','2']);
                     if (audioSink) audioLabel = 'aplay (ALSA)';
                 }
-
-                if (!audioSink && options.speaker) {
-                    console.error('⚠️  Aucune sortie audio trouvée — npm install speaker'); process.exit(1);
-                }
-            } else {
-                audioLabel = 'désactivé';
+                if (!audioSink) audioLabel = 'désactivé  (SoX introuvable)';
             }
 
             const wsPort = parseInt(options.port) || 8765;
@@ -342,15 +303,68 @@ Logs
                 return false;
             }
 
-            // ── WEBSOCKET ────────────────────────────────────────────────────
-            try {
-                const { WebSocketServer } = require('ws');
-                const wss = new WebSocketServer({ port: wsPort });
-                info(`  WebSocket: ws://localhost:${wsPort}`);
-                wss.on('connection', (ws) => {
+            // ── WEBSOCKET (implémentation built-in, zéro dépendance) ────────
+            {
+                const crypto = require('node:crypto');
+                const http   = require('node:http');
+
+                class _WS {
+                    constructor(socket) {
+                        this.socket = socket; this.readyState = 1;
+                        this._ev = {}; this._buf = Buffer.alloc(0);
+                        socket.on('data',  d => this._onData(d));
+                        socket.on('close', () => { this.readyState = 3; this._emit('close'); });
+                        socket.on('error', e => this._emit('error', e));
+                    }
+                    on(e, cb) { (this._ev[e] = this._ev[e] || []).push(cb); return this; }
+                    _emit(e, ...a) { (this._ev[e] || []).forEach(cb => cb(...a)); }
+                    send(msg) {
+                        if (this.readyState !== 1) return;
+                        const d = Buffer.from(msg); const n = d.length;
+                        let h;
+                        if (n < 126)     { h = Buffer.alloc(2); h[0]=0x81; h[1]=n; }
+                        else if (n<65536){ h = Buffer.alloc(4); h[0]=0x81; h[1]=126; h.writeUInt16BE(n,2); }
+                        else             { h = Buffer.alloc(10);h[0]=0x81; h[1]=127; h.writeBigUInt64BE(BigInt(n),2); }
+                        try { this.socket.write(Buffer.concat([h, d])); } catch {}
+                    }
+                    _onData(chunk) {
+                        this._buf = Buffer.concat([this._buf, chunk]);
+                        while (this._buf.length >= 2) {
+                            const b0=this._buf[0], b1=this._buf[1];
+                            const masked=!!(b1&0x80); let len=b1&0x7f, off=2;
+                            if (len===126){ if(this._buf.length<4)return; len=this._buf.readUInt16BE(2); off=4; }
+                            else if(len===127){ if(this._buf.length<10)return; len=Number(this._buf.readBigUInt64BE(2)); off=10; }
+                            const need=off+(masked?4:0)+len;
+                            if(this._buf.length<need)return;
+                            let payload;
+                            if (masked) {
+                                const mask=this._buf.slice(off,off+4); off+=4;
+                                payload=Buffer.alloc(len);
+                                for(let i=0;i<len;i++) payload[i]=this._buf[off+i]^mask[i%4];
+                            } else { payload=this._buf.slice(off,off+len); }
+                            this._buf=this._buf.slice(off+len);
+                            const op=b0&0x0f;
+                            if(op===1||op===2) this._emit('message', payload);
+                            else if(op===8){ this.readyState=3; this.socket.end(); this._emit('close'); }
+                        }
+                    }
+                }
+
+                const server = http.createServer();
+                server.on('upgrade', (req, socket) => {
+                    const key = req.headers['sec-websocket-key'];
+                    if (!key) { socket.end(); return; }
+                    const accept = crypto.createHash('sha1')
+                        .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
+                    socket.write(
+                        'HTTP/1.1 101 Switching Protocols\r\n' +
+                        'Upgrade: websocket\r\nConnection: Upgrade\r\n' +
+                        `Sec-WebSocket-Accept: ${accept}\r\n\r\n`
+                    );
+                    const ws = new _WS(socket);
                     wsClients.add(ws);
                     ws.send(`@master:name=runtime-node&version=1`);
-                    ws.on('message', (data) => {
+                    ws.on('message', data => {
                         const line = data.toString().trim();
                         if (!handleClientLine(line, l => ws.send(l)))
                             emulator.handleLine(line);
@@ -363,8 +377,8 @@ Logs
                     ws.on('close', disconnect);
                     ws.on('error', disconnect);
                 });
-            } catch {
-                console.error('⚠️  Module ws absent — npm install ws');
+                server.listen(wsPort);
+                info(`  WebSocket: ws://localhost:${wsPort}`);
             }
 
             emulator.sendMessage('INIT_ENGINE', { customRomBytes, customRomName });

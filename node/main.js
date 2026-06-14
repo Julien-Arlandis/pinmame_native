@@ -199,7 +199,7 @@ Logs
 
             const service = new bleno.PrimaryService({ uuid: BLE_SVC, characteristics: [outChar, inChar] });
             bleno.on('stateChange', state => {
-                if (state === 'poweredOn') bleno.startAdvertising('pinmame_node', [BLE_SVC]);
+                if (state === 'poweredOn') bleno.startAdvertising('PINMAME_node', [BLE_SVC]);
                 else bleno.stopAdvertising();
             });
             bleno.on('advertisingStart', err => {

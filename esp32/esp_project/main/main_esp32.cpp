@@ -249,7 +249,7 @@ static int gap_event_cb(struct ble_gap_event* event, void* arg) {
 
 static void start_advertising(void) {
     struct ble_hs_adv_fields fields = {};
-    const char* name           = "pinmame_esp32";
+    const char* name           = "PINMAME_ESP32";
     fields.flags               = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
     fields.name                = (const uint8_t*)name;
     fields.name_len            = (uint8_t)strlen(name);
@@ -350,7 +350,7 @@ extern "C" void app_main(void) {
 
     ble_svc_gap_init();
     ble_svc_gatt_init();
-    ble_svc_gap_device_name_set("pinmame_esp32");
+    ble_svc_gap_device_name_set("PINMAME_ESP32");
 
     ble_gatts_count_cfg(gatt_svcs);
     ble_gatts_add_svcs(gatt_svcs);

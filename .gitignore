@@ -8,7 +8,6 @@ engine/node/package-lock.json
 # Dossiers de travail volumineux (à compiler localement)
 pinmame_workspace/
 pinmame_workspace_wasm/
-pinmame_workspace_wasm_objs/
 
 # Sauvegardes
 *.nv

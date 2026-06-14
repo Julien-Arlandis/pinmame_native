@@ -26,7 +26,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ENGINE_DIR="$(dirname "$SCRIPT_DIR")"
 PROJECT_ROOT="$(dirname "$ENGINE_DIR")"
-WASM_TEMP_OBJ_DIR="$PROJECT_ROOT/pinmame_workspace_wasm_objs"
+WASM_TEMP_OBJ_DIR="$ENGINE_DIR/out/wasm_objs"
 
 # Cherche la source PinMAME : pinmame_stripped (si existant) ou pinmame_workspace/pinmame_stock
 if [ -d "$PROJECT_ROOT/pinmame_stripped/src" ]; then

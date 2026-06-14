@@ -33,7 +33,7 @@ if [ -d "$PROJECT_ROOT/pinmame_stripped/src" ]; then
 else
     NATIVE_WORKSPACE="$PROJECT_ROOT/pinmame_workspace/pinmame_stock"
 fi
-WASM_TEMP_OBJ_DIR="$PROJECT_ROOT/pinmame_workspace_wasm_objs"
+WASM_TEMP_OBJ_DIR="$ENGINE_DIR/out/wasm_objs"
 
 # Vérification de l'archive statique
 if [ ! -f "$ENGINE_DIR/out/libpinmame_wasm.a" ]; then

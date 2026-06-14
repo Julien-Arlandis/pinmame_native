@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.16)
 # =========================================================================
 
 # Racine du dépôt PinMAME (intouchable)
-set(PM "${CMAKE_CURRENT_SOURCE_DIR}/../../../pinmame_workspace/pinmame_stock")
+set(PM "${CMAKE_CURRENT_SOURCE_DIR}/../../../workspace/pinmame_stock")
 # Racine du projet pinmame_native (api.cpp, esp32/)
 set(ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
 

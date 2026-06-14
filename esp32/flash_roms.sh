@@ -1,9 +1,8 @@
 #!/bin/zsh
-# Flash les ROMs choisies sur la partition SPIFFS de l'ESP32-S3
+# Flash la ROM sur la partition SPIFFS de l'ESP32-S3
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ROMS_DIR="$SCRIPT_DIR/../node/roms"
 SPIFFS_OFFSET="0x410000"
 SPIFFS_SIZE="0x200000"
@@ -21,47 +20,20 @@ if [[ -z "$PORT" ]]; then
 fi
 echo "→ Port : $PORT"
 
-# Lister les ROMs disponibles (zsh : tableaux indexés à partir de 1)
 ROMS=("$ROMS_DIR"/*.zip)
 if [[ ${#ROMS[@]} -eq 0 ]]; then
     echo "❌ Aucune ROM trouvée dans $ROMS_DIR"
     exit 1
 fi
 
-echo ""
+ROM="${ROMS[1]}"
+NAME=$(basename "$ROM" .zip)
 [[ -f "$LAST_ROM_FILE" ]] && echo "→ ROM actuelle : $(cat $LAST_ROM_FILE)"
-echo "ROMs disponibles :"
-for i in {1..${#ROMS[@]}}; do
-    name=$(basename "${ROMS[$i]}" .zip)
-    size=$(du -h "${ROMS[$i]}" | awk '{print $1}')
-    echo "  $i) $name  ($size)"
-done
-echo "  a) Toutes"
-echo ""
-echo -n "Choix (ex: 1 3 ou a) : "
-read CHOICE
+echo "→ Flash : $NAME"
 
 mkdir -p "$TMP_DIR/roms"
+cp "$ROM" "$TMP_DIR/roms/"
 
-SELECTED=""
-if [[ "$CHOICE" == "a" ]]; then
-    cp "$ROMS_DIR"/*.zip "$TMP_DIR/roms/"
-    SELECTED="toutes"
-else
-    for n in ${=CHOICE}; do
-        if [[ $n -ge 1 && $n -le ${#ROMS[@]} ]]; then
-            cp "${ROMS[$n]}" "$TMP_DIR/roms/"
-            name=$(basename "${ROMS[$n]}" .zip)
-            echo "→ Sélectionné : $name"
-            SELECTED="$SELECTED $name"
-        else
-            echo "⚠️  Numéro invalide : $n"
-        fi
-    done
-    SELECTED="${SELECTED## }"
-fi
-
-echo ""
 echo "[*] Génération image SPIFFS..."
 python3 "$SPIFFSGEN" --page-size 256 --obj-name-len 32 \
     "$SPIFFS_SIZE" "$TMP_DIR" "$TMP_IMAGE"
@@ -74,6 +46,6 @@ python3 "$HOME/esp/v5.4/esp-idf/components/esptool_py/esptool/esptool.py" \
     --chip esp32s3 -p "$PORT" -b 460800 write_flash "$SPIFFS_OFFSET" "$TMP_IMAGE"
 
 rm -rf "$TMP_DIR"
-echo "$SELECTED" > "$LAST_ROM_FILE"
+echo "$NAME" > "$LAST_ROM_FILE"
 echo ""
-echo "✅ ROMs flashées sur SPIFFS."
+echo "✅ $NAME flashée sur SPIFFS."

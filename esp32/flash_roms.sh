@@ -29,7 +29,8 @@ fi
 ROM="${ROMS[1]}"
 NAME=$(basename "$ROM" .zip)
 [[ -f "$LAST_ROM_FILE" ]] && echo "→ ROM actuelle : $(cat $LAST_ROM_FILE)"
-echo "→ Flash : $NAME"
+echo -n "→ Flash $NAME ? [Entrée pour confirmer / Ctrl+C pour annuler] "
+read
 
 mkdir -p "$TMP_DIR/roms"
 cp "$ROM" "$TMP_DIR/roms/"

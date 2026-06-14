@@ -33,11 +33,17 @@ Quitter : Ctrl+]
     cd engine && make esp32
 
 
-== Architecture flash ==
+== Architecture flash (16MB) ==
 
-  0x000000 – 0x010000  bootloader + table des partitions
-  0x010000 – 0x410000  app (4MB) — firmware PinMAME
-  0x410000 – 0xFFFFFF  SPIFFS (12MB) — ROMs ZIP
+  0x000000 – 0x009000  bootloader 2nd stage
+  0x009000 – 0x00F000  NVS (24KB) — stockage persistant clé/valeur
+                        → nom de la ROM active, réglages utilisateur
+  0x00F000 – 0x010000  phy_init — calibration radio BLE
+  0x010000 – 0x410000  factory app (4MB) — firmware PinMAME compilé
+  0x410000 – 0xFFFFFF  SPIFFS (12MB) — ROMs ZIP (flashées via flash_roms.sh)
+
+  flash.sh     → écrase uniquement bootloader + app (SPIFFS intact)
+  flash_roms.sh → écrase uniquement SPIFFS (firmware intact)
 
 
 == Changer de ROM à chaud ==

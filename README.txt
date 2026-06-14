@@ -8,7 +8,7 @@ Node, compile le WASM et génère l'exécutable tilt à la racine du projet.
 
 Pour le firmware ESP32 :
 
-    cd engine && make native
+    cd engine && make esp32
 
 ------------------
 

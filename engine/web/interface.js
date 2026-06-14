@@ -144,7 +144,7 @@ const BLE_IN_UUID  = 'ab120003-b5a3-f393-e0a9-e50e24dcca9e'; // write  ← brows
 
 async function createBluetoothPort() {
     const device = await navigator.bluetooth.requestDevice({
-        filters: [{ name: 'PinMAME' }],
+        filters: [{ namePrefix: 'pinmame' }],
         optionalServices: [BLE_SVC_UUID]
     });
 
@@ -750,8 +750,8 @@ function connectMaster(master, display) {
             // conservé pour compatibilité Node.js
         } else if (line.startsWith('@roms:list=')) {
             const names = line.slice(11).split(',').map(decodeURIComponent).filter(Boolean);
-            romSelector.innerHTML = '<option value=""></option>' + names.map(n => `<option value="${n}">${stripExt(n)}</option>`).join('');
-            if (romSelector.options.length > 1) { romSelector.style.display = 'inline-block'; applyCurrentRom(); }
+            romSelector.innerHTML = names.map(n => `<option value="${n}">${stripExt(n)}</option>`).join('');
+            if (romSelector.options.length > 0) { romSelector.style.display = 'inline-block'; applyCurrentRom(); }
         }
     });
 }
@@ -859,7 +859,6 @@ function setupSystemHandlers(restartFn) {
         romSelector.onchange = () => {
             const name = romSelector.value;
             if (!name) return;
-            romSelector.value = '';
             logToTerminal(`📀 ROM sélectionnée : ${name}`);
             if (isRemote()) {
                 sessionStorage.removeItem('custom_rom_bytes');
@@ -967,7 +966,7 @@ async function loadRomManifest() {
         if (!r.ok) return;
         const list = await r.json();
         if (!Array.isArray(list) || !list.length) return;
-        romSelector.innerHTML = '<option value=""></option>' + list.map(n => `<option value="${n}">${stripExt(n)}</option>`).join('');
+        romSelector.innerHTML = list.map(n => `<option value="${n}">${stripExt(n)}</option>`).join('');
         romSelector.style.display = 'inline-block';
     } catch (_) {}
 }

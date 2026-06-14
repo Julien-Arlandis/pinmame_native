@@ -31,7 +31,7 @@ function unlockAudio() {
 // Le port Worker ajoute : onAudio(cb) — cb(left, right) — canal audio séparé du texte
 
 async function createWorkerPort() {
-    const resp = await fetch('tilt', { cache: 'no-store' });
+    const resp = await fetch('tilt_web', { cache: 'no-store' });
     const arrayBuffer = await resp.arrayBuffer();
     const bytes = new Uint8Array(arrayBuffer);
 

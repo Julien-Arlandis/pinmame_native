@@ -32,7 +32,8 @@ const { createEmulator } = require('../../tilt');
     const HELP = `
 PinMAME Node Runtime
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Usage: node engine/node/main.js [options]
+Usage: node engine/node/tilt_node  [options]
+       node engine/node/main.js   [options]
 
 ROM
   --rom=<name>           Nom de la ROM intégrée    (défaut: bonebstr)
@@ -235,8 +236,8 @@ Logs
             },
             loadRom(romName) {
                 const candidates = [
+                    path.join(__dirname, 'roms', `${romName}.zip`),
                     path.join(process.cwd(), 'roms', `${romName}.zip`),
-                    path.join(__dirname,     '..', '..', 'roms', `${romName}.zip`),
                     path.join(process.cwd(), `${romName}.zip`)
                 ];
                 const romPath = candidates.find(p => fs.existsSync(p));
@@ -255,8 +256,8 @@ Logs
             if (p.get('display') === '1') info('  [DISPLAY] connecté');
             if (p.get('driver')  === '1') info('  [DRIVER]  connecté');
             const romsDir = [
-                path.join(process.cwd(), 'roms'),
-                path.join(__dirname, '..', '..', 'roms')
+                path.join(__dirname, 'roms'),
+                path.join(process.cwd(), 'roms')
             ].find(d => { try { return fs.statSync(d).isDirectory(); } catch { return false; } });
             if (romsDir) {
                 const roms = fs.readdirSync(romsDir).filter(f => f.endsWith('.zip'))
@@ -285,7 +286,7 @@ Logs
             const data = p.get('data') || null;
             info(`  ROM      : changement → ${name}`);
             if (data) {
-                const romPath = path.join(process.cwd(), 'roms', `${name}.zip`);
+                const romPath = path.join(__dirname, 'roms', `${name}.zip`);
                 fs.writeFileSync(romPath, Buffer.from(data, 'base64'));
                 info(`  ROM sauvegardée → ${romPath}`);
             }

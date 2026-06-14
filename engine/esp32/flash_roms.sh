@@ -4,7 +4,7 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
-ROMS_DIR="$PROJECT_ROOT/roms"
+ROMS_DIR="$SCRIPT_DIR/../node/roms"
 SPIFFS_OFFSET="0x410000"
 SPIFFS_SIZE="0xBF0000"
 SPIFFSGEN="$HOME/esp/v5.4/esp-idf/components/spiffs/spiffsgen.py"

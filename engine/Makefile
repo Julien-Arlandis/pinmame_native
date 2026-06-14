@@ -18,4 +18,4 @@ node/node_modules:
 	cd node && npm install --silent
 
 clean:
-	rm -rf out/ node/node_modules/
+	rm -rf out/ node/node_modules/ web/tilt_web node/tilt_node

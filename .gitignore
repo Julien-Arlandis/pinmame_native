@@ -14,7 +14,8 @@ pinmame_workspace_wasm/
 
 # Archives ZIP sauf les ROMs du projet
 *.zip
-!roms/*.zip
+!engine/node/roms/*.zip
+!engine/web/roms/*.zip
 
 # Résidus de build et logs
 *.o

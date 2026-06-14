@@ -28,6 +28,9 @@ pinmame_stripped/
 out/
 node/tilt_node
 
+# État local ESP32
+esp32/.last_rom
+
 # Build ESP32
 esp32/esp_project/build/
 esp32/esp_project/.cache/

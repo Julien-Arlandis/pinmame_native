@@ -8,6 +8,7 @@ ROMS_DIR="$SCRIPT_DIR/../node/roms"
 SPIFFS_OFFSET="0x410000"
 SPIFFS_SIZE="0x200000"
 SPIFFSGEN="$HOME/esp/v5.4/esp-idf/components/spiffs/spiffsgen.py"
+LAST_ROM_FILE="$SCRIPT_DIR/.last_rom"
 TMP_DIR="$(mktemp -d)"
 TMP_IMAGE="$TMP_DIR/spiffs.bin"
 
@@ -28,6 +29,7 @@ if [[ ${#ROMS[@]} -eq 0 ]]; then
 fi
 
 echo ""
+[[ -f "$LAST_ROM_FILE" ]] && echo "→ ROM actuelle : $(cat $LAST_ROM_FILE)"
 echo "ROMs disponibles :"
 for i in {1..${#ROMS[@]}}; do
     name=$(basename "${ROMS[$i]}" .zip)
@@ -41,17 +43,22 @@ read CHOICE
 
 mkdir -p "$TMP_DIR/roms"
 
+SELECTED=""
 if [[ "$CHOICE" == "a" ]]; then
     cp "$ROMS_DIR"/*.zip "$TMP_DIR/roms/"
+    SELECTED="toutes"
 else
     for n in ${=CHOICE}; do
         if [[ $n -ge 1 && $n -le ${#ROMS[@]} ]]; then
             cp "${ROMS[$n]}" "$TMP_DIR/roms/"
-            echo "→ Sélectionné : $(basename ${ROMS[$n]})"
+            name=$(basename "${ROMS[$n]}" .zip)
+            echo "→ Sélectionné : $name"
+            SELECTED="$SELECTED $name"
         else
             echo "⚠️  Numéro invalide : $n"
         fi
     done
+    SELECTED="${SELECTED## }"
 fi
 
 echo ""
@@ -67,5 +74,6 @@ python3 "$HOME/esp/v5.4/esp-idf/components/esptool_py/esptool/esptool.py" \
     --chip esp32s3 -p "$PORT" -b 460800 write_flash "$SPIFFS_OFFSET" "$TMP_IMAGE"
 
 rm -rf "$TMP_DIR"
+echo "$SELECTED" > "$LAST_ROM_FILE"
 echo ""
 echo "✅ ROMs flashées sur SPIFFS."

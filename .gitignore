@@ -16,6 +16,7 @@ pinmame_workspace_wasm_objs/
 # Archives ZIP sauf les ROMs du projet
 *.zip
 !roms/*.zip
+!engine/esp32/roms/*.zip
 
 # Résidus de build et logs
 *.o
@@ -24,7 +25,8 @@ core.*
 vgcore.*
 pinmame_stripped/
 
-# Exécutable tilt généré
+# Artefacts de build engine
+engine/out/
 tilt
 
 # Build ESP32

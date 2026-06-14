@@ -1,18 +1,21 @@
 #!/usr/bin/env node
-// build_bundle.js — assemble src-emul/ → tilt (exécutable universel)
+// bundle.js — assemble engine/ → tilt (exécutable universel)
 'use strict';
 
 const fs   = require('node:fs');
 const path = require('node:path');
 
-const SRC   = path.join(__dirname, 'src-emul');
-const OUT   = path.join(__dirname, 'tilt');
+const ENGINE_DIR  = path.dirname(__dirname);
+const PROJECT_ROOT = path.dirname(ENGINE_DIR);
+const OUT_DIR     = path.join(ENGINE_DIR, 'out');
+const NODE_DIR    = path.join(ENGINE_DIR, 'node');
+const OUT         = path.join(PROJECT_ROOT, 'tilt');
 
-const wasmBuf    = fs.readFileSync(path.join(SRC, 'pinmame_web.wasm'));
-const webJs      = fs.readFileSync(path.join(SRC, 'pinmame_web.js'),  'utf8');
-const audioJs    = fs.readFileSync(path.join(SRC, 'runtime-audio.js'),    'utf8');
-const runtimeJs  = fs.readFileSync(path.join(SRC, 'runtime.js'),  'utf8');
-const nodeMainJs = fs.readFileSync(path.join(SRC, 'node_main.js'), 'utf8');
+const wasmBuf    = fs.readFileSync(path.join(OUT_DIR, 'pinmame_web.wasm'));
+const webJs      = fs.readFileSync(path.join(OUT_DIR, 'pinmame_web.js'),  'utf8');
+const audioJs    = fs.readFileSync(path.join(NODE_DIR, 'runtime-audio.js'), 'utf8');
+const runtimeJs  = fs.readFileSync(path.join(NODE_DIR, 'runtime.js'),  'utf8');
+const nodeMainJs = fs.readFileSync(path.join(NODE_DIR, 'main.js'), 'utf8');
 
 // Escape */ (0x2A 0x2F) sequences in WASM so they can't close the JS block comment
 function escapeWasm(buf) {

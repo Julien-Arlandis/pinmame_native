@@ -10,14 +10,15 @@ set -e
 # =========================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT_DIR="$(dirname "$SCRIPT_DIR")"
+ENGINE_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$ENGINE_DIR")"
 OBJ_DIR="$SCRIPT_DIR/tilt_esp32_objs"
 OUTPUT="$SCRIPT_DIR/tilt_esp32"
 
-if [ -d "$ROOT_DIR/pinmame_stripped/src" ]; then
-    BUILD_WORKSPACE="$ROOT_DIR/pinmame_stripped"
-elif [ -d "$ROOT_DIR/pinmame_workspace/pinmame_stock/src" ]; then
-    BUILD_WORKSPACE="$ROOT_DIR/pinmame_workspace/pinmame_stock"
+if [ -d "$PROJECT_ROOT/pinmame_stripped/src" ]; then
+    BUILD_WORKSPACE="$PROJECT_ROOT/pinmame_stripped"
+elif [ -d "$PROJECT_ROOT/pinmame_workspace/pinmame_stock/src" ]; then
+    BUILD_WORKSPACE="$PROJECT_ROOT/pinmame_workspace/pinmame_stock"
 else
     echo "❌ [NATIVE-V1.0] ni pinmame_stripped ni pinmame_workspace/pinmame_stock introuvable."
     exit 1
@@ -190,9 +191,9 @@ fi
 echo "[*] Compilation de api.cpp + hal_native.cpp + main_native.cpp + stubs..."
 # -DMAME_DEBUG : force osdepend.h à déclarer logerror (pas de static inline no-op)
 # ce qui permet à api.cpp de définir sa propre version
-$CXX "${FLAGS[@]}" "-I$ROOT_DIR" -DMAME_DEBUG -std=c++17 -c "$ROOT_DIR/api.cpp"  -o "$OBJ_DIR/api.o"
-$CXX "${FLAGS[@]}" "-I$ROOT_DIR" -std=c++17 -c hal_native.cpp  -o "$OBJ_DIR/hal_native.o"
-$CXX "${FLAGS[@]}" "-I$ROOT_DIR" -std=c++17 -c main_native.cpp -o "$OBJ_DIR/main_native.o"
+$CXX "${FLAGS[@]}" "-I$ENGINE_DIR" -DMAME_DEBUG -std=c++17 -c "$ENGINE_DIR/api.cpp"  -o "$OBJ_DIR/api.o"
+$CXX "${FLAGS[@]}" "-I$ENGINE_DIR" -std=c++17 -c hal_native.cpp  -o "$OBJ_DIR/hal_native.o"
+$CXX "${FLAGS[@]}" "-I$ENGINE_DIR" -std=c++17 -c main_native.cpp -o "$OBJ_DIR/main_native.o"
 $CC  "${FLAGS[@]}"               -c stubs_native.c             -o "$OBJ_DIR/stubs_native.o"
 $CC  "${FLAGS[@]}"               -c driver0_native.c           -o "$OBJ_DIR/driver0_native.o"
 ALL_OBJS+=("$OBJ_DIR/api.o" "$OBJ_DIR/hal_native.o" "$OBJ_DIR/main_native.o" "$OBJ_DIR/stubs_native.o" "$OBJ_DIR/driver0_native.o")

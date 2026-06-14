@@ -24,16 +24,19 @@ if ! command -v emcc &> /dev/null; then
     exit 1
 fi
 
-BASE_DIR=$(pwd)
-if [ -d "$BASE_DIR/pinmame_stripped/src" ]; then
-    NATIVE_WORKSPACE="$BASE_DIR/pinmame_stripped"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENGINE_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$ENGINE_DIR")"
+
+if [ -d "$PROJECT_ROOT/pinmame_stripped/src" ]; then
+    NATIVE_WORKSPACE="$PROJECT_ROOT/pinmame_stripped"
 else
-    NATIVE_WORKSPACE="$BASE_DIR/pinmame_workspace/pinmame_stock"
+    NATIVE_WORKSPACE="$PROJECT_ROOT/pinmame_workspace/pinmame_stock"
 fi
-WASM_TEMP_OBJ_DIR="$BASE_DIR/pinmame_workspace_wasm_objs"
+WASM_TEMP_OBJ_DIR="$PROJECT_ROOT/pinmame_workspace_wasm_objs"
 
 # Vérification de l'archive statique
-if [ ! -f "libpinmame_wasm.a" ]; then
+if [ ! -f "$ENGINE_DIR/out/libpinmame_wasm.a" ]; then
     echo "❌ [V94.0] ERREUR : libpinmame_wasm.a introuvable. Compile d'abord la lib statique."
     exit 1
 fi
@@ -54,7 +57,7 @@ API_FLAGS=(
 )
 
 echo "[*] [V94.0] Compilation du pont API C++..."
-emcc "${API_FLAGS[@]}" -c api.cpp -o "$WASM_TEMP_OBJ_DIR/api.o"
+emcc "${API_FLAGS[@]}" -c "$ENGINE_DIR/api.cpp" -o "$WASM_TEMP_OBJ_DIR/api.o"
 
 # =========================================================================
 # 🔗 ÉDITION DES LIENS ET GÉNÉRATION WEBASSEMBLY
@@ -79,25 +82,26 @@ LINK_FLAGS=(
 )
 
 echo "[*] [V94.0] Liaison des archives et injection des symboles modulaire..."
-emcc "$WASM_TEMP_OBJ_DIR/api.o" libpinmame_wasm.a "${LINK_FLAGS[@]}" \
+OUT_DIR="$ENGINE_DIR/out"
+emcc "$WASM_TEMP_OBJ_DIR/api.o" "$ENGINE_DIR/out/libpinmame_wasm.a" "${LINK_FLAGS[@]}" \
     -Wl,--wrap=run_machine \
     -Wl,--wrap=DAC_DC_offset_correction_data_16_w \
-    -o src-emul/pinmame_web.js
+    -o "$OUT_DIR/pinmame_web.js"
 
 # 📊 RAPPORT DE BUILD : Afficher la taille des fichiers générés
-if [ -f "src-emul/pinmame_web.js" ] && [ -f "src-emul/pinmame_web.wasm" ]; then
-    JS_SIZE=$(ls -lh src-emul/pinmame_web.js | awk '{print $5}')
-    WASM_SIZE=$(ls -lh src-emul/pinmame_web.wasm | awk '{print $5}')
-    JS_SIZE_BYTES=$(ls -l src-emul/pinmame_web.js | awk '{print $5}')
-    WASM_SIZE_BYTES=$(ls -l src-emul/pinmame_web.wasm | awk '{print $5}')
+if [ -f "$OUT_DIR/pinmame_web.js" ] && [ -f "$OUT_DIR/pinmame_web.wasm" ]; then
+    JS_SIZE=$(ls -lh "$OUT_DIR/pinmame_web.js" | awk '{print $5}')
+    WASM_SIZE=$(ls -lh "$OUT_DIR/pinmame_web.wasm" | awk '{print $5}')
+    JS_SIZE_BYTES=$(ls -l "$OUT_DIR/pinmame_web.js" | awk '{print $5}')
+    WASM_SIZE_BYTES=$(ls -l "$OUT_DIR/pinmame_web.wasm" | awk '{print $5}')
     TOTAL_BYTES=$((JS_SIZE_BYTES + WASM_SIZE_BYTES))
 
     echo ""
     echo "=================================================="
     echo "📊 RAPPORT DE BUILD V94.0"
     echo "=================================================="
-    echo "✅ src-emul/pinmame_web.js   : $JS_SIZE ($JS_SIZE_BYTES bytes)"
-    echo "✅ src-emul/pinmame_web.wasm : $WASM_SIZE ($WASM_SIZE_BYTES bytes)"
+    echo "✅ engine/out/pinmame_web.js   : $JS_SIZE ($JS_SIZE_BYTES bytes)"
+    echo "✅ engine/out/pinmame_web.wasm : $WASM_SIZE ($WASM_SIZE_BYTES bytes)"
     echo "───────────────────────────────────────────────────"
     printf "📦 TOTAL WASM+JS   : "
     if [ $TOTAL_BYTES -lt 1048576 ]; then
@@ -108,7 +112,7 @@ if [ -f "src-emul/pinmame_web.js" ] && [ -f "src-emul/pinmame_web.wasm" ]; then
     echo "=================================================="
 
     echo "[*] Assemblage du bundle universel → tilt"
-    node build_bundle.js
+    node "$SCRIPT_DIR/bundle.js"
     echo "=================================================="
 else
     echo "⚠️  [V94.0] Certains fichiers n'ont pas été générés correctement."

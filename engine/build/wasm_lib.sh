@@ -23,20 +23,22 @@ if ! command -v emcc &> /dev/null; then
     exit 1
 fi
 
-BASE_DIR=$(pwd)
-WASM_TEMP_OBJ_DIR="$BASE_DIR/pinmame_workspace_wasm_objs"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ENGINE_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$ENGINE_DIR")"
+WASM_TEMP_OBJ_DIR="$PROJECT_ROOT/pinmame_workspace_wasm_objs"
 
 # Cherche la source PinMAME : pinmame_stripped (si existant) ou pinmame_workspace/pinmame_stock
-if [ -d "$BASE_DIR/pinmame_stripped/src" ]; then
-    BUILD_WORKSPACE="$BASE_DIR/pinmame_stripped"
-elif [ -d "$BASE_DIR/pinmame_workspace/pinmame_stock/src" ]; then
-    BUILD_WORKSPACE="$BASE_DIR/pinmame_workspace/pinmame_stock"
+if [ -d "$PROJECT_ROOT/pinmame_stripped/src" ]; then
+    BUILD_WORKSPACE="$PROJECT_ROOT/pinmame_stripped"
+elif [ -d "$PROJECT_ROOT/pinmame_workspace/pinmame_stock/src" ]; then
+    BUILD_WORKSPACE="$PROJECT_ROOT/pinmame_workspace/pinmame_stock"
 else
     echo "❌ [V116.00] Erreur : ni pinmame_stripped ni pinmame_workspace/pinmame_stock introuvable."
     exit 1
 fi
 
-rm -f "libpinmame_wasm.a"
+rm -f "$ENGINE_DIR/out/libpinmame_wasm.a"
 rm -rf "$WASM_TEMP_OBJ_DIR"
 mkdir -p "$WASM_TEMP_OBJ_DIR/include"
 
@@ -210,9 +212,10 @@ if [ -f "$BUILD_WORKSPACE/src/unix/fileio.c" ]; then
 fi
 
 echo "[*] [V116.00] Assemblage final de l'archive statique..."
-find "$WASM_TEMP_OBJ_DIR" -name "*.o" | xargs emar rcs "libpinmame_wasm.a"
+mkdir -p "$ENGINE_DIR/out"
+find "$WASM_TEMP_OBJ_DIR" -name "*.o" | xargs emar rcs "$ENGINE_DIR/out/libpinmame_wasm.a"
 
-FILE_SIZE=$(du -sh "libpinmame_wasm.a" | cut -f1)
+FILE_SIZE=$(du -sh "$ENGINE_DIR/out/libpinmame_wasm.a" | cut -f1)
 echo "=================================================="
 echo "🟢 [V116.00] libpinmame_wasm.a généré avec succès ! ($FILE_SIZE)"
 echo "=================================================="

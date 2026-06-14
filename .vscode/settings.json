@@ -5,6 +5,11 @@
     "tilt",
     "pinmame_workspace/**",
     "pinmame_workspace_wasm_objs/**",
-    "node_modules/**"
+    "node_modules/**",
+    "esp32/**",
+    "node/**",
+    "out/**",
+    "workspace/**",
+    "build/**"
   ]
 }

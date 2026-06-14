@@ -4,8 +4,8 @@
 
 Ne jamais modifier les fichiers dans `pinmame_workspace/`.
 C'est une base externe. Toute correction passe exclusivement par :
-- `api.cpp`
-- `runtime.js`
+- `engine/api.cpp`
+- `engine/node/runtime.js`
 - `interface.js`
 - `index.html`
 

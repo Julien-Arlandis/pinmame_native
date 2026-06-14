@@ -1,6 +1,6 @@
 /* ================================================================
    PinMAME — tilt_web (navigateur Worker + Node.js)
-   Généré le 2026-06-14T19:42:01.696Z
+   Généré le 2026-06-14T19:46:43.846Z
    Sources : pinmame_web.js + pinmame_web.wasm + runtime-audio.js + runtime.js
    ================================================================ */
 if (typeof process !== 'undefined' && typeof __filename !== 'undefined') {

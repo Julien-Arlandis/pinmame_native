@@ -15,7 +15,6 @@ pinmame_workspace_wasm/
 # Archives ZIP sauf les ROMs du projet
 *.zip
 !roms/*.zip
-!engine/esp32/roms/*.zip
 
 # Résidus de build et logs
 *.o

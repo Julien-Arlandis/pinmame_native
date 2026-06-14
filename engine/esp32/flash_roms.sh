@@ -20,7 +20,7 @@ if [[ -z "$PORT" ]]; then
 fi
 echo "→ Port : $PORT"
 
-# Lister les ROMs disponibles
+# Lister les ROMs disponibles (zsh : tableaux indexés à partir de 1)
 ROMS=("$ROMS_DIR"/*.zip)
 if [[ ${#ROMS[@]} -eq 0 ]]; then
     echo "❌ Aucune ROM trouvée dans $ROMS_DIR"
@@ -29,10 +29,10 @@ fi
 
 echo ""
 echo "ROMs disponibles :"
-for i in "${!ROMS[@]}"; do
+for i in {1..${#ROMS[@]}}; do
     name=$(basename "${ROMS[$i]}" .zip)
     size=$(du -h "${ROMS[$i]}" | awk '{print $1}')
-    echo "  $((i+1))) $name  ($size)"
+    echo "  $i) $name  ($size)"
 done
 echo "  a) Toutes"
 echo ""
@@ -45,10 +45,9 @@ if [[ "$CHOICE" == "a" ]]; then
     cp "$ROMS_DIR"/*.zip "$TMP_DIR/roms/"
 else
     for n in ${=CHOICE}; do
-        idx=$((n-1))
-        if [[ $idx -ge 0 && $idx -lt ${#ROMS[@]} ]]; then
-            cp "${ROMS[$idx]}" "$TMP_DIR/roms/"
-            echo "→ Sélectionné : $(basename ${ROMS[$idx]})"
+        if [[ $n -ge 1 && $n -le ${#ROMS[@]} ]]; then
+            cp "${ROMS[$n]}" "$TMP_DIR/roms/"
+            echo "→ Sélectionné : $(basename ${ROMS[$n]})"
         else
             echo "⚠️  Numéro invalide : $n"
         fi

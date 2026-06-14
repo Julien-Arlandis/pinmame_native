@@ -35,15 +35,34 @@ Quitter : Ctrl+]
 
 == Architecture flash (16MB) ==
 
-  0x000000 – 0x009000  bootloader 2nd stage
-  0x009000 – 0x00F000  NVS (24KB) — stockage persistant clé/valeur
-                        → nom de la ROM active, réglages utilisateur
-  0x00F000 – 0x010000  phy_init — calibration radio BLE
-  0x010000 – 0x410000  factory app (4MB) — firmware PinMAME compilé
-  0x410000 – 0xFFFFFF  SPIFFS (12MB) — ROMs ZIP (flashées via flash_roms.sh)
+La flash de l'ESP32 est découpée en zones (partitions), chacune avec un rôle précis.
+Les adresses sont en hexadécimal.
 
-  flash.sh     → écrase uniquement bootloader + app (SPIFFS intact)
-  flash_roms.sh → écrase uniquement SPIFFS (firmware intact)
+  0x000000 – 0x009000  Bootloader (36KB)
+                        Premier code exécuté au démarrage. Charge l'app.
+                        Écrasé par flash.sh.
+
+  0x009000 – 0x00F000  NVS — Non-Volatile Storage (24KB)
+                        Stockage clé/valeur persistant (survit aux reboot).
+                        Contient le nom de la ROM active (@rom:name=...).
+                        Jamais écrasé automatiquement.
+
+  0x00F000 – 0x010000  phy_init (4KB)
+                        Données de calibration radio pour le BLE.
+                        Écrasé par flash.sh.
+
+  0x010000 – 0x410000  App — firmware PinMAME (4MB)
+                        Le code compilé qui tourne sur l'ESP32.
+                        Écrasé par flash.sh à chaque compilation.
+
+  0x410000 – 0xFFFFFF  SPIFFS — filesystem (12MB)
+                        Système de fichiers qui contient les ROMs ZIP.
+                        Monté au démarrage sous /spiffs.
+                        PinMAME cherche ses ROMs dans /spiffs/roms/.
+                        Écrasé uniquement par flash_roms.sh.
+
+  flash.sh      → écrase bootloader + phy_init + app  (SPIFFS intact)
+  flash_roms.sh → écrase uniquement SPIFFS            (firmware intact)
 
 
 == Changer de ROM à chaud ==

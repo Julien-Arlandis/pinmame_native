@@ -199,11 +199,11 @@ Logs
 
             const service = new bleno.PrimaryService({ uuid: BLE_SVC, characteristics: [outChar, inChar] });
             bleno.on('stateChange', state => {
-                if (state === 'poweredOn') bleno.startAdvertising('pinmame_node', [BLE_SVC]);
+                if (state === 'poweredOn') bleno.startAdvertising('tilt_node', [BLE_SVC]);
                 else bleno.stopAdvertising();
             });
             bleno.on('advertisingStart', err => {
-                if (!err) { bleno.setServices([service]); info('  BLE      : advertising pinmame_node'); }
+                if (!err) { bleno.setServices([service]); info('  BLE      : advertising tilt_node'); }
             });
         } catch {
             info('⚠️  BLE indisponible — npm install @abandonware/bleno  (ou --no-ble)');

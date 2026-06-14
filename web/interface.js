@@ -144,7 +144,7 @@ const BLE_IN_UUID  = 'ab120003-b5a3-f393-e0a9-e50e24dcca9e'; // write  ← brows
 
 async function createBluetoothPort() {
     const device = await navigator.bluetooth.requestDevice({
-        filters: [{ namePrefix: 'pinmame' }],
+        filters: [{ namePrefix: 'tilt' }],
         optionalServices: [BLE_SVC_UUID]
     });
 
@@ -708,7 +708,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.100';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.101';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();

@@ -56,7 +56,7 @@ fi
 
 echo ""
 echo "[*] Génération image SPIFFS..."
-python3 "$SPIFFSGEN" --page-size 256 --obj-name-len 64 \
+python3 "$SPIFFSGEN" --page-size 256 --obj-name-len 32 \
     "$SPIFFS_SIZE" "$TMP_DIR" "$TMP_IMAGE"
 
 echo "[*] Flash SPIFFS à l'offset $SPIFFS_OFFSET..."

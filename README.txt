@@ -8,6 +8,10 @@ Génère web/tilt_web (navigateur) et node/tilt_node (Node.js).
 
 == Environnement web ==
 
+    https://julien-arlandis.github.io/pinmame_native/
+
+Ou en local :
+
     cd web && python3 -m http.server 8080
 
 Ouvrir http://localhost:8080 dans le navigateur.

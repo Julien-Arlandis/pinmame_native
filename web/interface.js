@@ -708,7 +708,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.101';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.102';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();
@@ -1204,18 +1204,23 @@ async function bootstrap() {
         };
 
         // Sonde périodique — affiche/masque le bouton WS selon disponibilité du serveur
-        (async () => {
-            while (true) {
-                if (currentMode !== 'node') {
-                    let found = false;
-                    for (const url of WS_CANDIDATES) {
-                        if (await probeWs(url)) { found = true; break; }
+        // Sur HTTPS, ws:// est du contenu mixte → Chrome bloque et désactive Web Bluetooth
+        if (location.protocol === 'https:') {
+            btnNode.style.display = 'none';
+        } else {
+            (async () => {
+                while (true) {
+                    if (currentMode !== 'node') {
+                        let found = false;
+                        for (const url of WS_CANDIDATES) {
+                            if (await probeWs(url)) { found = true; break; }
+                        }
+                        btnNode.style.display = found ? '' : 'none';
                     }
-                    btnNode.style.display = found ? '' : 'none';
+                    await new Promise(r => setTimeout(r, 2000));
                 }
-                await new Promise(r => setTimeout(r, 2000));
-            }
-        })();
+            })();
+        }
     }
 
     // ── Bouton BLE ───────────────────────────────────────────────────────────

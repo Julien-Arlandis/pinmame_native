@@ -356,7 +356,7 @@ extern "C" void app_main(void) {
 
     ble_svc_gap_init();
     ble_svc_gatt_init();
-    ble_svc_gap_device_name_set("PINMAME_esp32");
+    ble_svc_gap_device_name_set("tilt_esp32");
 
     ble_gatts_count_cfg(gatt_svcs);
     ble_gatts_add_svcs(gatt_svcs);

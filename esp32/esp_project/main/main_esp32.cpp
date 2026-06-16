@@ -474,8 +474,11 @@ extern "C" void app_main(void) {
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
 
+    // Pile agrandie 32K -> 49K : suspectée trop juste (cf. canary réactivé dans
+    // sdkconfig.defaults), un dépassement silencieux pouvant corrompre des
+    // variables locales (ex. IntegerDivideByZero observé dans le resampler).
     BaseType_t ok = xTaskCreatePinnedToCoreWithCaps(
-        emulation_task, "pinmame", 32768, NULL, 5, NULL, 1,
+        emulation_task, "pinmame", 49152, NULL, 5, NULL, 1,
         MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT
     );
     if (ok != pdPASS)

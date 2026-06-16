@@ -43,6 +43,13 @@ CONFIG_FREERTOS_CHECK_STACKOVERFLOW_NONE=y
 # et probablement disputée par le BLE/PHY pour y placer des objets durables.
 CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP=n
 
+# ----- FreeRTOS : détection de dépassement de pile -----
+# Réactivé (était désactivé car la tâche "pinmame" est "profonde") : un crash
+# IntegerDivideByZero déterministe et inexplicable par les valeurs loggées a été
+# observé dans le resampler — suspecté d'être une corruption par dépassement de
+# pile silencieux, masqué par la désactivation précédente de ce contrôle.
+CONFIG_FREERTOS_CHECK_STACKOVERFLOW_CANARY=y
+
 # ----- Logs -----
 CONFIG_LOG_DEFAULT_LEVEL_ERROR=y
 

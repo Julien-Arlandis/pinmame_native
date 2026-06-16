@@ -757,20 +757,15 @@ int mixer_sh_start()
 		channel->config_mixing_level 			= config_mixing_level[i];
 		channel->config_default_mixing_level 	= config_default_mixing_level[i];
 
-#ifdef ESP_PLATFORM
-		// Le convertisseur SINC plante de façon déterministe sur ESP32-S3 :
-		// IntegerDivideByZero dans calc_output_single avec un increment à 0,
-		// alors que tous les champs de SINC_FILTER lus juste avant (index_inc,
-		// coeff_half_len, magic) sont valides — cause non identifiée (probable
-		// bug toolchain xtensa sur lrint/double_to_fp, hors de notre contrôle
-		// car le code crashant est dans workspace/). SRC_LINEAR n'utilise aucune
-		// division par increment fixe-point : on l'utilise à la place sur ESP32.
-		channel->src_left  = src_new(SRC_LINEAR, 1, &error);
-		channel->src_right = src_new(SRC_LINEAR, 1, &error);
-#else
+		// Le crash IntegerDivideByZero observé dans calc_output_single (ESP32-S3)
+		// est mathématiquement impossible avec les valeurs loggées juste avant
+		// (index_inc/ratio valides => increment != 0) : la piste retenue est une
+		// corruption de pile de la tâche "pinmame" (CONFIG_FREERTOS_CHECK_STACKOVERFLOW
+		// était désactivé dans sdkconfig.defaults, ce qui masquait un éventuel
+		// dépassement silencieux). Cf. stack agrandie + canary réactivé. SRC_SINC
+		// est donc restauré ici ; à revenir à SRC_LINEAR si le crash persiste.
 		channel->src_left  = src_new((pmoptions.resampling_quality == 0) ? SRC_SINC_FASTEST : SRC_SINC_MEDIUM_QUALITY, 1, &error); //!! if changing quality, change src_sinc_opt again to include the other table (search for //!! there)
 		channel->src_right = src_new((pmoptions.resampling_quality == 0) ? SRC_SINC_FASTEST : SRC_SINC_MEDIUM_QUALITY, 1, &error);
-#endif
 
 		channel->lr_silent_value[0] = INT_MAX;
 		channel->lr_silent_value_f[0] = FLT_MAX;

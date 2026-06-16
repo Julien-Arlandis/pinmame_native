@@ -428,9 +428,22 @@ static unsigned mixer_channel_resample_16(struct mixer_channel_data* const chann
 #ifdef ESP_PLATFORM
 	// Diagnostic temporaire : dernier point de mesure avant l'appel qui plante
 	// (IntegerDivideByZero observé dans calc_output_single via src_process).
-	ESP_LOGE("MIXSRC16", "ch='%s' lr=%u ratio=%.6f from=%.1f to=%.1f src_len=%u dst_len=%u state=%p",
-		channel->name ? channel->name : "?", left_right, data.src_ratio,
-		channel->from_frequency, channel->to_frequency, src_len, dst_len, (void*)src_state);
+	// On lit directement la structure interne (visible ici car src_sinc_opt.c
+	// est inclus textuellement dans ce fichier) pour vérifier si index_inc,
+	// le diviseur utilisé dans calc_output_single, est corrompu/nul.
+	{
+		SRC_PRIVATE* __dbg_psrc = (SRC_PRIVATE*)src_state;
+		SINC_FILTER* __dbg_filter = (__dbg_psrc && __dbg_psrc->private_data) ? (SINC_FILTER*)__dbg_psrc->private_data : NULL;
+		ESP_LOGE("MIXSRC16", "ch='%s' lr=%u ratio=%.6f from=%.1f to=%.1f src_len=%u dst_len=%u state=%p last_ratio=%.6f filter=%p magic=0x%x coeff_half_len=%d index_inc=%d b_len=%d",
+			channel->name ? channel->name : "?", left_right, data.src_ratio,
+			channel->from_frequency, channel->to_frequency, src_len, dst_len, (void*)src_state,
+			__dbg_psrc ? __dbg_psrc->last_ratio : -1.0,
+			(void*)__dbg_filter,
+			__dbg_filter ? __dbg_filter->sinc_magic_marker : 0,
+			__dbg_filter ? __dbg_filter->coeff_half_len : -1,
+			__dbg_filter ? __dbg_filter->index_inc : -1,
+			__dbg_filter ? __dbg_filter->b_len : -1);
+	}
 #endif
 
 	if (src_process(src_state, &data) != SRC_ERR_NO_ERROR)

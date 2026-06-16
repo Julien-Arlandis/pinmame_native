@@ -36,6 +36,13 @@ CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # Désactiver la vérification de stack overflow sur la tâche PinMAME (profond)
 CONFIG_FREERTOS_CHECK_STACKOVERFLOW_NONE=y
 
+# ----- RTC -----
+# La RTC FAST memory (8KB, 0x600fe000-0x60100000) ne doit pas servir de heap
+# général : un SRC_STATE de libsamplerate y a été alloué et corrompu en cours
+# de partie (IntegerDivideByZero dans calc_output_single), région trop petite
+# et probablement disputée par le BLE/PHY pour y placer des objets durables.
+CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP=n
+
 # ----- Logs -----
 CONFIG_LOG_DEFAULT_LEVEL_ERROR=y
 

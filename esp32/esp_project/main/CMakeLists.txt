@@ -85,7 +85,7 @@ set(PINMAME_INCS
 idf_component_register(
     SRCS        ${PINMAME_SRCS} ${APP_SRCS}
     INCLUDE_DIRS ${PINMAME_INCS}
-    REQUIRES    esp_timer freertos nvs_flash spiffs app_update esp_system zlib bt
+    REQUIRES    esp_timer freertos nvs_flash spiffs app_update esp_system zlib bt usb
     LDFRAGMENTS "linker.lf"
 )
 
@@ -145,5 +145,8 @@ target_link_libraries(${COMPONENT_LIB} INTERFACE
     -Wl,--wrap=__fixdfdi
     -Wl,--wrap=__extendsfdf2
     -Wl,--wrap=__truncdfsf2
+    # GTS80B : neutralise cpu_boost_interleave une fois le CPU audio suspendu
+    # (sinon le timer NMI orphelin de gts80s.c continue à hacher le scheduler)
+    -Wl,--wrap=cpu_boost_interleave
 )
 

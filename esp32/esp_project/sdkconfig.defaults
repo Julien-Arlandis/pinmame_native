@@ -14,7 +14,8 @@ CONFIG_SPIRAM_SPEED_80M=y
 # Met automatiquement les variables .bss annotées EXT_RAM_BSS_ATTR en PSRAM
 CONFIG_SPIRAM_ALLOW_BSS_SEG_EXTERNAL_MEMORY=y
 # Les petites allocations (<16KB) restent en SRAM interne (plus rapide)
-CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=65536
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=65536
 CONFIG_SPIRAM_USE_MALLOC=y
 
 # ----- CPU -----
@@ -48,6 +49,8 @@ CONFIG_BT_CONTROLLER_ENABLED=y
 CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 # MTU étendu : 247 → 244 octets utiles par notification (moins de chunks)
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=247
+# NimBLE en PSRAM — libère la SRAM interne pour USB DMA + stack PinMAME
+CONFIG_BT_NIMBLE_MEM_ALLOC_MODE_EXTERNAL=y
 
-# ----- USB Serial/JTAG (pour debug sans adaptateur externe) -----
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# ----- Console UART (Port B / CH343P) — libère Port A (GPIO19/20) pour USB OTG -----
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y

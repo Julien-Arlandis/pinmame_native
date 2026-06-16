@@ -368,17 +368,27 @@ extern "C" {
 
     static int g_stereo = 1;
     int osd_start_audio_stream(int stereo) {
-#ifdef ESP_PLATFORM
-        (void)stereo; return 0; // sample_rate=0 → pas de streams, pas de mixing
-#else
         g_stereo = stereo; return SPF;
-#endif
     }
+
+#ifdef ESP_PLATFORM
+    // Carte son GTS80B (gts80s.c) : nmi_callback() se réarme indéfiniment via
+    // timer_set(), même CPU audio suspendu, et appelle cpu_boost_interleave(10us,800us)
+    // à chaque réarmement -> c'est ça qui hache le scheduler (1378 appels/frame).
+    // Une fois le CPU audio suspendu, ce boost d'interleave ne sert plus à rien :
+    // on le neutralise pour laisser le CPU principal tourner par tranches normales.
+    static bool audio_cpu_suspended = false;
+    extern "C" void __real_cpu_boost_interleave(double timeslice_time, double boost_duration);
+    extern "C" void __wrap_cpu_boost_interleave(double timeslice_time, double boost_duration) {
+        if (audio_cpu_suspended) return;
+        __real_cpu_boost_interleave(timeslice_time, boost_duration);
+    }
+#endif
+
     int osd_update_audio_stream(INT16 *b) {
         if (g_stereo) {
             for (int i = 0; i < SPF * 2; i++) { g_ring[g_wi] = b[i]; g_wi = (g_wi + 1) % ABMAX; }
         } else {
-            // mono : MAME ne fournit que SPF samples — on duplique L=R pour garder le format stéréo
             for (int i = 0; i < SPF; i++) {
                 g_ring[g_wi] = b[i]; g_wi = (g_wi + 1) % ABMAX;
                 g_ring[g_wi] = b[i]; g_wi = (g_wi + 1) % ABMAX;
@@ -388,13 +398,7 @@ extern "C" {
     }
     void osd_stop_audio_stream() {}
     void osd_sound_enable(int) {}
-    int  osd_init_sound() {
-#ifdef ESP_PLATFORM
-        return 1; // désactive tout le sous-système audio (test perf)
-#else
-        return 0;
-#endif
-    }
+    int  osd_init_sound() { return 1; } // son désactivé (pas de casque UAC connecté)
     void proc_mechsounds(int, int) {}
     int  YM2203_sh_start(const struct MachineSound *) { return 0; }
     void YM2203_sh_stop() {} void YM2203_sh_reset() {}
@@ -409,6 +413,24 @@ extern "C" {
         hal_push_audio((uintptr_t)g_lin, n, gen);
     }
 
+    // ─── Prototype audio-over-BLE : curseur de lecture indépendant ───────────
+    // Sous-échantillonne le ring buffer 44100Hz stéréo 16-bit → mono 8-bit,
+    // ratio configurable (STEP), pour tenir dans la bande passante BLE.
+    int api_get_ble_audio_chunk(uint8_t *out, int max_bytes) {
+        static int g_ble_ri = 0;
+        const int STEP = 4; // 44100 / STEP = 11025 Hz de sortie
+        int produced = 0;
+        while (produced < max_bytes) {
+            int n = (g_wi - g_ble_ri + ABMAX) % ABMAX;
+            if (n < STEP * 2) break;
+            int v = (g_ring[g_ble_ri] >> 8) + 128;
+            if (v < 0) v = 0; else if (v > 255) v = 255;
+            out[produced++] = (uint8_t)v;
+            g_ble_ri = (g_ble_ri + STEP * 2) % ABMAX;
+        }
+        return produced;
+    }
+
     static void (*g_irq)(int, int) = nullptr;
     static void irq_bridge(int s) { if (g_irq) g_irq(0, s); }
     int OPMInit(int n, int c, int r, void (*)(int,int,int,double), void (*ih)(int,int)) {
@@ -418,7 +440,6 @@ extern "C" {
     void OPMResetChip(int n) { YM2151ResetChip(n); }
     void OPMUpdateOne(int n, INT16 **b, int l) {
 #ifdef ESP_PLATFORM
-        // Pas de speaker — on zappe la synthèse FM (coût ~90ms/frame en PSRAM)
         (void)n;
         if (b) { if (b[0]) memset(b[0], 0, (size_t)l * sizeof(INT16));
                  if (b[1]) memset(b[1], 0, (size_t)l * sizeof(INT16)); }
@@ -445,11 +466,11 @@ extern "C" {
         static bool     machine_info_posted = false;
 
 #ifdef ESP_PLATFORM
-        // Compteur FPS réel (cadence d'émulation, pas de changement d'affichage)
+        // Compteur FPS
         static int64_t fps_t0 = 0;
         static int fps_count = 0;
+        int64_t now_us = hal_cycles() / 1000LL;
         fps_count++;
-        int64_t now_us = (int64_t)(hal_cycles() / 1000LL);
         if (now_us - fps_t0 >= 5000000LL) {
             float fps = fps_count * 1000000.0f / (float)(now_us - fps_t0);
             extern void esp_loge_fps(float fps);
@@ -474,6 +495,7 @@ extern "C" {
                 if (Machine->drv->cpu[i].cpu_flags & CPU_AUDIO_CPU)
                     cpunum_suspend(i, SUSPEND_REASON_DISABLE, 1);
             }
+            audio_cpu_suspended = true;
 #endif
             char info[512] = {0};
             int len = 0;
@@ -878,11 +900,7 @@ extern "C" {
         if (drivers[game_index]->driver_init)
             drivers[game_index]->driver_init();
         if (!rompath_extra) rompath_extra = (char*)hal_rompath();
-#ifdef ESP_PLATFORM
-        options.samplerate = 0; // désactive streams_sh_update (Machine->sample_rate=0 → retour immédiat)
-#else
         options.samplerate = 44100;
-#endif
         options.gui_host = 1;
         bailing = 0;
         run_game(game_index);

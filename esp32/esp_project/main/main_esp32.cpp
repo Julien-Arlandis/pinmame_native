@@ -25,7 +25,78 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 
+// USB Host + UAC
+#include "usb/usb_host.h"
+#include "usb/uac_host.h"
+
 static const char* TAG = "PinMAME";
+
+// ─── Audio USB ───────────────────────────────────────────────────────────────
+extern "C" void   usb_audio_init(void);
+extern "C" size_t usb_audio_read(void* dst, size_t want, uint32_t timeout_ms);
+
+static uac_host_device_handle_t g_uac_handle = NULL;
+
+// Appelé par le driver UAC quand l'état de l'interface change
+static void uac_device_cb(uac_host_device_handle_t handle,
+                           const uac_host_device_event_t event, void* arg) {
+    ESP_LOGE(TAG, "UAC device event: %d", (int)event);
+    if (event == UAC_HOST_DRIVER_EVENT_DISCONNECTED) {
+        uac_host_device_stop(handle);
+        uac_host_device_close(handle);
+        g_uac_handle = NULL;
+    }
+}
+
+// Appelé par le driver UAC quand un nouveau périphérique audio est détecté
+static void uac_driver_cb(uint8_t addr, uint8_t iface_num,
+                           const uac_host_driver_event_t event, void* arg) {
+    ESP_LOGE(TAG, "UAC driver event: %d  addr=%d iface=%d", (int)event, addr, iface_num);
+    if (event == UAC_HOST_DRIVER_EVENT_TX_CONNECTED) {
+        uac_host_device_config_t dev_cfg = {};
+        dev_cfg.addr            = addr;
+        dev_cfg.iface_num       = iface_num;
+        dev_cfg.buffer_size     = 16 * 1024;
+        dev_cfg.buffer_threshold = 4 * 1024;
+        dev_cfg.callback        = uac_device_cb;
+        dev_cfg.callback_arg    = NULL;
+        esp_err_t rc = uac_host_device_open(&dev_cfg, &g_uac_handle);
+        if (rc != ESP_OK) { ESP_LOGE(TAG, "uac_host_device_open: %d", rc); return; }
+        uac_host_stream_config_t stream_cfg = {};
+        stream_cfg.channels      = 2;
+        stream_cfg.bit_resolution = 16;
+        stream_cfg.sample_freq   = 22050;
+        stream_cfg.flags         = 0;
+        rc = uac_host_device_start(g_uac_handle, &stream_cfg);
+        if (rc != ESP_OK) { ESP_LOGE(TAG, "uac_host_device_start: %d", rc); return; }
+        uac_host_device_set_mute(g_uac_handle, false);
+        uac_host_device_set_volume(g_uac_handle, 80);
+        ESP_LOGE(TAG, "UAC: streaming 22050 Hz stereo 16-bit OK");
+    }
+}
+
+// Gestion des événements de la librairie USB host
+static void usb_host_task(void* arg) {
+    while (true) {
+        uint32_t flags = 0;
+        esp_err_t err = usb_host_lib_handle_events(portMAX_DELAY, &flags);
+        ESP_LOGE(TAG, "USB host event: err=%d flags=0x%x", err, (unsigned)flags);
+        if (flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
+            usb_host_device_free_all();
+        }
+    }
+}
+
+// Tâche de lecture du buffer audio → écriture vers les écouteurs USB
+static void uac_audio_task(void* arg) {
+    static uint8_t buf[2940]; // 1 frame = 735 samples × 2 ch × 2 octets
+    while (true) {
+        size_t got = usb_audio_read(buf, sizeof(buf), 500);
+        if (got > 0 && g_uac_handle) {
+            uac_host_device_write(g_uac_handle, buf, (uint32_t)got, 200);
+        }
+    }
+}
 
 static char ROM_NAME[32] = "bonebstr";  // modifiable via @rom:name=
 
@@ -347,6 +418,39 @@ extern "C" void app_main(void) {
     strncpy((char*)(corridor + 1000), ROM_NAME, 20);
     corridor[1000 + strnlen(ROM_NAME, 20)] = '\0';
 
+    // ── USB Host + UAC audio ──────────────────────────────────────────────────
+    ESP_LOGE(TAG, "[MEM] avant USB  — SRAM libre: %u  bloc max: %u",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+
+    usb_audio_init();
+
+    usb_host_config_t host_cfg = {};
+    host_cfg.skip_phy_setup = false;
+    host_cfg.intr_flags     = ESP_INTR_FLAG_LEVEL1;
+    ESP_ERROR_CHECK(usb_host_install(&host_cfg));
+    xTaskCreatePinnedToCoreWithCaps(usb_host_task, "usb_host", 4096, NULL, 10, NULL, 0,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+    ESP_LOGE(TAG, "[MEM] apres USB  — SRAM libre: %u  bloc max: %u",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+
+    uac_host_driver_config_t uac_cfg = {};
+    uac_cfg.create_background_task = true;
+    uac_cfg.task_priority          = 10;
+    uac_cfg.stack_size             = 4096;
+    uac_cfg.core_id                = 0;
+    uac_cfg.callback               = uac_driver_cb;
+    uac_cfg.callback_arg           = NULL;
+    ESP_ERROR_CHECK(uac_host_install(&uac_cfg));
+    xTaskCreatePinnedToCoreWithCaps(uac_audio_task, "uac_audio", 4096, NULL, 8, NULL, 0,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+
+    ESP_LOGE(TAG, "[MEM] apres UAC  — SRAM libre: %u  bloc max: %u",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+
     // NimBLE
     ret = nimble_port_init();
     if (ret != ESP_OK) { ESP_LOGE(TAG, "nimble_port_init failed: %d", ret); return; }
@@ -363,9 +467,16 @@ extern "C" void app_main(void) {
 
     nimble_port_freertos_init(ble_host_task);
 
-    // Émulation sur Core 1
-    BaseType_t ok = xTaskCreatePinnedToCore(
-        emulation_task, "pinmame", 32768, NULL, 5, NULL, 1
+    extern void ble_audio_task_start(void);
+    ble_audio_task_start();
+
+    ESP_LOGE(TAG, "[MEM] apres BLE  — SRAM libre: %u  bloc max: %u",
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+
+    BaseType_t ok = xTaskCreatePinnedToCoreWithCaps(
+        emulation_task, "pinmame", 32768, NULL, 5, NULL, 1,
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT
     );
     if (ok != pdPASS)
         ESP_LOGE(TAG, "Impossible de créer la tâche PinMAME");

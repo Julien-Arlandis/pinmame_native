@@ -3,6 +3,25 @@
 
 function feedAudioRingBuffer() {}
 
+// ─── Prototype : audio reçu via BLE (mono 8-bit, 11025Hz, tag 0x02) ──────────
+// Indépendant du pipeline WASM local (unlockAudio/feedAudioRingBuffer ci-dessus).
+let playBleAudioChunk = (() => {
+    let ctx = null, t = 0;
+    return (bytes) => {
+        if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 11025 });
+        if (ctx.state === 'suspended') ctx.resume();
+        const buf = ctx.createBuffer(1, bytes.length, 11025);
+        const data = buf.getChannelData(0);
+        for (let i = 0; i < bytes.length; i++) data[i] = (bytes[i] - 128) / 128;
+        const s = ctx.createBufferSource();
+        s.buffer = buf;
+        s.connect(ctx.destination);
+        const start = Math.max(t, ctx.currentTime);
+        s.start(start);
+        t = start + bytes.length / 11025;
+    };
+})();
+
 function unlockAudio() {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     ctx.resume();
@@ -155,7 +174,11 @@ async function createBluetoothPort() {
     let inChar  = null;
 
     function onNotification(e) {
-        const data   = new Uint8Array(e.target.value.buffer);
+        const data = new Uint8Array(e.target.value.buffer);
+        if (data[0] === 0x02) {
+            playBleAudioChunk(data.subarray(1));
+            return;
+        }
         const isLast = data[0] === 0x01;
         fragBuf += decoder.decode(data.slice(1));
         if (isLast) {
@@ -708,7 +731,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.102';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.103';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();

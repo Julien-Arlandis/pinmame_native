@@ -13,6 +13,7 @@
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/stream_buffer.h"
 #include "esp_log.h"
 
 // NimBLE
@@ -109,6 +110,40 @@ extern "C" void ble_resend_last_state(void) {
     if (s_last_lamp[0])    bleSend(s_last_lamp);
 }
 
+// ─── Prototype audio-over-BLE ─────────────────────────────────────────────
+// Paquet = [0x02][échantillons mono 8-bit, 11025Hz] — tag 0x02 distinct des
+// flags texte (0x00/0x01) utilisés par bleSend(). Pas de réassemblage côté
+// navigateur : chaque notify est un chunk audio autonome.
+extern "C" int api_get_ble_audio_chunk(uint8_t *out, int max_bytes);
+
+static void ble_audio_task(void*) {
+    static uint8_t packet[247];
+    for (;;) {
+        if (g_ble_conn_handle != BLE_HS_CONN_HANDLE_NONE && g_ble_out_handle) {
+            uint16_t att_mtu = ble_att_mtu(g_ble_conn_handle);
+            if (att_mtu < 4) att_mtu = 23;
+            int max_payload = (int)att_mtu - 3 - 1;
+            if (max_payload > (int)sizeof(packet) - 1) max_payload = (int)sizeof(packet) - 1;
+            if (max_payload > 0) {
+                int n = api_get_ble_audio_chunk(packet + 1, max_payload);
+                if (n > 0) {
+                    packet[0] = 0x02;
+                    struct os_mbuf* om = ble_hs_mbuf_from_flat(packet, n + 1);
+                    if (om) {
+                        int rc = ble_gatts_notify_custom(g_ble_conn_handle, g_ble_out_handle, om);
+                        if (rc != 0) g_ble_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+                    }
+                }
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+}
+
+extern "C" void ble_audio_task_start(void) {
+    xTaskCreate(ble_audio_task, "ble_audio", 4096, NULL, 5, NULL);
+}
+
 extern "C" {
 
 hal_cycles_t hal_cycles(void) {
@@ -125,10 +160,29 @@ void hal_osd_exit(void) {
     ESP_LOGI(TAG, "osd_exit");
 }
 
-// ─── Audio — pas de sortie (pas de I2S/speaker), on vide juste les buffers DAC
+// ─── Audio USB ───────────────────────────────────────────────────────────────
+// 735 samples stéréo 16-bit par frame × 2 octets = 2940 octets/frame
+// 16 frames de tampon ≈ 267 ms de latence max
+#define USB_AUDIO_FRAME_BYTES  2940
+#define USB_AUDIO_SB_SIZE      (USB_AUDIO_FRAME_BYTES * 16)
+
+static StreamBufferHandle_t g_audio_sb = NULL;
+
+extern "C" void usb_audio_init(void) {
+    g_audio_sb = xStreamBufferCreate(USB_AUDIO_SB_SIZE, USB_AUDIO_FRAME_BYTES);
+}
+
+extern "C" size_t usb_audio_read(void* dst, size_t want, uint32_t timeout_ms) {
+    if (!g_audio_sb) return 0;
+    return xStreamBufferReceive(g_audio_sb, dst, want, pdMS_TO_TICKS(timeout_ms));
+}
+
 void hal_push_audio(uintptr_t ptr, int count, uint32_t gen) {
-    (void)ptr; (void)count; (void)gen;
+    (void)gen;
     for (int c = 0; c < 2; c++) api_reset_dac_buffer(c);
+    if (!g_audio_sb || !ptr || count <= 0) return;
+    // count = nombre de INT16 (stéréo interleaved) → count*2 octets
+    xStreamBufferSend(g_audio_sb, (const void*)ptr, (size_t)(count * 2), 0);
 }
 
 void hal_push_display(uintptr_t ptr, uint32_t gen) {

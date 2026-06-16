@@ -152,7 +152,7 @@ extern "C" uint8_t* pinmame_get_dsprom_ptr(void);
 // ─── Parsing des commandes BLE entrantes ─────────────────────────────────────
 static void handle_ble_command(const char* line) {
     uint8_t* corridor = pinmame_get_dsprom_ptr();
-    ESP_LOGI(TAG, "[BLE←] \"%s\"", line);
+    ESP_LOGE(TAG, "[BLE←] \"%s\"", line);
 
     // @set:id=N&state=S  →  corridor[100 + N] = S
     if (strncmp(line, "@set:id=", 8) == 0) {
@@ -163,9 +163,9 @@ static void handle_ble_command(const char* line) {
         if (s) state = atoi(s + 7);
         if (id >= 0 && id < 80) {
             corridor[100 + id] = (uint8_t)(state ? 1 : 0);
-            ESP_LOGI(TAG, "  → sw[%d] = %d (corridor[%d])", id, state, 100 + id);
+            ESP_LOGE(TAG, "  → sw[%d] = %d (corridor[%d])", id, state, 100 + id);
         } else {
-            ESP_LOGW(TAG, "  → id=%d hors limites (0-79)", id);
+            ESP_LOGE(TAG, "  → id=%d hors limites (0-79)", id);
         }
         return;
     }
@@ -245,7 +245,7 @@ static int gatt_in_access(uint16_t conn_handle, uint16_t attr_handle,
 
     uint8_t flag = 0;
     os_mbuf_copydata(ctxt->om, 0, 1, &flag);
-    ESP_LOGI(TAG, "[BLE chunk] flag=0x%02x len=%d", flag, pktlen);
+    ESP_LOGE(TAG, "[BLE chunk] flag=0x%02x len=%d", flag, pktlen);
 
     uint16_t dlen = pktlen - 1;
     if (dlen > 0 && s_in_len + (int)dlen < (int)sizeof(s_in_buf) - 1) {

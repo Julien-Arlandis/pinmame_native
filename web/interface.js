@@ -5,22 +5,22 @@ function feedAudioRingBuffer() {}
 
 // ─── Prototype : audio reçu via BLE (mono 8-bit, 11025Hz, tag 0x02) ──────────
 // Indépendant du pipeline WASM local (unlockAudio/feedAudioRingBuffer ci-dessus).
-let playBleAudioChunk = (() => {
-    let ctx = null, t = 0;
-    return (bytes) => {
-        if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 11025 });
-        if (ctx.state === 'suspended') ctx.resume();
-        const buf = ctx.createBuffer(1, bytes.length, 11025);
-        const data = buf.getChannelData(0);
-        for (let i = 0; i < bytes.length; i++) data[i] = (bytes[i] - 128) / 128;
-        const s = ctx.createBufferSource();
-        s.buffer = buf;
-        s.connect(ctx.destination);
-        const start = Math.max(t, ctx.currentTime);
-        s.start(start);
-        t = start + bytes.length / 11025;
-    };
-})();
+// Le AudioContext doit être créé/résumé dans le même geste utilisateur que
+// unlockAudio() ci-dessous, sinon les navigateurs (Chrome Android) bloquent
+// silencieusement resume() appelé depuis un callback BLE (pas un geste utilisateur).
+let bleAudioCtx = null, bleAudioT = 0;
+function playBleAudioChunk(bytes) {
+    if (!bleAudioCtx) return;
+    const buf = bleAudioCtx.createBuffer(1, bytes.length, 11025);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bytes.length; i++) data[i] = (bytes[i] - 128) / 128;
+    const s = bleAudioCtx.createBufferSource();
+    s.buffer = buf;
+    s.connect(bleAudioCtx.destination);
+    const start = Math.max(bleAudioT, bleAudioCtx.currentTime);
+    s.start(start);
+    bleAudioT = start + bytes.length / 11025;
+}
 
 function unlockAudio() {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -35,7 +35,11 @@ function unlockAudio() {
         s.start(t = Math.max(t, ctx.currentTime + left.length / 44100));
         t += left.length / 44100;
     };
-    unlockAudio = () => ctx.resume();
+
+    if (!bleAudioCtx) bleAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 11025 });
+    bleAudioCtx.resume();
+
+    unlockAudio = () => { ctx.resume(); bleAudioCtx.resume(); };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -163,7 +167,11 @@ const BLE_IN_UUID  = 'ab120003-b5a3-f393-e0a9-e50e24dcca9e'; // write  ← brows
 
 async function createBluetoothPort() {
     const device = await navigator.bluetooth.requestDevice({
-        filters: [{ namePrefix: 'tilt' }],
+        // Deux filtres en OR : par nom (ESP32/NimBLE l'annonce correctement) et
+        // par UUID de service (filet de sécurité pour bleno/CoreBluetooth sur
+        // macOS, qui omet souvent le nom local du paquet d'annonce BLE quand
+        // un UUID de service 128 bits occupe déjà presque tout le paquet).
+        filters: [{ namePrefix: 'tilt' }, { services: [BLE_SVC_UUID] }],
         optionalServices: [BLE_SVC_UUID]
     });
 
@@ -173,9 +181,17 @@ async function createBluetoothPort() {
     let fragBuf = '';
     let inChar  = null;
 
+    let bleAudioDbgCount = 0, bleAudioDbgBytes = 0;
     function onNotification(e) {
         const data = new Uint8Array(e.target.value.buffer);
         if (data[0] === 0x02) {
+            bleAudioDbgCount++; bleAudioDbgBytes += data.length - 1;
+            if (bleAudioDbgCount % 50 === 1) {
+                const payload = data.subarray(1);
+                let min = 255, max = 0;
+                for (let i = 0; i < payload.length; i++) { if (payload[i] < min) min = payload[i]; if (payload[i] > max) max = payload[i]; }
+                console.log('[BLEAUDIO]', bleAudioDbgCount, 'chunks,', bleAudioDbgBytes, 'bytes, ctxState=', bleAudioCtx && bleAudioCtx.state, 'min=', min, 'max=', max);
+            }
             playBleAudioChunk(data.subarray(1));
             return;
         }
@@ -232,7 +248,11 @@ async function createBluetoothPort() {
     await gattConnect();
 
     const writable = new WritableStream({
-        write(line) { return bleWrite(line); }
+        // Si l'écriture échoue (ex: déconnexion BLE en cours), on avale l'erreur
+        // ici plutôt que de la laisser remonter : sinon le WritableStream passe
+        // en état "erroné" définitivement et plus AUCUN envoi ultérieur ne
+        // fonctionne (même après reconnexion), sans erreur visible côté UI.
+        write(line) { return bleWrite(line).catch(() => {}); }
     });
 
     return {
@@ -731,7 +751,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.103';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.106';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();

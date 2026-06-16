@@ -18,6 +18,11 @@
 #include <assert.h>
 #include <stdbool.h>
 
+#ifdef ESP_PLATFORM
+#include "esp_log.h"
+#include "esp_timer.h"
+#endif
+
 #ifndef FLT_MAX
  #define FLT_MAX         3.402823466e+38F        /* max value */
 #endif
@@ -231,7 +236,9 @@ static void mixer_channel_resample_set(struct mixer_channel_data * const channel
 	if (restart)
 		channel->frac = 0;
 
-	channel->from_frequency = from_frequency;
+	// Garde-fou : un flux avec from_frequency <= 0 (chip non démarré / stub ESP32)
+	// fait planter le resampler (division par zéro). Repli en 1:1, pas de resample.
+	channel->from_frequency = (from_frequency > 0.0) ? from_frequency : to_frequency;
 	channel->to_frequency = to_frequency;
 
 	/* reset the filter state */
@@ -408,6 +415,10 @@ static unsigned mixer_channel_resample_16(struct mixer_channel_data* const chann
 	data.output_frames = dst_len;
 	data.end_of_input = 0;
 	data.src_ratio = channel->to_frequency / channel->from_frequency;
+	// Garde-fou : un ratio nul/négatif/non fini fait planter calc_output_single
+	// (division par "increment" qui devient 0) — observé en jeu réel sur ESP32.
+	if (!(data.src_ratio > 0.0) || !isfinite(data.src_ratio))
+		data.src_ratio = 1.0;
 
 	// When using the src_process or src_callback_process APIs and updating the src_ratio field of the SRC_STATE struct,
 	// the library will try to smoothly transition between the conversion ratio of the last call and the conversion ratio of the current call.
@@ -515,6 +526,10 @@ static unsigned mixer_channel_resample_8(struct mixer_channel_data * const chann
 	data.output_frames = dst_len;
 	data.end_of_input = 0;
 	data.src_ratio = channel->to_frequency / channel->from_frequency;
+	// Garde-fou : un ratio nul/négatif/non fini fait planter calc_output_single
+	// (division par "increment" qui devient 0) — observé en jeu réel sur ESP32.
+	if (!(data.src_ratio > 0.0) || !isfinite(data.src_ratio))
+		data.src_ratio = 1.0;
 
 	// When using the src_process or src_callback_process APIs and updating the src_ratio field of the SRC_STATE struct,
 	// the library will try to smoothly transition between the conversion ratio of the last call and the conversion ratio of the current call.
@@ -827,9 +842,6 @@ void mixer_update_channel(struct mixer_channel_data * const channel, const int t
 
 void mixer_sh_update()
 {
-#ifdef ESP_PLATFORM
-	return; // pas de sortie audio sur ESP32 — évite le calcul du mixer
-#endif
 	struct mixer_channel_data* channel;
 	unsigned int accum_pos = accum_base;
 	int i;
@@ -937,6 +949,41 @@ void mixer_sh_update()
     extern void pm_wave_record(INT16 *buffer, int samples);
     pm_wave_record(mix_buffer, samples_this_frame);
     }
+
+#ifdef ESP_PLATFORM
+	/* Diagnostic temporaire : repérer si le mixer produit un signal non nul
+	   et quels canaux sont actifs (cf. bug "aucun son" malgré partie en cours) */
+	{
+		static int64_t s_last_log_us = 0;
+		int64_t now_us = esp_timer_get_time();
+		if (now_us - s_last_log_us >= 3000000LL)
+		{
+			s_last_log_us = now_us;
+			int16_t peak = 0;
+			unsigned int k;
+			for (k = 0; k < samples_this_frame * (is_stereo ? 2 : 1); k++)
+			{
+				int16_t v = mix_buffer[k];
+				if (v < 0) v = -v;
+				if (v > peak) peak = v;
+			}
+			ESP_LOGE("MIXER", "samples=%u stereo=%d peak=%d active_channels=%d",
+				(unsigned)samples_this_frame, is_stereo, (int)peak, (int)first_free_channel);
+			for (i = 0, channel = mixer_channel; i < first_free_channel; i++, channel++)
+			{
+				if (channel->is_playing || channel->samples_available > 0)
+				{
+					ESP_LOGE("MIXER", "  ch[%d] '%s' is_playing=%d is_stream=%d vol=%d/%d level=%d gain=%d freq=%.1f avail=%d",
+						i, channel->name ? channel->name : "?",
+						channel->is_playing, channel->is_stream,
+						channel->left_volume, channel->right_volume,
+						channel->mixing_level, channel->gain,
+						channel->from_frequency, channel->samples_available);
+				}
+			}
+		}
+	}
+#endif
 
 	samples_this_frame = osd_update_audio_stream(mix_buffer);
 
@@ -1231,6 +1278,29 @@ void mixer_play_streamed_sample_16(const int ch, const INT16 *data, int len, con
 	}
 
 	mixer_channel_resample_set(channel,freq,0);
+
+#ifdef ESP_PLATFORM
+	/* Diagnostic temporaire : peak du signal SOURCE (avant resample/mixage)
+	   pour savoir si le chip émule réellement un son non nul sur ce canal. */
+	{
+		static int64_t s_last_log_us[MIXER_MAX_CHANNELS] = {0};
+		int64_t now_us = esp_timer_get_time();
+		if (now_us - s_last_log_us[ch] >= 3000000LL)
+		{
+			s_last_log_us[ch] = now_us;
+			INT16 peak = 0;
+			int j;
+			for (j = 0; j < len; j++)
+			{
+				INT16 v = data[j];
+				if (v < 0) v = -v;
+				if (v > peak) peak = v;
+			}
+			ESP_LOGE("MIXSRC", "ch[%d] '%s' len=%d freq=%.1f peak=%d vol=%.3f/%.3f",
+				ch, channel->name ? channel->name : "?", len, freq, (int)peak, mixing_volume[0], mixing_volume[1]);
+		}
+	}
+#endif
 
 	mixer_channel_resample_16_pan(channel,mixing_volume,ACCUMULATOR_MASK,&data,len);
 

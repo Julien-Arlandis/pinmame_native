@@ -372,17 +372,15 @@ extern "C" {
     }
 
 #ifdef ESP_PLATFORM
+    #include "esp_log.h"
+    #include "esp_timer.h"
     // Carte son GTS80B (gts80s.c) : nmi_callback() se réarme indéfiniment via
-    // timer_set(), même CPU audio suspendu, et appelle cpu_boost_interleave(10us,800us)
-    // à chaque réarmement -> c'est ça qui hache le scheduler (1378 appels/frame).
-    // Une fois le CPU audio suspendu, ce boost d'interleave ne sert plus à rien :
-    // on le neutralise pour laisser le CPU principal tourner par tranches normales.
-    static bool audio_cpu_suspended = false;
+    // timer_set() et appelle cpu_boost_interleave(10us,800us) à chaque réarmement
+    // -> c'est ça qui hache le scheduler (1378 appels/frame). On neutralise
+    // systématiquement ce boost (le CPU audio tourne normalement par ailleurs,
+    // il n'a pas besoin de ce boost d'interleave pour produire le son).
     extern "C" void __real_cpu_boost_interleave(double timeslice_time, double boost_duration);
-    extern "C" void __wrap_cpu_boost_interleave(double timeslice_time, double boost_duration) {
-        if (audio_cpu_suspended) return;
-        __real_cpu_boost_interleave(timeslice_time, boost_duration);
-    }
+    extern "C" void __wrap_cpu_boost_interleave(double timeslice_time, double boost_duration) {}
 #endif
 
     int osd_update_audio_stream(INT16 *b) {
@@ -423,7 +421,11 @@ extern "C" {
         while (produced < max_bytes) {
             int n = (g_wi - g_ble_ri + ABMAX) % ABMAX;
             if (n < STEP * 2) break;
-            int v = (g_ring[g_ble_ri] >> 8) + 128;
+            // Moyenne des STEP échantillons (filtre anti-repliement avant décimation,
+            // sinon le contenu >5.5kHz des chips son se replie en bruit large bande)
+            int sum = 0;
+            for (int j = 0; j < STEP; j++) sum += g_ring[(g_ble_ri + j * 2) % ABMAX];
+            int v = (sum / STEP >> 8) + 128;
             if (v < 0) v = 0; else if (v > 255) v = 255;
             out[produced++] = (uint8_t)v;
             g_ble_ri = (g_ble_ri + STEP * 2) % ABMAX;
@@ -439,19 +441,31 @@ extern "C" {
     void OPMShutdown() { YM2151Shutdown(); }
     void OPMResetChip(int n) { YM2151ResetChip(n); }
     void OPMUpdateOne(int n, INT16 **b, int l) {
-#ifdef ESP_PLATFORM
-        (void)n;
-        if (b) { if (b[0]) memset(b[0], 0, (size_t)l * sizeof(INT16));
-                 if (b[1]) memset(b[1], 0, (size_t)l * sizeof(INT16)); }
-#else
+        // Synthèse FM réelle réactivée : nécessaire au prototype audio-over-BLE
+        // (avant, sans speaker, on zappait le calcul pour gagner ~90ms/frame).
         YM2151UpdateOne(n, b, l);
-#endif
     }
     void OPMSetPortHander(int, void (*)(unsigned, unsigned char)) {}
     int  YM2151TimerOver(int, int) { return 0; }
     static int g_reg = 0;
     void YM2151_register_port_0_w(offs_t, data8_t d) { g_reg = d; }
     void YM2151_data_port_0_w(offs_t, data8_t d) {
+#ifdef ESP_PLATFORM
+        /* Diagnostic temporaire : compter les écritures de registres YM2151
+           pour savoir si le jeu envoie réellement des commandes au chip
+           (bug "aucun son" — peak=0 systématique côté synthèse). */
+        {
+            static uint32_t s_writes = 0;
+            static int64_t s_last_log_us = 0;
+            s_writes++;
+            int64_t now_us = esp_timer_get_time();
+            if (now_us - s_last_log_us >= 3000000LL) {
+                s_last_log_us = now_us;
+                ESP_LOGE("YM2151W", "writes=%u last_reg=0x%02X last_data=0x%02X", (unsigned)s_writes, (unsigned)g_reg, (unsigned)d);
+                s_writes = 0;
+            }
+        }
+#endif
         for (int i = 0; i < 4; i++) stream_update(i, 0);
         YM2151WriteReg(0, g_reg, d);
     }
@@ -478,6 +492,30 @@ extern "C" {
             fps_t0 = now_us;
             fps_count = 0;
         }
+
+        // Diagnostic temporaire : cycles cumulés par CPU, pour savoir si le CPU
+        // son (souvent CPU_AUDIO_CPU, ex. celui qui pilote DAC+YM2151 sur GTS80B)
+        // progresse réellement ou reste figé (bug "aucun son").
+        {
+            static int64_t s_last_cyc_log_us = 0;
+            static UINT64 s_last_cycles[MAX_CPU] = {0};
+            if (now_us - s_last_cyc_log_us >= 3000000LL) {
+                s_last_cyc_log_us = now_us;
+                if (Machine && Machine->drv) {
+                    char line[160];
+                    int off = 0;
+                    for (int i = 0; i < MAX_CPU; i++) {
+                        if (!Machine->drv->cpu[i].cpu_type) break;
+                        UINT64 c = cpunum_gettotalcycles64(i);
+                        UINT64 d = c - s_last_cycles[i];
+                        s_last_cycles[i] = c;
+                        bool audio = (Machine->drv->cpu[i].cpu_flags & CPU_AUDIO_CPU) != 0;
+                        off += snprintf(line + off, sizeof(line) - off, "cpu%d%s=%llu ", i, audio ? "(audio)" : "", (unsigned long long)d);
+                    }
+                    ESP_LOGE("CPUCYC", "%s", line);
+                }
+            }
+        }
 #endif
 
         // Generation written by JS at boot (slot 1076). Passed to every callback so JS
@@ -488,15 +526,6 @@ extern "C" {
         // Post full machine info once on first frame: CPUs + sound chips + stereo + rate.
         if (!machine_info_posted && Machine && Machine->drv) {
             machine_info_posted = true;
-#ifdef ESP_PLATFORM
-            // Suspend audio CPUs — ils tournent même avec le son désactivé
-            for (int i = 0; i < MAX_CPU; i++) {
-                if (!Machine->drv->cpu[i].cpu_type) break;
-                if (Machine->drv->cpu[i].cpu_flags & CPU_AUDIO_CPU)
-                    cpunum_suspend(i, SUSPEND_REASON_DISABLE, 1);
-            }
-            audio_cpu_suspended = true;
-#endif
             char info[512] = {0};
             int len = 0;
 

@@ -118,6 +118,8 @@ extern "C" int api_get_ble_audio_chunk(uint8_t *out, int max_bytes);
 
 static void ble_audio_task(void*) {
     static uint8_t packet[247];
+    int64_t last_log_us = 0;
+    uint32_t bytes_sent = 0, sends_ok = 0, sends_fail = 0, empty_reads = 0;
     for (;;) {
         if (g_ble_conn_handle != BLE_HS_CONN_HANDLE_NONE && g_ble_out_handle) {
             uint16_t att_mtu = ble_att_mtu(g_ble_conn_handle);
@@ -131,10 +133,21 @@ static void ble_audio_task(void*) {
                     struct os_mbuf* om = ble_hs_mbuf_from_flat(packet, n + 1);
                     if (om) {
                         int rc = ble_gatts_notify_custom(g_ble_conn_handle, g_ble_out_handle, om);
-                        if (rc != 0) g_ble_conn_handle = BLE_HS_CONN_HANDLE_NONE;
+                        if (rc != 0) { g_ble_conn_handle = BLE_HS_CONN_HANDLE_NONE; sends_fail++; }
+                        else { sends_ok++; bytes_sent += n; }
                     }
+                } else {
+                    empty_reads++;
                 }
             }
+        }
+        int64_t now_us = esp_timer_get_time();
+        if (now_us - last_log_us >= 3000000LL) {
+            ESP_LOGE("BLEAUDIO", "conn=%d out_handle=%d bytes=%u ok=%u fail=%u empty=%u",
+                     (int)g_ble_conn_handle, (int)g_ble_out_handle,
+                     (unsigned)bytes_sent, (unsigned)sends_ok, (unsigned)sends_fail, (unsigned)empty_reads);
+            last_log_us = now_us;
+            bytes_sent = sends_ok = sends_fail = empty_reads = 0;
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }

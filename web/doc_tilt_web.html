@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>tilt_web — Documentation API</title>
+<style>
+    :root {
+        --bg-main: #050505;
+        --bg-box: #111;
+        --accent: #00ffcc;
+        --accent2: #00ff44;
+        --border: #222;
+    }
+    body {
+        background: var(--bg-main);
+        color: #ccc;
+        font-family: monospace;
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 24px 28px 80px;
+        line-height: 1.55;
+    }
+    h1 { color: var(--accent); font-size: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+    h2 { color: var(--accent2); font-size: 1.15rem; margin-top: 2.4em; border-left: 3px solid var(--accent2); padding-left: 10px; }
+    h3 { color: #ffaa00; font-size: 0.98rem; margin-top: 1.8em; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre code { color: #00ff88; }
+    code { background: var(--bg-box); padding: 1px 5px; border-radius: 3px; }
+    pre {
+        background: var(--bg-box);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 14px 16px;
+        overflow-x: auto;
+        font-size: 0.85rem;
+    }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 0.88rem; }
+    th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+    th { background: var(--bg-box); color: var(--accent); }
+    .tag { display: inline-block; background: #1a1a1a; border: 1px solid var(--border); color: #ffaa00; border-radius: 3px; padding: 0 6px; font-size: 0.78rem; }
+    .dir-in  { color: #00aaff; }
+    .dir-out { color: #ff66aa; }
+    .note { border-left: 3px solid #555; padding: 8px 14px; background: #0d0d0d; color: #999; margin: 14px 0; font-size: 0.88rem; }
+    .top-link { font-size: 0.8rem; }
+    nav.toc { background: var(--bg-box); border: 1px solid var(--border); border-radius: 6px; padding: 14px 18px; }
+    nav.toc ul { margin: 0.3em 0; padding-left: 1.4em; }
+    nav.toc a { color: #aaa; }
+    nav.toc a:hover { color: var(--accent); }
+</style>
+</head>
+<body>
+
+<p class="top-link"><a href="index.html">&larr; Retour à l'interface</a></p>
+
+<h1>tilt_web — Documentation API</h1>
+
+<p>
+<code>tilt_web</code> est un bundle JS auto-suffisant (généré par <code>node/bundle.js</code> à partir de
+<code>node/runtime.js</code> + <code>node/runtime-audio.js</code> + le moteur WASM PinMAME) exécutable :
+</p>
+<ul>
+    <li>dans le navigateur, comme <strong>Web Worker</strong> (chargé par <code>web/interface.js</code>) ;</li>
+    <li>dans <strong>Node.js</strong>, via <code>require('./tilt_web')</code> qui expose <code>{ createEmulator }</code> (utilisé par <code>node/main.js</code> / <code>tilt_node</code>).</li>
+</ul>
+<p>
+Dans les deux cas, l'émulateur ne parle qu'un seul protocole texte ligne par ligne (<code>{ channel, line }</code>),
+plus un canal binaire séparé pour l'audio. Ce document liste l'intégralité de cette surface : la fonction exposée,
+les lignes de protocole (entrées/sorties), les canaux binaires, et la manière de brancher une fonction sur chaque
+type d'événement (changement de switch, sortie transistor/solénoïde, lampe, affichage, audio).
+</p>
+
+<nav class="toc">
+<strong>Sommaire</strong>
+<ul>
+    <li><a href="#createemulator"><code>createEmulator()</code></a></li>
+    <li><a href="#transport">Transport — Worker vs Node vs BLE/WebSocket</a></li>
+    <li><a href="#in">Lignes entrantes (host → émulateur)</a></li>
+    <li><a href="#out">Lignes sortantes (émulateur → host)</a></li>
+    <li><a href="#audio">Canal audio (binaire)</a></li>
+    <li><a href="#capturescope">Canaux capture / scope</a></li>
+    <li><a href="#serialmaster">Classe <code>SerialMaster</code> (API haut niveau navigateur)</a></li>
+    <li><a href="#recipes">Recettes — brancher une fonction sur un événement</a></li>
+</ul>
+</nav>
+
+<h2 id="createemulator">1. <code>createEmulator(options)</code></h2>
+
+<p>Point d'entrée unique du bundle. Définie dans <code>node/runtime.js</code>.</p>
+
+<pre><code>function createEmulator({ sendLine, sendAudio, sendCapture, sendScope, loadRom })
+  → { sendMessage(type, payload), handleLine(line) }</code></pre>
+
+<table>
+<tr><th>Option (callback fourni par l'hôte)</th><th>Rôle</th></tr>
+<tr><td><code>sendLine(channel, line)</code></td><td>Appelée par le moteur pour émettre une ligne de protocole (<code>!set:</code>, <code>!lamp:</code>, <code>!display:</code>, <code>@status:</code>, …). <code>channel</code> est indicatif (<code>'driver'</code>, <code>'display'</code>, <code>'status'</code>) — la donnée utile est toujours dans <code>line</code>.</td></tr>
+<tr><td><code>sendAudio(left, right)</code></td><td>Appelée à chaque bloc audio généré. <code>left</code>/<code>right</code> sont des <code>Float32Array</code> (mêmes longueur, échantillons [-1, 1], 44100 Hz).</td></tr>
+<tr><td><code>sendCapture(d)</code></td><td>Appelée pour la capture des bus son bruts (debug). <code>d = { ym_L, ym_R, dac }</code> (Float32Array).</td></tr>
+<tr><td><code>sendScope(d)</code></td><td>Appelée quand l'oscilloscope est actif. <code>d = { ym_L, ym_R, dac, spk_L, spk_R }</code>.</td></tr>
+<tr><td><code>loadRom(romName, baseUrl)</code></td><td>Doit retourner une <code>Promise&lt;ArrayBuffer&gt;</code> contenant le <code>.zip</code> de la ROM.</td></tr>
+</table>
+
+<p>L'objet retourné expose deux méthodes — c'est toute la surface de contrôle du moteur :</p>
+
+<table>
+<tr><th>Méthode</th><th>Usage</th></tr>
+<tr>
+<td><code>sendMessage(type, payload)</code></td>
+<td>Un seul type supporté : <code>'INIT_ENGINE'</code> avec <code>payload = { customRomBytes, customRomName, baseUrl }</code>. Démarre le moteur WASM et charge la ROM.</td>
+</tr>
+<tr>
+<td><code>handleLine(line)</code></td>
+<td>Transmet une ligne de protocole <strong>entrante</strong> (host → moteur) — voir <a href="#in">§3</a>.</td>
+</tr>
+</table>
+
+<h2 id="transport">2. Transport — Worker vs Node vs BLE/WebSocket</h2>
+
+<p>
+Le protocole ligne-à-ligne ne dépend pas du transport. <code>web/interface.js</code> sait parler à trois types de
+"maîtres" (<code>master</code>), tous exposant la même interface (<code>SerialMaster</code>, §6) :
+</p>
+<table>
+<tr><th>Transport</th><th>Fonction de création</th><th>Détail</th></tr>
+<tr><td>Worker local (navigateur)</td><td><code>createWorkerPort()</code></td><td>Fetch <code>tilt_web</code>, extrait le WASM embarqué, lance un <code>Worker</code>. Audio via <code>postMessage({channel:'audio'})</code>.</td></tr>
+<tr><td>WebSocket (Node distant)</td><td><code>createWebSocketPort(ws, name)</code> / <code>trySerialMaster(url)</code></td><td>Se connecte à <code>tilt_node</code> (serveur intégré, port 8765 par défaut). Handshake : <code>@master:name=…</code>.</td></tr>
+<tr><td>Bluetooth LE</td><td><code>createBlePort(device)</code></td><td>Service UUID <code>ab120001-…</code>, caractéristiques OUT (notify) / IN (write). Fragmentation 511 octets, 1er octet = flag de fin (<code>0x01</code>) / suite (<code>0x00</code>).</td></tr>
+</table>
+
+<h2 id="in">3. Lignes entrantes — host → émulateur (<span class="dir-in">@…</span>)</h2>
+
+<p>Envoyées via <code>master.send(line)</code> (navigateur) ou écrites sur le WebSocket/BLE côté <code>tilt_node</code>, puis transmises à <code>emulator.handleLine(line)</code>.</p>
+
+<table>
+<tr><th>Ligne</th><th>Paramètres</th><th>Effet</th></tr>
+<tr><td><code>@set:id=&lt;n&gt;&amp;state=&lt;0|1&gt;</code></td><td><code>id</code> = n° switch (0-79), <code>state</code></td><td><strong>Changement d'état d'un switch/contact</strong> — écrit l'octet dans la mémoire WASM lue par le jeu.</td></tr>
+<tr><td><code>@dip:id=&lt;n&gt;&amp;state=&lt;0|1&gt;</code></td><td><code>id</code> = n° dip-switch</td><td>Change un dip-switch.</td></tr>
+<tr><td><code>@sound:cmd=&lt;n&gt;</code></td><td><code>cmd</code> = commande son (0-255)</td><td>Injecte une commande sonore directement (bypass CPU).</td></tr>
+<tr><td><code>@audio:distance=&lt;n&gt;&amp;chip=&lt;f&gt;&amp;dac=&lt;f&gt;&amp;sep=&lt;0|1&gt;</code></td><td>tous optionnels</td><td>Réglages mix audio (distance simulateur, balance chip/DAC, séparation stéréo).</td></tr>
+<tr><td><code>@scope:on=&lt;0|1&gt;</code></td><td></td><td>Active/désactive l'envoi du canal <code>scope</code>.</td></tr>
+<tr><td><code>@capture:action=start|stop</code></td><td></td><td>Démarre/arrête la capture brute des bus son.</td></tr>
+<tr><td><code>@connect:input=1&amp;display=1&amp;driver=1</code></td><td>(géré côté <code>tilt_node</code>, pas par <code>handleLine</code>)</td><td>Annonce de connexion d'un client ; déclenche le renvoi de la liste de ROMs + derniers états connus.</td></tr>
+<tr><td><code>@reboot:</code></td><td>(idem, côté <code>tilt_node</code>)</td><td>Recrée intégralement l'émulateur (reboot dur).</td></tr>
+<tr><td><code>@rom:name=&lt;n&gt;&amp;data=&lt;base64&gt;</code></td><td>(idem, côté <code>tilt_node</code>)</td><td>Change/injecte une ROM puis reboot.</td></tr>
+</table>
+
+<h2 id="out">4. Lignes sortantes — émulateur → host (<span class="dir-out">!… / @…</span>)</h2>
+
+<p>Reçues via le callback <code>sendLine(channel, line)</code> côté hôte, redistribuées par <code>master.onMessage(cb)</code> côté navigateur.</p>
+
+<table>
+<tr><th>Ligne</th><th>Paramètres</th><th>Événement représenté</th></tr>
+<tr>
+<td><code>!set:id=&lt;n&gt;&amp;state=&lt;0|1&gt;</code></td>
+<td><code>id</code> = n° solénoïde/transistor (0-31)</td>
+<td><strong>Changement de sortie transistor / solénoïde.</strong> Émise uniquement sur changement d'état (32 bits comparés à l'état précédent).</td>
+</tr>
+<tr>
+<td><code>!lamp:&lt;24 car. hex&gt;</code></td>
+<td>12 octets (colonnes) × 8 lampes</td>
+<td>État complet de la matrice de lampes (96 lampes), renvoyé en bloc à chaque frame modifiée.</td>
+</tr>
+<tr>
+<td><code>!display:action=raw&amp;data=&lt;hex&gt;</code></td>
+<td>40 caractères VFD encodés en hex (16 bits/caractère)</td>
+<td>Contenu brut de l'afficheur.</td>
+</tr>
+<tr>
+<td><code>!display:action=text&amp;data=&lt;urlencoded&gt;</code></td>
+<td>texte ASCII</td>
+<td>Contenu de l'afficheur en texte (utilisé notamment pour la sortie série display).</td>
+</tr>
+<tr>
+<td><code>@status:state=loading|ready&amp;rom=&lt;nom&gt;</code></td>
+<td></td>
+<td>Cycle de vie du moteur (chargement / ROM prête).</td>
+</tr>
+<tr>
+<td><code>@machine:cpu=…|snd=…|stereo=0|1|rate=…</code></td>
+<td></td>
+<td>Infos machine détectées (CPU, puces son, stéréo, fréquence).</td>
+</tr>
+<tr>
+<td><code>@sound:chips=&lt;liste&gt;</code></td>
+<td></td>
+<td>Liste des puces son actives (compatibilité Node).</td>
+</tr>
+<tr>
+<td><code>@roms:list=&lt;a,b,c&gt;</code></td>
+<td>noms encodés URL, séparés par virgule</td>
+<td>Liste des ROMs disponibles côté serveur (<code>tilt_node</code>).</td>
+</tr>
+<tr>
+<td><code>@audio:cmd=0x&lt;hex&gt;</code></td>
+<td></td>
+<td>Log d'une commande audio reçue par le moteur son (diagnostic).</td>
+</tr>
+</table>
+
+<h2 id="audio">5. Canal audio (binaire, séparé du texte)</h2>
+
+<p>
+L'audio ne passe <strong>jamais</strong> par les lignes texte : c'est un canal dédié pour éviter la latence/charge
+du parsing. Le moteur appelle <code>sendAudio(left, right)</code> à intervalle régulier (pacing géré par
+<code>node/runtime-audio.js</code> / <code>audio.startPacing()</code>).
+</p>
+<ul>
+    <li><strong>Worker (navigateur)</strong> : <code>worker.postMessage({ channel: 'audio', left, right })</code> → côté <code>interface.js</code>, <code>port.onAudio(cb)</code>.</li>
+    <li><strong>Node (<code>tilt_node</code>)</strong> : converti en PCM 16-bit stéréo (<code>floatTo16BitPCM</code>) puis écrit dans le sink choisi (haut-parleur via <code>play</code>/<code>aplay</code>, ou fichier <code>--audio-out</code>).</li>
+</ul>
+
+<h2 id="capturescope">6. Canaux capture / scope</h2>
+
+<table>
+<tr><th>Canal</th><th>Activation</th><th>Payload</th><th>Usage</th></tr>
+<tr><td><code>capture</code></td><td><code>@capture:action=start</code></td><td><code>{ ym_L, ym_R, dac }</code> (Float32Array)</td><td>Enregistrement brut des bus son (debug/diagnostic).</td></tr>
+<tr><td><code>scope</code></td><td><code>@scope:on=1</code></td><td><code>{ ym_L, ym_R, dac, spk_L, spk_R }</code></td><td>Oscilloscope temps réel affiché dans l'interface (bouton <code>scopeBtn</code>).</td></tr>
+</table>
+
+<h2 id="serialmaster">7. Classe <code>SerialMaster</code> (API haut niveau, navigateur)</h2>
+
+<p>
+Définie dans <code>web/interface.js</code>. Enveloppe un transport (Worker / WebSocket / BLE) derrière une API
+unique — c'est l'objet que manipule le reste de l'interface (<code>master.send(...)</code>, etc.).
+</p>
+
+<table>
+<tr><th>Méthode</th><th>Signature</th><th>Rôle</th></tr>
+<tr><td><code>send</code></td><td><code>send(line: string)</code></td><td>Envoie une ligne <code>@…</code> vers l'émulateur (switch, dip, etc.).</td></tr>
+<tr><td><code>onMessage</code></td><td><code>onMessage(cb: (line: string) =&gt; void)</code></td><td><strong>S'abonne à toutes les lignes texte sortantes</strong> (<code>!set:</code>, <code>!lamp:</code>, <code>!display:</code>, <code>@status:</code>, …). Plusieurs abonnés possibles (liste interne).</td></tr>
+<tr><td><code>onAudio</code></td><td><code>onAudio(cb: (left: Float32Array, right: Float32Array) =&gt; void)</code></td><td>S'abonne au flux audio PCM flottant.</td></tr>
+<tr><td><code>onCapture</code></td><td><code>onCapture(cb: (d) =&gt; void)</code></td><td>S'abonne au canal de capture brute.</td></tr>
+<tr><td><code>onScope</code></td><td><code>onScope(cb: (d) =&gt; void)</code></td><td>S'abonne au flux oscilloscope.</td></tr>
+<tr><td><code>onDisconnect</code></td><td><code>onDisconnect(cb: () =&gt; void)</code></td><td>Appelé à la fermeture du transport.</td></tr>
+<tr><td><code>name</code></td><td>getter</td><td>Nom du maître connecté.</td></tr>
+</table>
+
+<h2 id="recipes">8. Recettes — brancher une fonction sur un événement</h2>
+
+<h3>Détecter un changement de switch (entrée)</h3>
+<div class="note">Les switches sont des <em>entrées</em> envoyées par l'hôte vers l'émulateur — il n'y a pas d'« événement switch » émis par le moteur ; c'est vous qui le déclenchez (bouton UI, capteur physique, etc.).</div>
+<pre><code>// Faire passer le switch n°27 (pièce) à l'état "actif"
+master.send('@set:id=27&amp;state=1');
+// ... puis relâché
+master.send('@set:id=27&amp;state=0');</code></pre>
+
+<h3>Écouter les sorties transistor / solénoïde</h3>
+<pre><code>master.onMessage((line) =&gt; {
+    if (!line.startsWith('!set:')) return;
+    const p = new URLSearchParams(line.slice(5));
+    const id    = parseInt(p.get('id'));    // 0-31
+    const state = parseInt(p.get('state')); // 0 ou 1
+    console.log(`Solénoïde ${id} → ${state ? 'ON' : 'OFF'}`);
+});</code></pre>
+
+<h3>Écouter les lampes</h3>
+<pre><code>master.onMessage((line) =&gt; {
+    if (!line.startsWith('!lamp:')) return;
+    const hex = line.slice(6);
+    for (let col = 0; col &lt; 12; col++) {
+        const mask = parseInt(hex.slice(col * 2, col * 2 + 2), 16);
+        for (let row = 0; row &lt; 8; row++) {
+            const lampId = col * 8 + row;
+            const state  = (mask &gt;&gt; row) &amp; 1;
+            // ... réagir au changement
+        }
+    }
+});</code></pre>
+
+<h3>Écouter l'affichage (VFD)</h3>
+<pre><code>master.onMessage((line) =&gt; {
+    if (line.startsWith('!display:action=text&amp;data=')) {
+        const text = decodeURIComponent(line.slice(26));
+        console.log('Affichage :', text);
+    }
+});</code></pre>
+
+<h3>Récupérer la sortie audio</h3>
+<pre><code>master.onAudio((left, right) =&gt; {
+    // left/right : Float32Array, 44100 Hz, valeurs [-1, 1]
+    monAudioContext_feed(left, right);
+});</code></pre>
+
+<h3>Suivre le cycle de vie du moteur</h3>
+<pre><code>master.onMessage((line) =&gt; {
+    if (!line.startsWith('@status:')) return;
+    const state = new URLSearchParams(line.slice(8)).get('state');
+    if (state === 'ready') console.log('Moteur prêt');
+});</code></pre>
+
+<h3>Côté Node.js — utiliser <code>createEmulator</code> directement</h3>
+<pre><code>const { createEmulator } = require('./tilt_web');
+
+const emulator = createEmulator({
+    sendLine(channel, line) {
+        if (line.startsWith('!set:'))   { /* sortie transistor */ }
+        if (line.startsWith('!lamp:'))  { /* lampes */ }
+        if (line.startsWith('@status:')) { /* cycle de vie */ }
+    },
+    sendAudio(left, right) { /* PCM flottant 44100 Hz */ },
+    loadRom: (name) =&gt; require('fs').promises.readFile(`./roms/${name}.zip`)
+});
+
+emulator.sendMessage('INIT_ENGINE', { customRomName: 'bonebstr' });
+
+// Simuler un appui sur un switch
+emulator.handleLine('@set:id=27&amp;state=1');</code></pre>
+
+<p class="note">
+Référence du protocole texte : commentaire en tête de <code>web/interface.js</code> ; implémentation moteur :
+<code>node/runtime.js</code> (fonction <code>createEmulator</code> + <code>handleLine</code>) ; audio :
+<code>node/runtime-audio.js</code> ; assemblage du bundle : <code>node/bundle.js</code>.
+</p>
+
+</body>
+</html>

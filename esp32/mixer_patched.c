@@ -425,27 +425,6 @@ static unsigned mixer_channel_resample_16(struct mixer_channel_data* const chann
 	// BUT we can disable this via:
 	src_set_ratio(src_state, data.src_ratio);
 
-#ifdef ESP_PLATFORM
-	// Diagnostic temporaire : dernier point de mesure avant l'appel qui plante
-	// (IntegerDivideByZero observé dans calc_output_single via src_process).
-	// On lit directement la structure interne (visible ici car src_sinc_opt.c
-	// est inclus textuellement dans ce fichier) pour vérifier si index_inc,
-	// le diviseur utilisé dans calc_output_single, est corrompu/nul.
-	{
-		SRC_PRIVATE* __dbg_psrc = (SRC_PRIVATE*)src_state;
-		SINC_FILTER* __dbg_filter = (__dbg_psrc && __dbg_psrc->private_data) ? (SINC_FILTER*)__dbg_psrc->private_data : NULL;
-		ESP_LOGE("MIXSRC16", "ch='%s' lr=%u ratio=%.6f from=%.1f to=%.1f src_len=%u dst_len=%u state=%p last_ratio=%.6f filter=%p magic=0x%x coeff_half_len=%d index_inc=%d b_len=%d",
-			channel->name ? channel->name : "?", left_right, data.src_ratio,
-			channel->from_frequency, channel->to_frequency, src_len, dst_len, (void*)src_state,
-			__dbg_psrc ? __dbg_psrc->last_ratio : -1.0,
-			(void*)__dbg_filter,
-			__dbg_filter ? __dbg_filter->sinc_magic_marker : 0,
-			__dbg_filter ? __dbg_filter->coeff_half_len : -1,
-			__dbg_filter ? __dbg_filter->index_inc : -1,
-			__dbg_filter ? __dbg_filter->b_len : -1);
-	}
-#endif
-
 	if (src_process(src_state, &data) != SRC_ERR_NO_ERROR)
 	{
 		assert(!"src_process");
@@ -778,8 +757,20 @@ int mixer_sh_start()
 		channel->config_mixing_level 			= config_mixing_level[i];
 		channel->config_default_mixing_level 	= config_default_mixing_level[i];
 
+#ifdef ESP_PLATFORM
+		// Le convertisseur SINC plante de façon déterministe sur ESP32-S3 :
+		// IntegerDivideByZero dans calc_output_single avec un increment à 0,
+		// alors que tous les champs de SINC_FILTER lus juste avant (index_inc,
+		// coeff_half_len, magic) sont valides — cause non identifiée (probable
+		// bug toolchain xtensa sur lrint/double_to_fp, hors de notre contrôle
+		// car le code crashant est dans workspace/). SRC_LINEAR n'utilise aucune
+		// division par increment fixe-point : on l'utilise à la place sur ESP32.
+		channel->src_left  = src_new(SRC_LINEAR, 1, &error);
+		channel->src_right = src_new(SRC_LINEAR, 1, &error);
+#else
 		channel->src_left  = src_new((pmoptions.resampling_quality == 0) ? SRC_SINC_FASTEST : SRC_SINC_MEDIUM_QUALITY, 1, &error); //!! if changing quality, change src_sinc_opt again to include the other table (search for //!! there)
 		channel->src_right = src_new((pmoptions.resampling_quality == 0) ? SRC_SINC_FASTEST : SRC_SINC_MEDIUM_QUALITY, 1, &error);
+#endif
 
 		channel->lr_silent_value[0] = INT_MAX;
 		channel->lr_silent_value_f[0] = FLT_MAX;

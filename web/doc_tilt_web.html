@@ -53,83 +53,81 @@
 
 <p class="top-link"><a href="index.html">&larr; Retour à l'interface</a></p>
 
-<h1>tilt_web — Documentation API</h1>
+<h1>tilt_node / tilt_web — Documentation du protocole</h1>
 
 <p>
-<code>tilt_web</code> est un bundle JS auto-suffisant (généré par <code>node/bundle.js</code> à partir de
-<code>node/runtime.js</code> + <code>node/runtime-audio.js</code> + le moteur WASM PinMAME) exécutable :
+<code>node/bundle.js</code> assemble le même moteur (<code>node/runtime.js</code> + <code>node/runtime-audio.js</code> +
+WASM PinMAME) en <strong>deux bundles indépendants</strong> :
 </p>
-<ul>
-    <li>dans le navigateur, comme <strong>Web Worker</strong> (chargé par <code>web/interface.js</code>) ;</li>
-    <li>dans <strong>Node.js</strong>, via <code>require('./tilt_web')</code> qui expose <code>{ createEmulator }</code> (utilisé par <code>node/main.js</code> / <code>tilt_node</code>).</li>
-</ul>
+<table>
+<tr><th>Bundle</th><th>Pour qui</th><th>Ce qu'il contient</th></tr>
+<tr>
+<td><code>node/tilt_node</code></td>
+<td><strong>Émuler un flipper en standalone.</strong> C'est le seul fichier nécessaire.</td>
+<td>Exécutable Node.js autonome : moteur PinMAME + serveur WebSocket (port 8765) + périphérique BLE intégrés. <code>node node/tilt_node --rom=...</code> et c'est tout — aucun navigateur, aucun autre fichier du repo requis.</td>
+</tr>
+<tr>
+<td><code>web/tilt_web</code></td>
+<td>Servir le moteur à un navigateur (le workbench de ce repo).</td>
+<td>Le même moteur, packagé pour tourner en Web Worker côté client. <code>web/interface.js</code> + <code>web/index.html</code> s'en servent pour le mode "Local" du workbench — c'est un cas d'usage parmi d'autres, pas une dépendance du protocole.</td>
+</tr>
+</table>
 <p>
-Dans les deux cas, l'émulateur ne parle qu'un seul protocole texte ligne par ligne (<code>{ channel, line }</code>),
-plus un canal binaire séparé pour l'audio. Ce document liste l'intégralité de cette surface : la fonction exposée,
-les lignes de protocole (entrées/sorties), les canaux binaires, et la manière de brancher une fonction sur chaque
-type d'événement (changement de switch, sortie transistor/solénoïde, lampe, affichage, audio).
+<strong>Le protocole texte est strictement le même dans les deux cas</strong> — c'est lui, et non un fichier JS
+particulier, qui constitue l'API. Si vous pilotez un flipper avec <code>tilt_node</code>, vous n'avez besoin que
+des sections 1 à 4 ci-dessous (lignes entrantes/sortantes, audio) appliquées par-dessus une connexion WebSocket
+ou BLE — dans n'importe quel langage. <code>web/interface.js</code> (§6, en annexe) n'est qu'<em>un</em> client
+parmi d'autres possibles, celui du workbench navigateur fourni avec le repo ; il ne fait pas partie du pack
+<code>tilt_node</code> et n'est requis pour rien d'autre que cette UI-là.
 </p>
 
 <nav class="toc">
 <strong>Sommaire</strong>
 <ul>
-    <li><a href="#createemulator"><code>createEmulator()</code></a></li>
-    <li><a href="#transport">Transport — Worker vs Node vs BLE/WebSocket</a></li>
-    <li><a href="#in">Lignes entrantes (host → émulateur)</a></li>
-    <li><a href="#out">Lignes sortantes (émulateur → host)</a></li>
-    <li><a href="#audio">Canal audio (binaire)</a></li>
-    <li><a href="#capturescope">Canaux capture / scope</a></li>
-    <li><a href="#serialmaster">Classe <code>SerialMaster</code> (API haut niveau navigateur)</a></li>
-    <li><a href="#recipes">Recettes — brancher une fonction sur un événement</a></li>
+    <li><a href="#standalone">1. Émuler un flipper avec <code>tilt_node</code> seul</a></li>
+    <li><a href="#in">2. Lignes entrantes (client → émulateur)</a></li>
+    <li><a href="#out">3. Lignes sortantes (émulateur → client)</a></li>
+    <li><a href="#audio">4. Canal audio (binaire)</a></li>
+    <li><a href="#capturescope">5. Canaux capture / scope</a></li>
+    <li><a href="#annexe">6. Annexe — <code>web/interface.js</code> (client navigateur du repo, optionnel)</a></li>
+    <li><a href="#recipes">7. Recettes — brancher une fonction sur un événement</a></li>
 </ul>
 </nav>
 
-<h2 id="createemulator">1. <code>createEmulator(options)</code></h2>
+<h2 id="standalone">1. Émuler un flipper avec <code>tilt_node</code> seul</h2>
 
-<p>Point d'entrée unique du bundle. Définie dans <code>node/runtime.js</code>.</p>
+<pre><code>node node/tilt_node --rom=bonebstr
+# ou, sans bundle pré-généré : node node/main.js --rom=bonebstr</code></pre>
 
-<pre><code>function createEmulator({ sendLine, sendAudio, sendCapture, sendScope, loadRom })
-  → { sendMessage(type, payload), handleLine(line) }</code></pre>
-
-<table>
-<tr><th>Option (callback fourni par l'hôte)</th><th>Rôle</th></tr>
-<tr><td><code>sendLine(channel, line)</code></td><td>Appelée par le moteur pour émettre une ligne de protocole (<code>!set:</code>, <code>!lamp:</code>, <code>!display:</code>, <code>@status:</code>, …). <code>channel</code> est indicatif (<code>'driver'</code>, <code>'display'</code>, <code>'status'</code>) — la donnée utile est toujours dans <code>line</code>.</td></tr>
-<tr><td><code>sendAudio(left, right)</code></td><td>Appelée à chaque bloc audio généré. <code>left</code>/<code>right</code> sont des <code>Float32Array</code> (mêmes longueur, échantillons [-1, 1], 44100 Hz).</td></tr>
-<tr><td><code>sendCapture(d)</code></td><td>Appelée pour la capture des bus son bruts (debug). <code>d = { ym_L, ym_R, dac }</code> (Float32Array).</td></tr>
-<tr><td><code>sendScope(d)</code></td><td>Appelée quand l'oscilloscope est actif. <code>d = { ym_L, ym_R, dac, spk_L, spk_R }</code>.</td></tr>
-<tr><td><code>loadRom(romName, baseUrl)</code></td><td>Doit retourner une <code>Promise&lt;ArrayBuffer&gt;</code> contenant le <code>.zip</code> de la ROM.</td></tr>
-</table>
-
-<p>L'objet retourné expose deux méthodes — c'est toute la surface de contrôle du moteur :</p>
-
-<table>
-<tr><th>Méthode</th><th>Usage</th></tr>
-<tr>
-<td><code>sendMessage(type, payload)</code></td>
-<td>Un seul type supporté : <code>'INIT_ENGINE'</code> avec <code>payload = { customRomBytes, customRomName, baseUrl }</code>. Démarre le moteur WASM et charge la ROM.</td>
-</tr>
-<tr>
-<td><code>handleLine(line)</code></td>
-<td>Transmet une ligne de protocole <strong>entrante</strong> (host → moteur) — voir <a href="#in">§3</a>.</td>
-</tr>
-</table>
-
-<h2 id="transport">2. Transport — Worker vs Node vs BLE/WebSocket</h2>
-
+<p>Ça suffit. <code>tilt_node</code> démarre :</p>
+<ul>
+    <li>un serveur <strong>WebSocket</strong> sur <code>ws://localhost:8765</code> (port configurable via <code>--port=</code>) ;</li>
+    <li>un périphérique <strong>BLE</strong> annoncé sous le nom <code>tilt_node</code> (service <code>ab120001-…</code>), sauf <code>--no-ble</code> ;</li>
+    <li>la sortie audio directement sur le haut-parleur de la machine (SoX/ALSA), sauf <code>--no-speaker</code>.</li>
+</ul>
 <p>
-Le protocole ligne-à-ligne ne dépend pas du transport. <code>web/interface.js</code> sait parler à trois types de
-"maîtres" (<code>master</code>), tous exposant la même interface (<code>SerialMaster</code>, §6) :
+N'importe quel client — navigateur, script Python, microcontrôleur — peut alors s'y connecter en WebSocket ou
+BLE et échanger les lignes de protocole des §2-3 ci-dessous. Le client n'a pas besoin de connaître
+<code>createEmulator</code> ni aucun fichier JS du repo : il parle juste ce protocole texte sur le socket.
 </p>
-<table>
-<tr><th>Transport</th><th>Fonction de création</th><th>Détail</th></tr>
-<tr><td>Worker local (navigateur)</td><td><code>createWorkerPort()</code></td><td>Fetch <code>tilt_web</code>, extrait le WASM embarqué, lance un <code>Worker</code>. Audio via <code>postMessage({channel:'audio'})</code>.</td></tr>
-<tr><td>WebSocket (Node distant)</td><td><code>createWebSocketPort(ws, name)</code> / <code>trySerialMaster(url)</code></td><td>Se connecte à <code>tilt_node</code> (serveur intégré, port 8765 par défaut). Handshake : <code>@master:name=…</code>.</td></tr>
-<tr><td>Bluetooth LE</td><td><code>createBlePort(device)</code></td><td>Service UUID <code>ab120001-…</code>, caractéristiques OUT (notify) / IN (write). Fragmentation 511 octets, 1er octet = flag de fin (<code>0x01</code>) / suite (<code>0x00</code>).</td></tr>
-</table>
+<p>Au moment de la connexion, <code>tilt_node</code> envoie immédiatement :</p>
+<pre><code>@master:name=runtime-node&amp;version=1</code></pre>
+<p>
+puis, si le client envoie <code>@connect:input=1&amp;display=1&amp;driver=1</code>, il renvoie la liste des
+ROMs disponibles et les derniers états connus (affichage, lampes, statut) — pratique pour qu'un client qui se
+connecte en cours de partie rattrape l'état courant sans attendre le prochain changement.
+</p>
+<div class="note">
+<code>createEmulator({ sendLine, sendAudio, sendCapture, sendScope, loadRom })</code> (dans
+<code>node/runtime.js</code>) est le moteur interne que <code>tilt_node</code> appelle pour faire tourner le
+WASM PinMAME et router les lignes. Vous n'avez besoin d'y toucher que si vous embarquez le moteur comme
+librairie dans votre propre process Node (comme le fait <code>node/main.js</code>) — pas pour piloter un
+flipper via WebSocket/BLE, ce qui est le cas d'usage normal.
+</div>
 
-<h2 id="in">3. Lignes entrantes — host → émulateur (<span class="dir-in">@…</span>)</h2>
+<h2 id="in">2. Lignes entrantes — client → émulateur (<span class="dir-in">@…</span>)</h2>
 
-<p>Envoyées via <code>master.send(line)</code> (navigateur) ou écrites sur le WebSocket/BLE côté <code>tilt_node</code>, puis transmises à <code>emulator.handleLine(line)</code>.</p>
+<p>Écrites par le client directement sur le WebSocket ou la caractéristique BLE IN de <code>tilt_node</code> (une ligne = un message). En interne, <code>tilt_node</code> les transmet à <code>emulator.handleLine(line)</code>.</p>
 
 <table>
 <tr><th>Ligne</th><th>Paramètres</th><th>Effet</th></tr>
@@ -144,9 +142,9 @@ Le protocole ligne-à-ligne ne dépend pas du transport. <code>web/interface.js<
 <tr><td><code>@rom:name=&lt;n&gt;&amp;data=&lt;base64&gt;</code></td><td>(idem, côté <code>tilt_node</code>)</td><td>Change/injecte une ROM puis reboot.</td></tr>
 </table>
 
-<h2 id="out">4. Lignes sortantes — émulateur → host (<span class="dir-out">!… / @…</span>)</h2>
+<h2 id="out">3. Lignes sortantes — émulateur → client (<span class="dir-out">!… / @…</span>)</h2>
 
-<p>Reçues via le callback <code>sendLine(channel, line)</code> côté hôte, redistribuées par <code>master.onMessage(cb)</code> côté navigateur.</p>
+<p>Reçues telles quelles sur le WebSocket ou en notification BLE depuis <code>tilt_node</code> (une ligne par message).</p>
 
 <table>
 <tr><th>Ligne</th><th>Paramètres</th><th>Événement représenté</th></tr>
@@ -197,7 +195,7 @@ Le protocole ligne-à-ligne ne dépend pas du transport. <code>web/interface.js<
 </tr>
 </table>
 
-<h2 id="audio">5. Canal audio (binaire, séparé du texte)</h2>
+<h2 id="audio">4. Canal audio (binaire, séparé du texte)</h2>
 
 <p>
 L'audio ne passe <strong>jamais</strong> par les lignes texte : c'est un canal dédié pour éviter la latence/charge
@@ -205,11 +203,11 @@ du parsing. Le moteur appelle <code>sendAudio(left, right)</code> à intervalle 
 <code>node/runtime-audio.js</code> / <code>audio.startPacing()</code>).
 </p>
 <ul>
-    <li><strong>Worker (navigateur)</strong> : <code>worker.postMessage({ channel: 'audio', left, right })</code> → côté <code>interface.js</code>, <code>port.onAudio(cb)</code>.</li>
-    <li><strong>Node (<code>tilt_node</code>)</strong> : converti en PCM 16-bit stéréo (<code>floatTo16BitPCM</code>) puis écrit dans le sink choisi (haut-parleur via <code>play</code>/<code>aplay</code>, ou fichier <code>--audio-out</code>).</li>
+    <li><strong><code>tilt_node</code> (standalone)</strong> : l'audio est converti en PCM 16-bit stéréo (<code>floatTo16BitPCM</code>) et écrit directement dans le sink choisi sur la machine qui exécute <code>tilt_node</code> — haut-parleur via <code>play</code>/SoX (macOS) ou <code>aplay</code>/ALSA (Linux), ou fichier avec <code>--audio-out=</code>. <strong>Il n'est jamais envoyé sur le WebSocket ni le BLE</strong> — un client réseau ne reçoit pas l'audio, seulement les lignes texte des §2-3.</li>
+    <li><strong>Worker (navigateur, <code>tilt_web</code>)</strong> : seul ce mode forwarde l'audio au code JS appelant via <code>worker.postMessage({ channel: 'audio', left, right })</code> → <code>port.onAudio(cb)</code>, parce que le Worker tourne dans le même process que la page qui doit le jouer.</li>
 </ul>
 
-<h2 id="capturescope">6. Canaux capture / scope</h2>
+<h2 id="capturescope">5. Canaux capture / scope</h2>
 
 <table>
 <tr><th>Canal</th><th>Activation</th><th>Payload</th><th>Usage</th></tr>
@@ -217,11 +215,20 @@ du parsing. Le moteur appelle <code>sendAudio(left, right)</code> à intervalle 
 <tr><td><code>scope</code></td><td><code>@scope:on=1</code></td><td><code>{ ym_L, ym_R, dac, spk_L, spk_R }</code></td><td>Oscilloscope temps réel affiché dans l'interface (bouton <code>scopeBtn</code>).</td></tr>
 </table>
 
-<h2 id="serialmaster">7. Classe <code>SerialMaster</code> (API haut niveau, navigateur)</h2>
+<h2 id="annexe">6. Annexe — <code>web/interface.js</code> (client navigateur du repo, optionnel)</h2>
+
+<div class="note">
+Cette section ne concerne <strong>que</strong> le workbench navigateur fourni dans ce repo
+(<code>web/index.html</code> + <code>web/interface.js</code>). Si vous écrivez votre propre client pour piloter
+un flipper via <code>tilt_node</code> (en JS, Python, sur microcontrôleur…), vous n'avez pas besoin de cette
+classe : parlez directement le protocole texte des §2-3 sur le WebSocket/BLE. <code>SerialMaster</code> n'est
+qu'une enveloppe pratique utilisée par l'UI de ce repo pour unifier ses trois transports (Worker local,
+WebSocket, BLE) derrière une seule API JS.
+</div>
 
 <p>
-Définie dans <code>web/interface.js</code>. Enveloppe un transport (Worker / WebSocket / BLE) derrière une API
-unique — c'est l'objet que manipule le reste de l'interface (<code>master.send(...)</code>, etc.).
+Classe définie dans <code>web/interface.js</code>. Enveloppe un transport (Worker / WebSocket / BLE) derrière une
+API unique — c'est l'objet que manipule le reste de l'interface (<code>master.send(...)</code>, etc.).
 </p>
 
 <table>
@@ -235,7 +242,31 @@ unique — c'est l'objet que manipule le reste de l'interface (<code>master.send
 <tr><td><code>name</code></td><td>getter</td><td>Nom du maître connecté.</td></tr>
 </table>
 
-<h2 id="recipes">8. Recettes — brancher une fonction sur un événement</h2>
+<h2 id="recipes">7. Recettes — brancher une fonction sur un événement</h2>
+
+<h3>Client minimal — WebSocket pur, sans <code>interface.js</code> ni navigateur</h3>
+<p>Exemple Node.js (module <code>ws</code>) qui se connecte à <code>tilt_node</code> et réagit aux sorties transistor :</p>
+<pre><code>const WebSocket = require('ws');
+const ws = new WebSocket('ws://localhost:8765');
+
+ws.on('open', () =&gt; ws.send('@connect:input=1&amp;display=1&amp;driver=1'));
+
+ws.on('message', (data) =&gt; {
+    const line = data.toString().trim();
+    if (line.startsWith('!set:')) {
+        const p = new URLSearchParams(line.slice(5));
+        console.log(`Solénoïde ${p.get('id')} → ${p.get('state') === '1' ? 'ON' : 'OFF'}`);
+    }
+});
+
+// Simuler l'appui sur le switch n°27 (pièce)
+ws.send('@set:id=27&amp;state=1');</code></pre>
+
+<div class="note">
+Les recettes suivantes utilisent <code>master.send(...)</code> / <code>master.onMessage(...)</code>, l'objet
+<code>SerialMaster</code> du workbench (§6) — purement pour la concision. Avec un client maison, c'est exactement
+<code>ws.send(line)</code> / <code>ws.on('message', cb)</code> comme dans la recette ci-dessus.
+</div>
 
 <h3>Détecter un changement de switch (entrée)</h3>
 <div class="note">Les switches sont des <em>entrées</em> envoyées par l'hôte vers l'émulateur — il n'y a pas d'« événement switch » émis par le moteur ; c'est vous qui le déclenchez (bouton UI, capteur physique, etc.).</div>
@@ -275,7 +306,8 @@ master.send('@set:id=27&amp;state=0');</code></pre>
     }
 });</code></pre>
 
-<h3>Récupérer la sortie audio</h3>
+<h3>Récupérer la sortie audio (mode Worker navigateur uniquement)</h3>
+<div class="note">Ne s'applique pas à un client WebSocket/BLE de <code>tilt_node</code> : voir §4, l'audio y reste local à la machine qui exécute <code>tilt_node</code>.</div>
 <pre><code>master.onAudio((left, right) =&gt; {
     // left/right : Float32Array, 44100 Hz, valeurs [-1, 1]
     monAudioContext_feed(left, right);

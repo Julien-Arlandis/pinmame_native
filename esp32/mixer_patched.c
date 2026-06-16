@@ -425,6 +425,14 @@ static unsigned mixer_channel_resample_16(struct mixer_channel_data* const chann
 	// BUT we can disable this via:
 	src_set_ratio(src_state, data.src_ratio);
 
+#ifdef ESP_PLATFORM
+	// Diagnostic temporaire : dernier point de mesure avant l'appel qui plante
+	// (IntegerDivideByZero observé dans calc_output_single via src_process).
+	ESP_LOGE("MIXSRC16", "ch='%s' lr=%u ratio=%.6f from=%.1f to=%.1f src_len=%u dst_len=%u state=%p",
+		channel->name ? channel->name : "?", left_right, data.src_ratio,
+		channel->from_frequency, channel->to_frequency, src_len, dst_len, (void*)src_state);
+#endif
+
 	if (src_process(src_state, &data) != SRC_ERR_NO_ERROR)
 	{
 		assert(!"src_process");

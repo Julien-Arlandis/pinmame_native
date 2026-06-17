@@ -94,7 +94,13 @@ extern "C" {
 }
 
 #define ABMAX 131072
-#define SPF   735
+// Sur ESP32 : synthèse à 11025Hz (BLE sort aussi à 11025Hz, pas de décimation).
+// Sur WASM/natif : 44100Hz pour la qualité maximale.
+#ifdef ESP_PLATFORM
+#define SPF   184    // 11025 / 60 fps
+#else
+#define SPF   735    // 44100 / 60 fps
+#endif
 #define DMAX  4096
 
 // PSRAM_BSS_ATTR : défini dans pinmame_config.h (ESP32) → .ext_ram.bss
@@ -416,7 +422,7 @@ extern "C" {
     // ratio configurable (STEP), pour tenir dans la bande passante BLE.
     int api_get_ble_audio_chunk(uint8_t *out, int max_bytes) {
         static int g_ble_ri = 0;
-        const int STEP = 4; // 44100 / STEP = 11025 Hz de sortie
+        const int STEP = 1; // synthèse native à 11025Hz sur ESP32, pas de décimation
         int produced = 0;
         while (produced < max_bytes) {
             int n = (g_wi - g_ble_ri + ABMAX) % ABMAX;
@@ -942,7 +948,11 @@ extern "C" {
         if (drivers[game_index]->driver_init)
             drivers[game_index]->driver_init();
         if (!rompath_extra) rompath_extra = (char*)hal_rompath();
+#ifdef ESP_PLATFORM
+        options.samplerate = 11025;
+#else
         options.samplerate = 44100;
+#endif
         options.gui_host = 1;
         bailing = 0;
         run_game(game_index);

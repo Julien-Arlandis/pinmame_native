@@ -65,13 +65,13 @@ static void uac_driver_cb(uint8_t addr, uint8_t iface_num,
         uac_host_stream_config_t stream_cfg = {};
         stream_cfg.channels      = 2;
         stream_cfg.bit_resolution = 16;
-        stream_cfg.sample_freq   = 22050;
+        stream_cfg.sample_freq   = 11025;
         stream_cfg.flags         = 0;
         rc = uac_host_device_start(g_uac_handle, &stream_cfg);
         if (rc != ESP_OK) { ESP_LOGE(TAG, "uac_host_device_start: %d", rc); return; }
         uac_host_device_set_mute(g_uac_handle, false);
         uac_host_device_set_volume(g_uac_handle, 80);
-        ESP_LOGE(TAG, "UAC: streaming 22050 Hz stereo 16-bit OK");
+        ESP_LOGE(TAG, "UAC: streaming 11025 Hz stereo 16-bit OK");
     }
 }
 
@@ -89,7 +89,7 @@ static void usb_host_task(void* arg) {
 
 // Tâche de lecture du buffer audio → écriture vers les écouteurs USB
 static void uac_audio_task(void* arg) {
-    static uint8_t buf[2940]; // 1 frame = 735 samples × 2 ch × 2 octets
+    static uint8_t buf[736]; // 1 frame = 184 samples × 2 ch × 2 octets à 11025Hz
     while (true) {
         size_t got = usb_audio_read(buf, sizeof(buf), 500);
         if (got > 0 && g_uac_handle) {
@@ -460,7 +460,7 @@ extern "C" void app_main(void) {
 
     ble_svc_gap_init();
     ble_svc_gatt_init();
-    ble_svc_gap_device_name_set("tilt_esp32");
+    ble_svc_gap_device_name_set("flip-g80-esp32");
 
     ble_gatts_count_cfg(gatt_svcs);
     ble_gatts_add_svcs(gatt_svcs);

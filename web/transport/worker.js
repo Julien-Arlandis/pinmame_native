@@ -2,7 +2,7 @@
 // Retourne un transport { send, onMessage, onAudio, onCapture, onScope, onDisconnect, disconnect, name }
 
 async function createWorkerTransport() {
-    const resp = await fetch('../flip-g80', { cache: 'no-store' });
+    const resp = await fetch('flip-g80', { cache: 'no-store' });
     const bytes = new Uint8Array(await resp.arrayBuffer());
 
     const markerBytes = new TextEncoder().encode('\n/* __WASM__\n');

@@ -42,7 +42,26 @@
 #include "../../ext/libsamplerate/samplerate.h"
 #include "../../ext/libsamplerate/samplerate.c"
 #include "../../ext/libsamplerate/src_linear.c" //!! not really needed, but linking error otherwise
+
+#ifdef ESP_PLATFORM
+// Sur Xtensa LX7 (ESP32-S3), lrint() peut retourner 0 pour de grandes valeurs
+// double (ex. lrint(369869.3) → 0), causant un IntegerDivideByZero dans
+// calc_output_single() via double_to_fp(). Bug confirmé en v3.108 : index_inc
+// et ratio sont valides juste avant le crash, seul lrint est en cause.
+// On remplace lrint par un arrondi cast-based fiable uniquement pour src_sinc_opt.c.
+static long int _esp32_lrint_safe(double x) {
+    return (x >= 0.0) ? (long int)(x + 0.5) : (long int)(x - 0.5);
+}
+#undef lrint
+#define lrint _esp32_lrint_safe
+#endif
+
 #include "../../ext/libsamplerate/src_sinc_opt.c"
+
+#ifdef ESP_PLATFORM
+#undef lrint
+#endif
+
 #include "../../ext/libsamplerate/src_zoh.c" //!! not really needed, but linking error otherwise
 
 /* Internal log */
@@ -240,6 +259,16 @@ static void mixer_channel_resample_set(struct mixer_channel_data * const channel
 	// fait planter le resampler (division par zéro). Repli en 1:1, pas de resample.
 	channel->from_frequency = (from_frequency > 0.0) ? from_frequency : to_frequency;
 	channel->to_frequency = to_frequency;
+
+#ifdef ESP_PLATFORM
+	// Sur ESP32-S3 (Xtensa LX7 sans SIMD), le filtre SINC_FASTEST coûte ~169 MACs
+	// par échantillon de sortie pour les canaux DAC à 192kHz (ratio 8.7×), ce qui
+	// fait chuter le FPS à ~4. Les DAC jouent des samples 8-bit ROM : la qualité SINC
+	// y est gaspillée. On bascule sur le resampler entier legacy (décalage+fraction)
+	// qui ne dépend pas de libsamplerate pour ces canaux haute fréquence.
+	if (channel->from_frequency > 100000.0)
+		channel->legacy_resample = 1;
+#endif
 
 	/* reset the filter state */
 	if (channel->is_reset_requested)
@@ -764,8 +793,18 @@ int mixer_sh_start()
 		// était désactivé dans sdkconfig.defaults, ce qui masquait un éventuel
 		// dépassement silencieux). Cf. stack agrandie + canary réactivé. SRC_SINC
 		// est donc restauré ici ; à revenir à SRC_LINEAR si le crash persiste.
+		//
+		// Sur ESP32-S3 : SINC_FASTEST coûte trop cher (FPS ~10 avec YM2151, ~4 avec DAC).
+		// On utilise SRC_LINEAR pour les canaux stream (YM2151 ~62kHz→22kHz).
+		// Les canaux DAC (>100kHz) court-circuitent libsamplerate via legacy_resample=1
+		// (cf. mixer_channel_resample_set), donc le type LINEAR ici ne les touche pas.
+#ifdef ESP_PLATFORM
+		channel->src_left  = src_new(SRC_LINEAR, 1, &error);
+		channel->src_right = src_new(SRC_LINEAR, 1, &error);
+#else
 		channel->src_left  = src_new((pmoptions.resampling_quality == 0) ? SRC_SINC_FASTEST : SRC_SINC_MEDIUM_QUALITY, 1, &error); //!! if changing quality, change src_sinc_opt again to include the other table (search for //!! there)
 		channel->src_right = src_new((pmoptions.resampling_quality == 0) ? SRC_SINC_FASTEST : SRC_SINC_MEDIUM_QUALITY, 1, &error);
+#endif
 
 		channel->lr_silent_value[0] = INT_MAX;
 		channel->lr_silent_value_f[0] = FLT_MAX;

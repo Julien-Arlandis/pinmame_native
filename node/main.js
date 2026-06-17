@@ -22,7 +22,9 @@ if (!process.env._TILT_RUNNING && !process.argv.includes('--ble-log')) {
     return;
 }
 
-const { createEmulator } = require('../web/tilt_web');
+const { createEmulator }            = require('flip-g80');
+const { createWsServerTransport }   = require('./transport/ws-server');
+const { createBlePeripheralTransport } = require('./transport/ble-peripheral');
 
 (async function main() {
     const fs     = require('node:fs');
@@ -32,8 +34,7 @@ const { createEmulator } = require('../web/tilt_web');
     const HELP = `
 PinMAME Node Runtime
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Usage: node node/tilt_node  [options]
-       node node/main.js   [options]
+Usage: node node/main.js  [options]
 
 ROM
   --rom=<name>           Nom de la ROM intégrée    (défaut: bonebstr)
@@ -143,75 +144,16 @@ Logs
     if (options.displaySerial) info(`  Display  : ${options.displaySerial}`);
     info(`  Verbosité: ${options.verbose ? 'activée' : 'désactivée  (--verbose pour les événements)'}`);
 
-    // ── BLE PERIPHERAL ────────────────────────────────────────────────────────
-    const BLE_SVC  = 'ab120001b5a3f393e0a9e50e24dcca9e';
-    const BLE_OUT  = 'ab120002b5a3f393e0a9e50e24dcca9e';
-    const BLE_IN   = 'ab120003b5a3f393e0a9e50e24dcca9e';
+    // ── TRANSPORTS ────────────────────────────────────────────────────────────
+    const wsTr  = createWsServerTransport(wsPort, info);
+    const bleTr = options.noBle ? null : createBlePeripheralTransport(info);
 
-    let bleNotify    = null;
-    let bleMtu       = 20;
-    let bleConnected = false;
-
-    function bleSend(line) {
-        if (!bleNotify) return;
-        const buf = Buffer.from(line + '\n');
-        for (let off = 0; off < buf.length; off += bleMtu - 1) {
-            const chunk  = buf.slice(off, off + bleMtu - 1);
-            const isLast = off + bleMtu - 1 >= buf.length;
-            const packet = Buffer.alloc(1 + chunk.length);
-            packet[0] = isLast ? 0x01 : 0x00;
-            chunk.copy(packet, 1);
-            bleNotify(packet);
-        }
+    function broadcast(line) {
+        wsTr.send(line);
+        bleTr?.send(line);
     }
 
-    if (!options.noBle) {
-        try {
-            const bleno = require('@abandonware/bleno');
-
-            const outChar = new bleno.Characteristic({
-                uuid: BLE_OUT,
-                properties: ['notify'],
-                onSubscribe(maxValueSize, cb) {
-                    bleMtu = maxValueSize; bleNotify = cb; bleConnected = true;
-                    info('  [BLE] client connecté');
-                    if (lastDisplayLine) bleSend(lastDisplayLine);
-                    if (lastLampLine)    bleSend(lastLampLine);
-                    if (lastStatusLine)  bleSend(lastStatusLine);
-                },
-                onUnsubscribe() { bleNotify = null; bleConnected = false; info('  [BLE] client déconnecté'); }
-            });
-
-            let bleInBuf = '';
-            const inChar = new bleno.Characteristic({
-                uuid: BLE_IN,
-                properties: ['write', 'writeWithoutResponse'],
-                onWriteRequest(data, offset, withoutResponse, cb) {
-                    const isLast = data[0] === 0x01;
-                    bleInBuf += data.slice(1).toString('utf8');
-                    if (isLast) {
-                        const line = bleInBuf.trim(); bleInBuf = '';
-                        if (line && !handleClientLine(line, bleSend)) emulator.handleLine(line);
-                    }
-                    cb(bleno.Characteristic.RESULT_SUCCESS);
-                }
-            });
-
-            const service = new bleno.PrimaryService({ uuid: BLE_SVC, characteristics: [outChar, inChar] });
-            bleno.on('stateChange', state => {
-                if (state === 'poweredOn') bleno.startAdvertising('tilt_node', [BLE_SVC]);
-                else bleno.stopAdvertising();
-            });
-            bleno.on('advertisingStart', err => {
-                if (!err) { bleno.setServices([service]); info('  BLE      : advertising tilt_node'); }
-            });
-        } catch {
-            info('⚠️  BLE indisponible — npm install @abandonware/bleno  (ou --no-ble)');
-        }
-    }
-
-    // ── EMULATEUR ────────────────────────────────────────────────────────────
-    const wsClients = new Set();
+    // ── EMULATEUR ─────────────────────────────────────────────────────────────
     let lastStatusLine  = null;
     let lastDisplayLine = null;
     let lastLampLine    = null;
@@ -228,8 +170,7 @@ Logs
                     if (str !== lastDisplayStr) { lastDisplayStr = str; displaySerial.write(`D:${str}\n`); }
                 }
                 log(line);
-                for (const ws of wsClients) if (ws.readyState === 1) ws.send(line);
-                if (bleConnected) bleSend(line);
+                broadcast(line);
             },
             sendAudio(left, right) {
                 if (audioSink) audioSink.write(floatTo16BitPCM(left, right));
@@ -275,9 +216,7 @@ Logs
             emulator = makeEmulator();
             const romArg = currentRomArgs.find(a => a.startsWith('--rom='));
             emulator.sendMessage('INIT_ENGINE', { customRomBytes: null, customRomName: romArg ? romArg.slice(6) : null });
-            const notif = '@status:state=loading';
-            for (const ws of wsClients) if (ws.readyState === 1) ws.send(notif);
-            if (bleConnected) bleSend(notif);
+            broadcast('@status:state=loading');
             return true;
         }
         if (line.startsWith('@rom:')) {
@@ -295,90 +234,28 @@ Logs
             lastStatusLine = lastDisplayLine = lastLampLine = null;
             emulator = makeEmulator();
             emulator.sendMessage('INIT_ENGINE', { customRomBytes: null, customRomName: name });
-            const notif = '@status:state=loading';
-            for (const ws of wsClients) if (ws.readyState === 1) ws.send(notif);
-            if (bleConnected) bleSend(notif);
+            broadcast('@status:state=loading');
             return true;
         }
         return false;
     }
 
-    // ── WEBSOCKET (built-in, zéro dépendance) ────────────────────────────────
-    {
-        const crypto = require('node:crypto');
-        const http   = require('node:http');
+    // ── CÂBLAGE WS ────────────────────────────────────────────────────────────
+    wsTr.onMessage((line, replyCb) => {
+        if (!handleClientLine(line, replyCb)) emulator.handleLine(line);
+    });
+    wsTr.listen();
 
-        class _WS {
-            constructor(socket) {
-                this.socket = socket; this.readyState = 1;
-                this._ev = {}; this._buf = Buffer.alloc(0);
-                socket.on('data',  d => this._onData(d));
-                socket.on('close', () => { this.readyState = 3; this._emit('close'); });
-                socket.on('error', e => this._emit('error', e));
-            }
-            on(e, cb) { (this._ev[e] = this._ev[e] || []).push(cb); return this; }
-            _emit(e, ...a) { (this._ev[e] || []).forEach(cb => cb(...a)); }
-            send(msg) {
-                if (this.readyState !== 1) return;
-                const d = Buffer.from(msg); const n = d.length;
-                let h;
-                if (n < 126)      { h = Buffer.alloc(2);  h[0]=0x81; h[1]=n; }
-                else if (n<65536) { h = Buffer.alloc(4);  h[0]=0x81; h[1]=126; h.writeUInt16BE(n,2); }
-                else              { h = Buffer.alloc(10); h[0]=0x81; h[1]=127; h.writeBigUInt64BE(BigInt(n),2); }
-                try { this.socket.write(Buffer.concat([h, d])); } catch {}
-            }
-            _onData(chunk) {
-                this._buf = Buffer.concat([this._buf, chunk]);
-                while (this._buf.length >= 2) {
-                    const b0=this._buf[0], b1=this._buf[1];
-                    const masked=!!(b1&0x80); let len=b1&0x7f, off=2;
-                    if (len===126){ if(this._buf.length<4)return; len=this._buf.readUInt16BE(2); off=4; }
-                    else if(len===127){ if(this._buf.length<10)return; len=Number(this._buf.readBigUInt64BE(2)); off=10; }
-                    const need=off+(masked?4:0)+len;
-                    if(this._buf.length<need)return;
-                    let payload;
-                    if (masked) {
-                        const mask=this._buf.slice(off,off+4); off+=4;
-                        payload=Buffer.alloc(len);
-                        for(let i=0;i<len;i++) payload[i]=this._buf[off+i]^mask[i%4];
-                    } else { payload=this._buf.slice(off,off+len); }
-                    this._buf=this._buf.slice(off+len);
-                    const op=b0&0x0f;
-                    if(op===1||op===2) this._emit('message', payload);
-                    else if(op===8){ this.readyState=3; this.socket.end(); this._emit('close'); }
-                }
-            }
-        }
-
-        const server = http.createServer();
-        server.on('error', e => console.error(`⚠️  WebSocket: ${e.message}`));
-        server.on('upgrade', (req, socket) => {
-            const key = req.headers['sec-websocket-key'];
-            if (!key) { socket.end(); return; }
-            const accept = crypto.createHash('sha1')
-                .update(key + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
-            socket.write(
-                'HTTP/1.1 101 Switching Protocols\r\n' +
-                'Upgrade: websocket\r\nConnection: Upgrade\r\n' +
-                `Sec-WebSocket-Accept: ${accept}\r\n\r\n`
-            );
-            const ws = new _WS(socket);
-            wsClients.add(ws);
-            ws.send(`@master:name=runtime-node&version=1`);
-            ws.on('message', data => {
-                const line = data.toString().trim();
-                if (!handleClientLine(line, l => ws.send(l))) emulator.handleLine(line);
-            });
-            const disconnect = () => {
-                if (!wsClients.has(ws)) return;
-                wsClients.delete(ws);
-                info('  [WS]      déconnecté');
-            };
-            ws.on('close', disconnect);
-            ws.on('error', disconnect);
+    // ── CÂBLAGE BLE ───────────────────────────────────────────────────────────
+    if (bleTr) {
+        bleTr.onConnect(() => {
+            if (lastDisplayLine) bleTr.send(lastDisplayLine);
+            if (lastLampLine)    bleTr.send(lastLampLine);
+            if (lastStatusLine)  bleTr.send(lastStatusLine);
         });
-        server.listen(wsPort);
-        info(`  WebSocket: ws://localhost:${wsPort}`);
+        bleTr.onMessage(line => {
+            if (!handleClientLine(line, l => bleTr.send(l))) emulator.handleLine(line);
+        });
     }
 
     emulator.sendMessage('INIT_ENGINE', { customRomBytes, customRomName });

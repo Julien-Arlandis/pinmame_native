@@ -1,26 +1,7 @@
 // interface.js
-// Browser UI — découverte de maîtres (WebSerial ou Worker local), sélection, connexion
+// Browser UI — transport agnostique (implémentations dans web/transport/)
 
 function feedAudioRingBuffer() {}
-
-// ─── Prototype : audio reçu via BLE (mono 8-bit, 11025Hz, tag 0x02) ──────────
-// Indépendant du pipeline WASM local (unlockAudio/feedAudioRingBuffer ci-dessus).
-// Le AudioContext doit être créé/résumé dans le même geste utilisateur que
-// unlockAudio() ci-dessous, sinon les navigateurs (Chrome Android) bloquent
-// silencieusement resume() appelé depuis un callback BLE (pas un geste utilisateur).
-let bleAudioCtx = null, bleAudioT = 0;
-function playBleAudioChunk(bytes) {
-    if (!bleAudioCtx) return;
-    const buf = bleAudioCtx.createBuffer(1, bytes.length, 11025);
-    const data = buf.getChannelData(0);
-    for (let i = 0; i < bytes.length; i++) data[i] = (bytes[i] - 128) / 128;
-    const s = bleAudioCtx.createBufferSource();
-    s.buffer = buf;
-    s.connect(bleAudioCtx.destination);
-    const start = Math.max(bleAudioT, bleAudioCtx.currentTime);
-    s.start(start);
-    bleAudioT = start + bytes.length / 11025;
-}
 
 function unlockAudio() {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -35,11 +16,7 @@ function unlockAudio() {
         s.start(t = Math.max(t, ctx.currentTime + left.length / 44100));
         t += left.length / 44100;
     };
-
-    if (!bleAudioCtx) bleAudioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 11025 });
-    bleAudioCtx.resume();
-
-    unlockAudio = () => { ctx.resume(); bleAudioCtx.resume(); };
+    unlockAudio = () => ctx.resume();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -49,283 +26,44 @@ function unlockAudio() {
 //   Émet   (maître → browser) : !set:  !lamp:  !display:  @status:
 // ═══════════════════════════════════════════════════════════════════════════════
 
-// ─── PORTS ───────────────────────────────────────────────────────────────────
-// Un port expose : { readable: ReadableStream<string>, writable: WritableStream<string>, name, isLocal? }
-// Le port Worker ajoute : onAudio(cb) — cb(left, right) — canal audio séparé du texte
-
-async function createWorkerPort() {
-    const resp = await fetch('tilt_web', { cache: 'no-store' });
-    const arrayBuffer = await resp.arrayBuffer();
-    const bytes = new Uint8Array(arrayBuffer);
-
-    // Split JS text from binary WASM embedded after the /* __WASM__ marker
-    const markerBytes = new TextEncoder().encode('\n/* __WASM__\n');
-    let markerPos = -1;
-    outer: for (let i = bytes.length - markerBytes.length; i >= 0; i--) {
-        for (let j = 0; j < markerBytes.length; j++) {
-            if (bytes[i + j] !== markerBytes[j]) continue outer;
-        }
-        markerPos = i; break;
-    }
-
-    let wasmBytes = null;
-    const jsBytes = markerPos !== -1 ? bytes.subarray(0, markerPos) : bytes;
-
-    if (markerPos !== -1) {
-        const endMarker = new TextEncoder().encode('\n*/');
-        let endPos = -1;
-        outer2: for (let i = bytes.length - endMarker.length; i > markerPos; i--) {
-            for (let j = 0; j < endMarker.length; j++) {
-                if (bytes[i + j] !== endMarker[j]) continue outer2;
-            }
-            endPos = i; break;
-        }
-        if (endPos !== -1) {
-            const raw = bytes.subarray(markerPos + markerBytes.length, endPos);
-            // Unescape: *\/ (0x2A 0x5C 0x2F) → */ (0x2A 0x2F)
-            const out = new Uint8Array(raw.length);
-            let oi = 0;
-            for (let i = 0; i < raw.length; i++) {
-                if (raw[i] === 0x2A && raw[i+1] === 0x5C && raw[i+2] === 0x2F) {
-                    out[oi++] = 0x2A; out[oi++] = 0x2F; i += 2;
-                } else { out[oi++] = raw[i]; }
-            }
-            wasmBytes = out.subarray(0, oi);
-        }
-    }
-
-    const jsText = new TextDecoder().decode(jsBytes);
-    const blob = new Blob([jsText], { type: 'application/javascript' });
-    const worker = new Worker(URL.createObjectURL(blob));
-    let audioCallback   = null;
-    let captureCallback = null;
-    let scopeCallback   = null;
-
-    if (wasmBytes) {
-        const buf = wasmBytes.buffer.slice(wasmBytes.byteOffset, wasmBytes.byteOffset + wasmBytes.byteLength);
-        worker.postMessage({ type: 'WASM_BINARY', data: buf }, [buf]);
-    }
-
-    const { readable, writable: innerWritable } = new TransformStream();
-    const lineWriter = innerWritable.getWriter();
-
-    worker.onmessage = ({ data: msg }) => {
-        if (msg.channel === 'audio') {
-            audioCallback?.(msg.left, msg.right);
-        } else if (msg.channel === 'capture') {
-            captureCallback?.(msg);
-        } else if (msg.channel === 'scope') {
-            scopeCallback?.(msg);
-        } else if (msg.line) {
-            lineWriter.write(msg.line).catch(() => {});
-        }
-    };
-
-    const writable = new WritableStream({
-        write(line) { worker.postMessage({ channel: 'input', line }); }
-    });
-
-    // sessionStorage n'est pas accessible depuis un Worker — on lit ici et on envoie
-    const customRomBytes = sessionStorage.getItem('custom_rom_bytes') || null;
-    const customRomName  = sessionStorage.getItem('custom_rom_filename')
-        || new URLSearchParams(location.search).get('rom')
-        || null;
-    worker.postMessage({ type: 'INIT_ENGINE', payload: { customRomBytes, customRomName, baseUrl: location.href } });
-
-    return {
-        readable, writable,
-        name: 'Exécution locale (navigateur)', isLocal: true,
-        terminate()   { worker.terminate(); },
-        disconnect()  { worker.terminate(); },
-        onAudio(cb)    { audioCallback   = cb; },
-        onCapture(cb)  { captureCallback = cb; },
-        onScope(cb)    { scopeCallback   = cb; }
-    };
-}
-
-function createWebSocketPort(ws, name) {
-    const { readable, writable: innerWritable } = new TransformStream();
-    const lineWriter = innerWritable.getWriter();
-
-    ws.onmessage = ({ data }) => lineWriter.write(data.trim()).catch(() => {});
-    ws.onclose   = ()        => lineWriter.close().catch(() => {});
-
-    const writable = new WritableStream({
-        write(line) { if (ws.readyState === WebSocket.OPEN) ws.send(line); }
-    });
-
-    return {
-        readable, writable, name,
-        disconnect() { try { ws.close(); } catch {} }
-    };
-}
-
-// UUIDs doivent correspondre à ceux de runtime.js (bleno)
-const BLE_SVC_UUID = 'ab120001-b5a3-f393-e0a9-e50e24dcca9e';
-const BLE_OUT_UUID = 'ab120002-b5a3-f393-e0a9-e50e24dcca9e'; // notify → browser
-const BLE_IN_UUID  = 'ab120003-b5a3-f393-e0a9-e50e24dcca9e'; // write  ← browser
-
-async function createBluetoothPort() {
-    const device = await navigator.bluetooth.requestDevice({
-        // Deux filtres en OR : par nom (ESP32/NimBLE l'annonce correctement) et
-        // par UUID de service (filet de sécurité pour bleno/CoreBluetooth sur
-        // macOS, qui omet souvent le nom local du paquet d'annonce BLE quand
-        // un UUID de service 128 bits occupe déjà presque tout le paquet).
-        filters: [{ namePrefix: 'tilt' }, { services: [BLE_SVC_UUID] }],
-        optionalServices: [BLE_SVC_UUID]
-    });
-
-    const { readable, writable: innerWritable } = new TransformStream();
-    const lineWriter = innerWritable.getWriter();
-    const decoder = new TextDecoder();
-    let fragBuf = '';
-    let inChar  = null;
-
-    let bleAudioDbgCount = 0, bleAudioDbgBytes = 0;
-    function onNotification(e) {
-        const data = new Uint8Array(e.target.value.buffer);
-        if (data[0] === 0x02) {
-            bleAudioDbgCount++; bleAudioDbgBytes += data.length - 1;
-            if (bleAudioDbgCount % 50 === 1) {
-                const payload = data.subarray(1);
-                let min = 255, max = 0;
-                for (let i = 0; i < payload.length; i++) { if (payload[i] < min) min = payload[i]; if (payload[i] > max) max = payload[i]; }
-                console.log('[BLEAUDIO]', bleAudioDbgCount, 'chunks,', bleAudioDbgBytes, 'bytes, ctxState=', bleAudioCtx && bleAudioCtx.state, 'min=', min, 'max=', max);
-            }
-            playBleAudioChunk(data.subarray(1));
-            return;
-        }
-        const isLast = data[0] === 0x01;
-        fragBuf += decoder.decode(data.slice(1));
-        if (isLast) {
-            for (const line of fragBuf.split('\n')) {
-                const l = line.trim();
-                if (l) lineWriter.write(l).catch(() => {});
-            }
-            fragBuf = '';
-        }
-    }
-
-    async function gattConnect() {
-        fragBuf       = '';
-        const server  = await device.gatt.connect();
-        const service = await server.getPrimaryService(BLE_SVC_UUID);
-        const out     = await service.getCharacteristic(BLE_OUT_UUID);
-        inChar        = await service.getCharacteristic(BLE_IN_UUID);
-        out.addEventListener('characteristicvaluechanged', onNotification);
-        await out.startNotifications();
-    }
-
-    device.addEventListener('gattserverdisconnected', async () => {
-        for (let i = 0; i < 20; i++) {
-            statusEl.textContent = `🔄 BLE reconnexion… (${i + 1}/20)`;
-            statusEl.style.color = '#ffaa00';
-            await new Promise(r => setTimeout(r, 1500));
-            try {
-                await gattConnect();
-                await bleWrite('@connect:input=1&display=1&driver=1');
-                return;
-            } catch {}
-        }
-        lineWriter.close().catch(() => {});
-    });
-
-    // Fragmentation browser → serveur : même protocole que serveur → browser
-    // Premier octet : 0x00=suite, 0x01=dernier fragment
-    const BLE_SEND_CHUNK = 511; // 512 bytes max - 1 octet flag
-    async function bleWrite(line) {
-        const encoded = new TextEncoder().encode(line);
-        for (let off = 0; off < encoded.length; off += BLE_SEND_CHUNK) {
-            const chunk  = encoded.subarray(off, off + BLE_SEND_CHUNK);
-            const isLast = off + BLE_SEND_CHUNK >= encoded.length;
-            const packet = new Uint8Array(1 + chunk.length);
-            packet[0]    = isLast ? 0x01 : 0x00;
-            packet.set(chunk, 1);
-            await inChar.writeValueWithoutResponse(packet);
-        }
-    }
-
-    await gattConnect();
-
-    const writable = new WritableStream({
-        // Si l'écriture échoue (ex: déconnexion BLE en cours), on avale l'erreur
-        // ici plutôt que de la laisser remonter : sinon le WritableStream passe
-        // en état "erroné" définitivement et plus AUCUN envoi ultérieur ne
-        // fonctionne (même après reconnexion), sans erreur visible côté UI.
-        write(line) { return bleWrite(line).catch(() => {}); }
-    });
-
-    return {
-        readable, writable, name: device.name || 'PinMAME BLE',
-        disconnect() { try { device.gatt.disconnect(); } catch {} }
-    };
-}
-
-// ─── MAÎTRE ──────────────────────────────────────────────────────────────────
-// Transport agnostique — même classe pour Worker, WebSocket, ou futur WebSerial
+// ─── SerialMaster ─────────────────────────────────────────────────────────────
+// Adapte un transport { send, onMessage, onAudio?, onCapture?, onScope?,
+//                       onDisconnect?, disconnect? } en objet unifié pour l'UI.
 
 class SerialMaster {
-    constructor(port) {
-        this._port   = port;
-        this._writer = port.writable.getWriter();
+    constructor(transport) {
+        this._transport = transport;
+        this.isLocal    = transport.isLocal || false;
         this._callbacks = [];
-        this.isLocal = port.isLocal || false;
 
-        if (port.onAudio)   port.onAudio((l, r) => this._audioCallback?.(l, r));
-        if (port.onCapture) port.onCapture((d)    => this._captureCallback?.(d));
-        if (port.onScope)   port.onScope((d)      => this._scopeCallback?.(d));
-        this._pump(port.readable);
+        transport.onMessage(line => { for (const cb of this._callbacks) cb(line); });
+        transport.onAudio?.((l, r) => this._audioCallback?.(l, r));
+        transport.onCapture?.(d    => this._captureCallback?.(d));
+        transport.onScope?.(d      => this._scopeCallback?.(d));
+        transport.onDisconnect?.(() => this._disconnectCallback?.());
     }
 
-    async _pump(readable) {
-        const reader = readable.getReader();
-        try {
-            for (;;) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                for (const cb of this._callbacks) cb(value);
-            }
-        } catch (e) { console.warn('[SerialMaster]', e); }
-        finally { reader.releaseLock(); this._disconnectCallback?.(); }
-    }
-
-    send(line)         { this._writer.write(line).catch(() => {}); }
+    send(line)         { this._transport.send(line); }
     onMessage(cb)      { this._callbacks.push(cb); }
     onAudio(cb)        { this._audioCallback   = cb; }
     onCapture(cb)      { this._captureCallback = cb; }
     onScope(cb)        { this._scopeCallback   = cb; }
     onDisconnect(cb)   { this._disconnectCallback = cb; }
-    get name()         { return this._port.name; }
+    disconnect()       { this._transport.disconnect?.(); }
+    get name()         { return this._transport.name; }
 }
 
 // Tente une connexion WebSocket, attend le handshake @master:name=...
 // Retourne un SerialMaster ou null au bout de 1,5 s
 async function trySerialMaster(url) {
-    return new Promise((resolve) => {
-        let ws, timer;
-        const done = (result) => { clearTimeout(timer); resolve(result); };
-        timer = setTimeout(() => { try { ws?.close(); } catch (_) {} done(null); }, 1500);
-        try { ws = new WebSocket(url); } catch { done(null); return; }
-        ws.onmessage = (e) => {
-            const line = e.data.trim();
-            if (line.startsWith('@master:')) {
-                const name = new URLSearchParams(line.slice(8)).get('name') || url;
-                const m = new SerialMaster(createWebSocketPort(ws, name));
-                m._reconnectUrl = url;
-                done(m);
-            }
-        };
-        ws.onerror = () => done(null);
-    });
+    const transport = await tryWsTransport(url); // défini dans transport/ws-client.js
+    if (!transport) return null;
+    const m = new SerialMaster(transport);
+    m._reconnectUrl = url;
+    return m;
 }
 
-// URLs candidates : localhost (ADB reverse / même machine) + Pi Zero gadget ethernet
-const WS_CANDIDATES = [
-    'ws://localhost:8765',
-    'ws://192.168.7.2:8765',
-];
-
-const BLE_STUB   = { _ble: true,   name: 'Bluetooth — PinMAME' };
+const BLE_STUB   = { _ble: true,   name: 'Bluetooth — flip-g80' };
 const LOCAL_STUB = { _local: true, name: 'Exécution locale (navigateur)', isLocal: true };
 
 async function discoverMasters() {
@@ -334,8 +72,8 @@ async function discoverMasters() {
 
 // Crée le master effectif à partir d'un stub ou retourne le master déjà résolu
 async function resolveMaster(m) {
-    if (m._local) return new SerialMaster(await createWorkerPort());
-    if (m._ble)   return new SerialMaster(await createBluetoothPort());
+    if (m._local) return new SerialMaster(await createWorkerTransport());    // transport/worker.js
+    if (m._ble)   return new SerialMaster(await createBleCentralTransport()); // transport/ble-central.js
     return m;
 }
 
@@ -345,12 +83,6 @@ async function resolveMaster(m) {
 async function selectMaster(masters) {
     const hasExternal = masters.some(m => !m.isLocal);
     if (!hasExternal) return resolveMaster(masters[0]);
-    // Auto-reconnexion après reboot/ROM change : pas de menu
-    if (sessionStorage.getItem('autoReconnect') === '1') {
-        sessionStorage.removeItem('autoReconnect');
-        const ws = masters.find(m => !m.isLocal && !m._ble && !m._local);
-        if (ws) return ws;
-    }
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:9999;';
@@ -381,210 +113,10 @@ async function selectMaster(masters) {
     });
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// AFFICHEUR GOTTLIEB 14 SEGMENTS
-// ═══════════════════════════════════════════════════════════════════════════════
-
-class GottliebDisplayEmulator {
-    constructor(canvasId) {
-        this.canvas = document.getElementById(canvasId);
-        if (!this.canvas) throw new Error(`Canvas '${canvasId}' introuvable`);
-        this.ctx = this.canvas.getContext('2d');
-        this.CHAR_WIDTH = 40; this.CHAR_HEIGHT = 70; this.SPACING = 15;
-        this.vfdCells = new Uint16Array(40);
-        this.cursorPosition = 0;
-        this._dirty = false;
-        this._overrideActive = false;
-        this._overrideL1 = '';
-        this._overrideL2 = '';
-        this._overrideDirL1 = 'none';
-        this._overrideDirL2 = 'none';
-        this._overrideOffsetL1 = 0;
-        this._overrideOffsetL2 = 0;
-        this._overrideTimerL1 = null;
-        this._overrideTimerL2 = null;
-        // Source de vérité unique — ASCII → segments PinMAME
-        // Bits : a=0x0001 b=0x0002 c=0x0004 d=0x0008 e=0x0010 f=0x0020
-        //        g1=0x0040 g2=0x0800 i=0x0100 j=0x0200 k=0x0400
-        //        l=0x1000 m=0x2000 n=0x4000 dp=0x0080
-        const _a2s = {
-            // Espace et ponctuation
-            ' ':0x0000,'!':0x0006,'"':0x0202,'#':0x0A8D,'$':0x086D,
-            '%':0x1CE8,'&':0x2AF5,'\'':0x0200,'(':0x0039,')':0x000F,
-            '*':0x7F40,'+':0x2A40,',':0x4000,'-':0x0840,'.':0x0080,
-            '/':0x4400,':':0x2200,';':0x4200,'<':0x1400,'=':0x0849,
-            '>':0x0500,'?':0x2203,'@':0x2A3F,'[':0x0039,'\\':0x1100,
-            ']':0x000F,'^':0x0500,'_':0x0008,'`':0x0100,'{':0x2240,
-            '|':0x2200,'}':0x0A09,'~':0x0840,
-            // Chiffres
-            '0':0x003F,'1':0x0006,'2':0x085B,'3':0x084F,'4':0x0866,
-            '5':0x086D,'6':0x087D,'7':0x0007,'8':0x087F,'9':0x086F,
-            // Lettres majuscules
-            'A':0x0877,'B':0x2A2F,'C':0x0039,'D':0x220F,'E':0x0079,
-            'F':0x0071,'G':0x083D,'H':0x0876,'I':0x2209,'J':0x001E,
-            'K':0x1470,'L':0x0038,'M':0x0536,'N':0x1136,'O':0x003F,
-            'P':0x0873,'Q':0x103F,'R':0x1873,'S':0x086D,'T':0x2201,
-            'U':0x003E,'V':0x4430,'W':0x5036,'X':0x5500,'Y':0x2500,
-            'Z':0x4409,
-        };
-        this.ascii2gottlieb = new Uint16Array(128);
-        this.gottlieb2ascii = new Map();
-        for (const [ch, mask] of Object.entries(_a2s)) {
-            const c = ch.charCodeAt(0);
-            this.ascii2gottlieb[c] = mask;
-            if (c >= 0x41 && c <= 0x5A) this.ascii2gottlieb[c + 32] = mask;
-            if (!this.gottlieb2ascii.has(mask)) this.gottlieb2ascii.set(mask, ch);
-        }
-        this._startRenderLoop();
-    }
-
-    decodeRaw(hex) {
-        let s = '';
-        for (let i = 0; i < 40; i++) {
-            const mask = parseInt(hex.slice(i * 4, i * 4 + 4), 16) || 0;
-            if (mask === 0) { s += ' '; continue; }
-            const ch = this.gottlieb2ascii.get(mask);
-            s += ch !== undefined ? ch : `[${mask.toString(16)}]`;
-        }
-        return s;
-    }
-
-    _enableOverrideLine(n, text, dir, speedMs, resetOffset = true) {
-        const tKey = `_overrideTimerL${n}`, oKey = `_overrideOffsetL${n}`, dKey = `_overrideDirL${n}`, lKey = `_overrideL${n}`;
-        this[lKey] = (text || '').toUpperCase();
-        this[dKey] = dir || 'none';
-        if (resetOffset) {
-            if ((dir || 'none') === 'none') {
-                const len = Math.min((text || '').length, 20);
-                this[oKey] = 20 - Math.floor((20 - len) / 2);
-            } else {
-                this[oKey] = 0;
-            }
-        }
-        if (this[tKey]) { clearInterval(this[tKey]); this[tKey] = null; }
-        this._applyOverride();
-        if (this[dKey] !== 'none') {
-            this[tKey] = setInterval(() => {
-                if (this[dKey] === 'left') this[oKey]++;
-                else this[oKey]--;
-                this._applyOverride();
-            }, speedMs || 100);
-        }
-    }
-
-    enableOverride(l1, l2, dirL1, dirL2, speedMs) {
-        this._overrideActive = true;
-        this._enableOverrideLine(1, l1, dirL1, speedMs);
-        this._enableOverrideLine(2, l2, dirL2, speedMs);
-    }
-
-    disableOverride() {
-        this._overrideActive = false;
-        if (this._overrideTimerL1) { clearInterval(this._overrideTimerL1); this._overrideTimerL1 = null; }
-        if (this._overrideTimerL2) { clearInterval(this._overrideTimerL2); this._overrideTimerL2 = null; }
-        this._dirty = true;
-    }
-
-    _getScrollWindow(text, offset) {
-        if (!text) return '                    ';
-        const total = text.length + 20;
-        const o = ((offset % total) + total) % total;
-        const padded = ' '.repeat(20) + text + ' '.repeat(20);
-        const doubled = padded + padded;
-        return doubled.slice(o, o + 20).padEnd(20, ' ');
-    }
-
-    _centerText(text) {
-        const t = (text || '').slice(0, 20);
-        const left = Math.floor((20 - t.length) / 2);
-        return t.padStart(left + t.length, ' ').padEnd(20, ' ');
-    }
-
-    _applyOverride() {
-        const w1 = this._getScrollWindow(this._overrideL1, this._overrideOffsetL1);
-        const w2 = this._getScrollWindow(this._overrideL2, this._overrideOffsetL2);
-        for (let i = 0; i < 20; i++) {
-            this.vfdCells[i]      = this.ascii2gottlieb[w1.charCodeAt(i) & 0x7F] || 0;
-            this.vfdCells[20 + i] = this.ascii2gottlieb[w2.charCodeAt(i) & 0x7F] || 0;
-        }
-        this._dirty = true;
-    }
-
-    parseCommand(cmd) {
-        if (!cmd || !cmd.startsWith('!display:')) return;
-        if (this._overrideActive) return;
-        const params = new URLSearchParams(cmd.slice(9));
-        switch (params.get('action')) {
-            case 'raw': {
-                const data = params.get('data') || '';
-                for (let i = 0; i < 40; i++)
-                    this.vfdCells[i] = parseInt(data.slice(i * 4, i * 4 + 4), 16) || 0;
-                break;
-            }
-            case 'clear': this.vfdCells.fill(0); this.cursorPosition = 0; break;
-            case 'move': {
-                const p = parseInt(params.get('pos'), 10);
-                if (p >= 0 && p < 40) this.cursorPosition = p;
-                break;
-            }
-            case 'write': {
-                const posParam = params.get('pos');
-                if (posParam !== null) this.cursorPosition = parseInt(posParam, 10);
-                const text = params.get('text') || '';
-                for (let i = 0; i < text.length && this.cursorPosition < 40; i++) {
-                    const code = text.charCodeAt(i);
-                    let mask = this.ascii2gottlieb[code & 0x7F];
-                    if (code & 0x80) mask |= 0x8000;
-                    this.vfdCells[this.cursorPosition++] = mask;
-                }
-                break;
-            }
-        }
-        this._dirty = true;
-    }
-
-    _drawSegment(x, y, mask) {
-        const ctx = this.ctx, w = this.CHAR_WIDTH, h = this.CHAR_HEIGHT, m = h / 2, hw = w / 2;
-        ctx.save(); ctx.translate(x, y); ctx.transform(1, 0, -0.15, 1, 0, 0);
-        ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
-        const seg = (bit, fn) => {
-            ctx.strokeStyle = (mask & bit) ? '#00ffff' : '#101a1a';
-            ctx.shadowBlur  = (mask & bit) ? 10 : 0;
-            ctx.shadowColor = '#00ffff';
-            ctx.beginPath(); fn(); ctx.stroke();
-        };
-        seg(0x0001,()=>{ctx.moveTo(2,0);ctx.lineTo(w-2,0)});
-        seg(0x0002,()=>{ctx.moveTo(w,2);ctx.lineTo(w,m-2)});
-        seg(0x0004,()=>{ctx.moveTo(w,m+2);ctx.lineTo(w,h-2)});
-        seg(0x0008,()=>{ctx.moveTo(2,h);ctx.lineTo(w-2,h)});
-        seg(0x0010,()=>{ctx.moveTo(0,m+2);ctx.lineTo(0,h-2)});
-        seg(0x0020,()=>{ctx.moveTo(0,2);ctx.lineTo(0,m-2)});
-        seg(0x0040,()=>{ctx.moveTo(2,m);ctx.lineTo(hw-2,m)});
-        seg(0x0800,()=>{ctx.moveTo(hw+2,m);ctx.lineTo(w-2,m)});
-        seg(0x0100,()=>{ctx.moveTo(2,2);ctx.lineTo(hw-2,m-2)});
-        seg(0x0200,()=>{ctx.moveTo(hw,2);ctx.lineTo(hw,m-3)});
-        seg(0x0400,()=>{ctx.moveTo(w-2,2);ctx.lineTo(hw+2,m-2)});
-        seg(0x4000,()=>{ctx.moveTo(2,h-2);ctx.lineTo(hw-2,m+2)});
-        seg(0x2000,()=>{ctx.moveTo(hw,h-4);ctx.lineTo(hw,m+3)});
-        seg(0x1000,()=>{ctx.moveTo(w-2,h-2);ctx.lineTo(hw+2,m+2)});
-        seg(0x0080,()=>{ctx.moveTo(w+2,h);ctx.lineTo(w+6,h+8)});
-        seg(0x8000,()=>{ctx.arc(w+4,h,2,0,Math.PI*2)});
-        ctx.restore();
-    }
-
-    _render() {
-        this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-        for (let i = 0; i < 20; i++) {
-            this._drawSegment(30 + i * (this.CHAR_WIDTH + this.SPACING), 40,  this.vfdCells[i]);
-            this._drawSegment(30 + i * (this.CHAR_WIDTH + this.SPACING), 140, this.vfdCells[20 + i]);
-        }
-    }
-
-    _startRenderLoop() {
-        const loop = () => { if (this._dirty) { this._dirty = false; this._render(); } requestAnimationFrame(loop); };
-        requestAnimationFrame(loop);
-    }
-}
+// Afficheurs chargés via <script> dans index.html :
+//   display/gottlieb-80.js   → GottliebDisplay80
+//   display/gottlieb-80a.js  → GottliebDisplay80A
+//   display/gottlieb-80b.js  → GottliebDisplay80B (actif, 14 segments alphanumériques)
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // UI NAVIGATEUR
@@ -751,7 +283,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.113';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.119';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();
@@ -764,10 +296,11 @@ function handleStatusLine(line) {
 
 // ── Connexion au maître ───────────────────────────────────────────────────────
 
-function connectMaster(master, display) {
+function connectMaster(master, displayRef) {
     master.onAudio((left, right) => feedAudioRingBuffer(left, right));
     master.onMessage((line) => {
         if (typeof line !== 'string') return;
+        const display = displayRef.current;
         if (line.startsWith('!display:')) {
             display.parseCommand(line);
             if (line.startsWith('!display:action=raw&data=')) {
@@ -783,12 +316,19 @@ function connectMaster(master, display) {
         } else if (line.startsWith('@machine:')) {
             const raw = line.slice(9);
             const p2  = new URLSearchParams(raw.replace(/\|/g, '&'));
+            // Sélection dynamique de l'afficheur selon la génération matérielle
+            const dsp = p2.get('dsp');
+            if (dsp === '80B' && !(displayRef.current instanceof GottliebDisplay80B))
+                displayRef.current = new GottliebDisplay80B('vfdCanvas');
+            else if (dsp === '80' && !(displayRef.current instanceof GottliebDisplay80))
+                displayRef.current = new GottliebDisplay80('vfdCanvas');
             const cpu    = (p2.get('cpu')    || '').replace(/\+/g, '  ');
             const snd    = (p2.get('snd')    || '').replace(/\+/g, ', ');
             const stereo = p2.get('stereo') === '1';
             const rate   = p2.get('rate') || '?';
             logToTerminal(`CPU : ${cpu}`);
             logToTerminal(`Son : ${snd} | ${stereo ? 'Stéréo' : 'Mono'} | ${rate} Hz`);
+            if (dsp) logToTerminal(`Afficheur : Gottlieb System ${dsp}`);
         } else if (line.startsWith('@sound:chips=')) {
             // conservé pour compatibilité Node.js
         } else if (line.startsWith('@roms:list=')) {
@@ -1024,7 +564,7 @@ async function bootstrap() {
         logToTerminal('⚡ Maître déconnecté');
     });
 
-    const display = new GottliebDisplayEmulator('vfdCanvas');
+    const _displayRef = { current: new GottliebDisplay80B('vfdCanvas') };
 
     // ── Override display panel ─────────────────────────────────────────────
     {
@@ -1040,6 +580,7 @@ async function bootstrap() {
         let ovrDirL1 = 'none', ovrDirL2 = 'none';
 
         const applyLineIfActive = (n) => {
+            const display = _displayRef.current;
             if (!display._overrideActive) return;
             const text  = n === 1 ? ovrL1.value : ovrL2.value;
             const dir   = n === 1 ? ovrDirL1 : ovrDirL2;
@@ -1089,6 +630,7 @@ async function bootstrap() {
         ovrL2.addEventListener('input', () => applyLineIfActive(2));
 
         overrideToggle.addEventListener('click', () => {
+            const display = _displayRef.current;
             if (display._overrideActive) {
                 display.disableOverride();
                 overrideToggle.textContent = '▶ Activer';
@@ -1106,7 +648,7 @@ async function bootstrap() {
     _masterRef.current = master;
     _masterRef.isLocal = master.isLocal;
     _audioMaster = master;
-    connectMaster(master, display);
+    connectMaster(master, _displayRef);
     window._masterRef = _masterRef;
 
     window.setAudioMix = (chip, dac) => _masterRef.current?.send(`@audio:chip=${chip}&dac=${dac}`);
@@ -1129,14 +671,13 @@ async function bootstrap() {
         window.dispatchEvent(new Event('captureComplete'));
     });
 
-    // Audio local uniquement si le maître tourne dans la page (Worker)
-    if (master.isLocal) {
-        const audioUnlock = () => unlockAudio(master);
-        // touchend + pointerdown + click pour couvrir iOS Safari, Android Chrome et desktop
-        document.addEventListener('touchend',    audioUnlock, { passive: true, once: false });
-        document.addEventListener('pointerdown', audioUnlock, { passive: true, once: false });
-        document.addEventListener('click',       audioUnlock, { passive: true, once: false });
-    }
+    // Déverrouillage AudioContext sur gesture — nécessaire pour le mode local.
+    // Le mode BLE a son propre AudioContext déjà déverrouillé dans createBleCentralTransport.
+    const audioUnlock = () => unlockAudio();
+    // touchend + pointerdown + click pour couvrir iOS Safari, Android Chrome et desktop
+    document.addEventListener('touchend',    audioUnlock, { passive: true, once: false });
+    document.addEventListener('pointerdown', audioUnlock, { passive: true, once: false });
+    document.addEventListener('click',       audioUnlock, { passive: true, once: false });
 
     buildSwitchGrid(master);
     buildSoundGrid(master);
@@ -1162,12 +703,12 @@ async function bootstrap() {
     async function switchToMaster(newMaster, type, rebuildUI = true) {
         const modeLabel = { local: '🖥 Local', node: '🌐 Node WS', ble: '🔵 BLE' };
         logToTerminal(`⚙️ Mode : ${modeLabel[type] || type}`);
-        master._port?.disconnect?.();
+        master.disconnect?.();
         master = newMaster;
         _masterRef.current = newMaster;
         _masterRef.isLocal = (type === 'local');
         _audioMaster = newMaster;
-        connectMaster(newMaster, display);
+        connectMaster(newMaster, _displayRef);
         if (!newMaster.isLocal) newMaster.send('@connect:input=1&display=1&driver=1');
         window._onScopeReady?.(newMaster);
         if (document.getElementById('scopeOverlay')?.style.display !== 'none') newMaster.send('@scope:on=1');
@@ -1192,7 +733,7 @@ async function bootstrap() {
     }
 
     async function goLocal() {
-        const newPort = await createWorkerPort();
+        const newPort = await createWorkerTransport();
         await switchToMaster(new SerialMaster(newPort), 'local');
         romSelector.style.display = 'none';
         romSelector.innerHTML = '';
@@ -1202,7 +743,7 @@ async function bootstrap() {
     restartLocalEmulator = async () => {
         if (_masterRef.current?._reconnectUrl) return;
         logToTerminal('🔄 Redémarrage émulateur local');
-        const newPort = await createWorkerPort();
+        const newPort = await createWorkerTransport();
         await switchToMaster(new SerialMaster(newPort), 'local', false);
         buildSwitchGrid(); buildSoundGrid(); buildDipSwitches();
     };
@@ -1273,7 +814,7 @@ async function bootstrap() {
             if (currentMode === 'ble') { await goLocal(); return; }
             btnBle.disabled = true;
             try {
-                const port = await createBluetoothPort();
+                const port = await createBleCentralTransport();
                 const bleM = new SerialMaster(port);
                 await switchToMaster(bleM, 'ble');
                 btnBle.disabled = false;

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.113</title>
+    <title>PinMAME Workbench v3.119</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -874,7 +874,13 @@
         <div id="scopeInfo" style="font-family:monospace; font-size:0.68rem; color:#444; margin-top:4px; text-align:right;"></div>
     </div>
 
-    <script src="interface.js?v=3.113"></script>
+    <script src="display/gottlieb-80.js"></script>
+    <script src="display/gottlieb-80a.js"></script>
+    <script src="display/gottlieb-80b.js"></script>
+    <script src="transport/worker.js"></script>
+    <script src="transport/ws-client.js"></script>
+    <script src="transport/ble-central.js"></script>
+    <script src="interface.js?v=3.118"></script>
     <script>
         (function() {
             const sCHIP = document.getElementById('sliderCHIP');
@@ -1101,7 +1107,7 @@
     </script>
 
     <footer style="text-align:center; padding:18px 0 10px; font-size:0.75rem; color:#444;">
-        <a href="doc_tilt_web.html" style="color:#555; text-decoration:none;">📖 Documentation API tilt_web</a>
+        <a href="doc_flip-g80.html" style="color:#555; text-decoration:none;">📖 Documentation API flip-g80</a>
     </footer>
 </body>
 </html>

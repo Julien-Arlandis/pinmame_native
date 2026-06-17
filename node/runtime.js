@@ -62,6 +62,17 @@ function createEmulator({ sendLine, sendAudio, sendCapture, sendScope, loadRom }
     let pinmameInstance = null;
     let vfdMemoryPointer = 0;
     let lastSolState = 0;
+    let lastDisplayRaw  = '';
+    let lastDisplayText = '';
+
+    // Listeners par événement
+    const _onSwitches    = [];   // cb(id, state) — tout switch
+    const _onSwitch      = {};   // id → [cb(state)]
+    const _onLamps       = [];   // cb(Uint8Array<12>)
+    const _onSolenoids   = [];   // cb(uint32)
+    const _onSolenoid    = {};   // id → [cb(state)]
+    const _onDisplay     = [];   // cb(rawHex: string)
+    const _onDisplayText = [];   // cb(text: string)
 
     const Module = {
         get wasmBinary() { return globalThis.__PINMAME_WASM_BINARY__; },
@@ -85,12 +96,16 @@ function createEmulator({ sendLine, sendAudio, sendCapture, sendScope, loadRom }
             const hi = pinmameInstance.HEAPU8[ptr + i * 2 + 1];
             data += (lo | (hi << 8)).toString(16).padStart(4, '0');
         }
+        lastDisplayRaw = data;
         sendLine('display', `!display:action=raw&data=${data}`);
+        for (const cb of _onDisplay) cb(data);
     };
 
     globalThis.pushWasmDisplayText = function(text, callerGen) {
         if (callerGen !== generation) return;
+        lastDisplayText = text;
         sendLine('display', `!display:action=text&data=${encodeURIComponent(text)}`);
+        for (const cb of _onDisplayText) cb(text);
     };
 
     globalThis.pushWasmLamps = function(ptr, callerGen) {
@@ -100,15 +115,23 @@ function createEmulator({ sendLine, sendAudio, sendCapture, sendScope, loadRom }
         for (let col = 0; col < 12; col++)
             lampHex += pinmameInstance.HEAPU8[ptr + col].toString(16).padStart(2, '0');
         sendLine('driver', `!lamp:${lampHex}`);
+        if (_onLamps.length) {
+            const lamps = pinmameInstance.HEAPU8.slice(ptr, ptr + 12);
+            for (const cb of _onLamps) cb(lamps);
+        }
     };
 
     globalThis.pushWasmSolens = function(solState, callerGen) {
         if (callerGen !== generation) return;
         for (let s = 0; s < 32; s++) {
-            if (((solState >> s) & 1) !== ((lastSolState >> s) & 1))
-                sendLine('driver', `!set:id=${s}&state=${(solState >> s) & 1}`);
+            if (((solState >> s) & 1) !== ((lastSolState >> s) & 1)) {
+                const state = (solState >> s) & 1;
+                sendLine('driver', `!set:id=${s}&state=${state}`);
+                if (_onSolenoid[s]) for (const cb of _onSolenoid[s]) cb(state);
+            }
         }
         lastSolState = solState;
+        for (const cb of _onSolenoids) cb(solState);
     };
 
     globalThis.postWasmLog = function(cmdId, callerGen) {
@@ -175,38 +198,134 @@ function createEmulator({ sendLine, sendAudio, sendCapture, sendScope, loadRom }
         setTimeout(() => { pinmameInstance._pinmame_web_boot(); }, 100);
     }
 
-    // Parse a text protocol line coming from the INPUT channel
+    // ── Méthodes directes (couche de base) ──────────────────────────────────────
+
+    // Abonnements aux événements
+
+    function onLamps(cb)       { _onLamps.push(cb); }
+    function onSolenoids(cb)   { _onSolenoids.push(cb); }
+    function onDisplay(cb)     { _onDisplay.push(cb); }
+    function onDisplayText(cb) { _onDisplayText.push(cb); }
+
+    function onSolenoid(id, cb) {
+        if (!_onSolenoid[id]) _onSolenoid[id] = [];
+        _onSolenoid[id].push(cb);
+    }
+
+    function onSwitches(cb)  { _onSwitches.push(cb); }
+
+    function onSwitch(id, cb) {
+        if (!_onSwitch[id]) _onSwitch[id] = [];
+        _onSwitch[id].push(cb);
+    }
+
+    // Getters — lecture synchrone de l'état courant
+
+    function getSwitch(id) {
+        if (!pinmameInstance || !vfdMemoryPointer) return 0;
+        return pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + id] ? 1 : 0;
+    }
+
+    function getDip(id) {
+        if (!pinmameInstance || !vfdMemoryPointer) return 0;
+        return pinmameInstance.HEAPU8[vfdMemoryPointer + 400 + id] ? 1 : 0;
+    }
+
+    function getLamps() {
+        if (!pinmameInstance || !vfdMemoryPointer) return new Uint8Array(12);
+        return pinmameInstance.HEAPU8.slice(vfdMemoryPointer + 300, vfdMemoryPointer + 312);
+    }
+
+    function getLamp(col, row) {
+        if (!pinmameInstance || !vfdMemoryPointer) return 0;
+        return (pinmameInstance.HEAPU8[vfdMemoryPointer + 300 + col] >> row) & 1;
+    }
+
+    function getSolenoids() { return lastSolState; }
+
+    function getSolenoid(id) { return (lastSolState >> id) & 1; }
+
+    function getDisplayRaw()  { return lastDisplayRaw; }
+
+    function getDisplayText() { return lastDisplayText; }
+
+    // Setters
+
+    function setSwitch(id, state) {
+        if (!pinmameInstance || !vfdMemoryPointer) return;
+        if (isNaN(id)) return;
+        const s = state ? 1 : 0;
+        pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + id] = s;
+        if (_onSwitch[id])  for (const cb of _onSwitch[id])  cb(s);
+        for (const cb of _onSwitches) cb(id, s);
+    }
+
+    function setDip(id, state) {
+        if (!pinmameInstance || !vfdMemoryPointer) return;
+        if (isNaN(id)) return;
+        pinmameInstance.HEAPU8[vfdMemoryPointer + 400 + id] = state ? 1 : 0;
+    }
+
+    function setSoundCmd(cmd) {
+        if (!pinmameInstance || !vfdMemoryPointer) return;
+        if (isNaN(cmd)) return;
+        pinmameInstance.HEAPU8[vfdMemoryPointer + 1060] = cmd;
+    }
+
+    function setAudioDistance(dist) {
+        if (!pinmameInstance || !vfdMemoryPointer) return;
+        if (isNaN(dist)) return;
+        writeU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1070, dist);
+    }
+
+    function setAudioMix(chip, dac) {
+        if (!isNaN(chip) && !isNaN(dac) && globalThis.setAudioMix) globalThis.setAudioMix(chip, dac);
+    }
+
+    function setAudioSep(on) {
+        if (globalThis.setAudioSep) globalThis.setAudioSep(!!on);
+    }
+
+    function setScopeActive(on) {
+        globalThis._scopeActive = !!on;
+    }
+
+    function startCapture() {
+        if (globalThis.startCapture) globalThis.startCapture();
+    }
+
+    function stopCapture() {
+        if (globalThis.stopCapture) globalThis.stopCapture();
+    }
+
+    // ── handleLine : désérialiseur texte → méthodes directes ────────────────────
+
     function handleLine(line) {
-        if (!line || !pinmameInstance || !vfdMemoryPointer) return;
+        if (!line) return;
         let p;
         if (line.startsWith('@set:')) {
             p = new URLSearchParams(line.slice(5));
-            const id = parseInt(p.get('id')), state = parseInt(p.get('state'));
-            if (!isNaN(id)) pinmameInstance.HEAPU8[vfdMemoryPointer + 100 + id] = state;
+            setSwitch(parseInt(p.get('id')), parseInt(p.get('state')));
         } else if (line.startsWith('@dip:')) {
             p = new URLSearchParams(line.slice(5));
-            const id = parseInt(p.get('id')), state = parseInt(p.get('state'));
-            if (!isNaN(id)) pinmameInstance.HEAPU8[vfdMemoryPointer + 400 + id] = state;
+            setDip(parseInt(p.get('id')), parseInt(p.get('state')));
         } else if (line.startsWith('@sound:')) {
             p = new URLSearchParams(line.slice(7));
-            const cmd = parseInt(p.get('cmd'));
-            if (!isNaN(cmd)) pinmameInstance.HEAPU8[vfdMemoryPointer + 1060] = cmd;
+            setSoundCmd(parseInt(p.get('cmd')));
         } else if (line.startsWith('@audio:')) {
             p = new URLSearchParams(line.slice(7));
-            const dist = parseInt(p.get('distance'));
-            if (!isNaN(dist)) writeU32(pinmameInstance.HEAPU8, vfdMemoryPointer + 1070, dist);
+            setAudioDistance(parseInt(p.get('distance')));
             const chip = parseFloat(p.get('chip')), dac = parseFloat(p.get('dac'));
-            if (!isNaN(chip) && !isNaN(dac) && globalThis.setAudioMix) globalThis.setAudioMix(chip, dac);
+            if (!isNaN(chip) && !isNaN(dac)) setAudioMix(chip, dac);
             const sep = p.get('sep');
-            if (sep !== null && globalThis.setAudioSep) globalThis.setAudioSep(sep === '1');
+            if (sep !== null) setAudioSep(sep === '1');
         } else if (line.startsWith('@scope:')) {
             p = new URLSearchParams(line.slice(7));
-            globalThis._scopeActive = p.get('on') === '1';
+            setScopeActive(p.get('on') === '1');
         } else if (line.startsWith('@capture:')) {
             p = new URLSearchParams(line.slice(9));
-            const action = p.get('action');
-            if (action === 'start' && globalThis.startCapture) globalThis.startCapture();
-            else if (action === 'stop' && globalThis.stopCapture) globalThis.stopCapture();
+            if (p.get('action') === 'start') startCapture();
+            else if (p.get('action') === 'stop') stopCapture();
         }
     }
 
@@ -214,7 +333,37 @@ function createEmulator({ sendLine, sendAudio, sendCapture, sendScope, loadRom }
         if (type === 'INIT_ENGINE') return initialiserMoteur(payload.customRomBytes, payload.customRomName, payload.baseUrl);
     }
 
-    return { sendMessage: handleMessage, handleLine };
+    return {
+        sendMessage: handleMessage,
+        handleLine,
+        // Abonnements
+        onSwitches,
+        onSwitch,
+        onLamps,
+        onSolenoids,
+        onSolenoid,
+        onDisplay,
+        onDisplayText,
+        // Getters
+        getSwitch,
+        getDip,
+        getLamps,
+        getLamp,
+        getSolenoids,
+        getSolenoid,
+        getDisplayRaw,
+        getDisplayText,
+        // Setters
+        setSwitch,
+        setDip,
+        setSoundCmd,
+        setAudioDistance,
+        setAudioMix,
+        setAudioSep,
+        setScopeActive,
+        startCapture,
+        stopCapture,
+    };
 }
 
 // ── Browser Worker ──────────────────────────────────────────────────────────

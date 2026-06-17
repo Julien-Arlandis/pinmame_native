@@ -466,7 +466,14 @@ extern "C" {
             }
         }
 #endif
+#ifndef ESP_PLATFORM
+        // Flush l'audio avant chaque write pour la précision de timing intratrame.
+        // Sur ESP32 : désactivé — stream_update() sur chaque write déclenchait la
+        // synthèse YM2151 3-4× trop souvent (155 writes/3s × 4 streams = 620 appels
+        // vs 19 fps × 4 = 76 appels/3s), ce qui causait une chute de FPS de 24→19.
+        // La synthèse se fait une fois par frame via le mixer, ce qui est suffisant.
         for (int i = 0; i < 4; i++) stream_update(i, 0);
+#endif
         YM2151WriteReg(0, g_reg, d);
     }
     EMSCRIPTEN_KEEPALIVE int  api_get_dac_count(int c)   { return (unsigned)c < 2 ? g_dn[c] : 0; }
@@ -568,6 +575,12 @@ extern "C" {
 
             // Stereo + rate
             len += snprintf(info + len, sizeof(info) - len, "|stereo=%d|rate=%d", g_stereo, options.samplerate);
+
+            // Type d'afficheur Gottlieb
+            if (core_gameData) {
+                const char* dsp = (core_gameData->gen & GEN_GTS80B) ? "80B" : "80";
+                len += snprintf(info + len, sizeof(info) - len, "|dsp=%s", dsp);
+            }
 
             hal_post_machine_info(info);
         }

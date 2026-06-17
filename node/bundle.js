@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// bundle.js — assemble engine/ → engine/web/tilt_web + engine/node/tilt_node
+// bundle.js — assemble engine/ → web/flip-g80 (la librairie)
 'use strict';
 
 const fs   = require('node:fs');
@@ -10,8 +10,7 @@ const OUT_DIR    = path.join(ENGINE_DIR, 'out');
 const NODE_DIR   = path.join(ENGINE_DIR, 'node');
 const WEB_DIR    = path.join(ENGINE_DIR, 'web');
 
-const OUT_WEB  = path.join(WEB_DIR,  'tilt_web');
-const OUT_NODE = path.join(NODE_DIR, 'tilt_node');
+const OUT_FLIP = path.join(WEB_DIR, 'flip-g80');
 
 fs.mkdirSync(WEB_DIR, { recursive: true });
 
@@ -19,7 +18,6 @@ const wasmBuf   = fs.readFileSync(path.join(OUT_DIR, 'pinmame_web.wasm'));
 const webJs     = fs.readFileSync(path.join(OUT_DIR, 'pinmame_web.js'),    'utf8');
 const audioJs   = fs.readFileSync(path.join(NODE_DIR, 'runtime-audio.js'), 'utf8');
 const runtimeJs = fs.readFileSync(path.join(NODE_DIR, 'runtime.js'),       'utf8');
-const mainJs    = fs.readFileSync(path.join(NODE_DIR, 'main.js'),           'utf8');
 
 // Escape */ (0x2A 0x2F) sequences in WASM so they can't close the JS block comment
 function escapeWasm(buf) {
@@ -69,10 +67,10 @@ const stamp   = new Date().toISOString();
 const sepBuf  = Buffer.from('\n/* __WASM__\n');
 const footBuf = Buffer.from('\n*/\n');
 
-// ── tilt_web ─────────────────────────────────────────────────────────────────
+// ── flip-g80 ─────────────────────────────────────────────────────────────────
 // Bundle universel : navigateur Worker + require() Node.js (librairie)
-const webJsText = `/* ================================================================
-   PinMAME — tilt_web (navigateur Worker + Node.js)
+const flipJsText = `/* ================================================================
+   flip-g80 — librairie PinMAME Gottlieb System 80 (navigateur Worker + Node.js)
    Généré le ${stamp}
    Sources : pinmame_web.js + pinmame_web.wasm + runtime-audio.js + runtime.js
    ================================================================ */
@@ -88,54 +86,10 @@ ${bundledRuntimeJs}
 
 })();`;
 
-const webBundle = Buffer.concat([Buffer.from(webJsText, 'utf8'), sepBuf, escapedWasm, footBuf]);
-fs.writeFileSync(OUT_WEB, webBundle);
-fs.chmodSync(OUT_WEB, 0o755);
-
-// ── tilt_node ─────────────────────────────────────────────────────────────────
-// Bundle autoexécutable Node.js : runtime PinMAME + serveur WS/BLE intégré
-// Aucun node_modules requis (BLE optionnel via @abandonware/bleno)
-
-// Adapter main.js : supprimer 'use strict' (déjà en tête) + require('../../tilt')
-const mainAdapted = mainJs
-    .replace(/^'use strict';\n/m, '')
-    .replace(/^const \{ createEmulator \} = require\([^)]+\);\n/m, '');
-
-const nodeJsText = `#!/usr/bin/env node
-'use strict';
-/* ================================================================
-   PinMAME — tilt_node (Node.js autoexécutable)
-   Généré le ${stamp}
-   Sources : pinmame_web.js + pinmame_web.wasm + runtime-audio.js
-             + runtime.js + main.js
-   ================================================================ */
-
-/* ── Extraction WASM embarqué ── */
-${nodeExtract}
-
-/* ── Runtime PinMAME (définit createEmulator) ── */
-(function () {
-
-${webJs}
-
-${audioJs}
-
-${bundledRuntimeJs}
-
-})();
-
-/* ── Récupère createEmulator depuis le runtime ── */
-const { createEmulator } = module.exports;
-module.exports = {};
-
-/* ── Serveur Node.js (WS + BLE optionnel) ── */
-${mainAdapted}`;
-
-const nodeBundle = Buffer.concat([Buffer.from(nodeJsText, 'utf8'), sepBuf, escapedWasm, footBuf]);
-fs.writeFileSync(OUT_NODE, nodeBundle);
-fs.chmodSync(OUT_NODE, 0o755);
+const flipBundle = Buffer.concat([Buffer.from(flipJsText, 'utf8'), sepBuf, escapedWasm, footBuf]);
+fs.writeFileSync(OUT_FLIP, flipBundle);
+fs.chmodSync(OUT_FLIP, 0o755);
 
 const mb = n => (n / 1024 / 1024).toFixed(2) + ' MB';
 const extra = escapedWasm.length - wasmBuf.length;
-console.log(`✅ tilt_web  → web/tilt_web   : ${mb(webBundle.length)}`);
-console.log(`✅ tilt_node → node/tilt_node : ${mb(nodeBundle.length)}  (WASM brut: ${mb(wasmBuf.length)}, échappements: +${extra} octets)`);
+console.log(`✅ flip-g80 → web/flip-g80 : ${mb(flipBundle.length)}  (WASM brut: ${mb(wasmBuf.length)}, échappements: +${extra} octets)`);

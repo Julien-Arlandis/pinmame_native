@@ -127,18 +127,23 @@ static void ble_audio_task(void*) {
             int max_payload = (int)att_mtu - 3 - 1;
             if (max_payload > (int)sizeof(packet) - 1) max_payload = (int)sizeof(packet) - 1;
             if (max_payload > 0) {
-                int n = api_get_ble_audio_chunk(packet + 1, max_payload);
-                if (n > 0) {
+                // Rafale : vider le buffer audio disponible en une passe (max 5 paquets).
+                // Limite à 5 pour ne pas épuiser le pool mbuf NimBLE (~20 blocs au total).
+                // En régime établi (24 fps = 80% temps réel), 1-2 paquets sont disponibles
+                // par cycle de 20ms → fill rate ~80%.
+                bool had_audio = false;
+                for (int burst = 0; burst < 5; burst++) {
+                    int n = api_get_ble_audio_chunk(packet + 1, max_payload);
+                    if (n <= 0) break;
+                    had_audio = true;
                     packet[0] = 0x02;
                     struct os_mbuf* om = ble_hs_mbuf_from_flat(packet, n + 1);
-                    if (om) {
-                        int rc = ble_gatts_notify_custom(g_ble_conn_handle, g_ble_out_handle, om);
-                        if (rc != 0) { g_ble_conn_handle = BLE_HS_CONN_HANDLE_NONE; sends_fail++; }
-                        else { sends_ok++; bytes_sent += n; }
-                    }
-                } else {
-                    empty_reads++;
+                    if (!om) { sends_fail++; break; } // pool mbuf épuisé : arrêter la rafale
+                    int rc = ble_gatts_notify_custom(g_ble_conn_handle, g_ble_out_handle, om);
+                    if (rc != 0) { sends_fail++; break; } // congestion BLE : arrêter la rafale
+                    sends_ok++; bytes_sent += n;
                 }
+                if (!had_audio) empty_reads++;
             }
         }
         int64_t now_us = esp_timer_get_time();

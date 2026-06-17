@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>flip-g80 — Documentation API</title>
+<style>
+    :root {
+        --bg-main: #050505;
+        --bg-box: #111;
+        --accent: #00ffcc;
+        --accent2: #00ff44;
+        --accent3: #ff9900;
+        --border: #222;
+    }
+    body {
+        background: var(--bg-main);
+        color: #ccc;
+        font-family: monospace;
+        max-width: 980px;
+        margin: 0 auto;
+        padding: 24px 28px 80px;
+        line-height: 1.55;
+    }
+    h1 { color: var(--accent); font-size: 1.5rem; border-bottom: 1px solid var(--border); padding-bottom: 10px; }
+    h2 { color: var(--accent2); font-size: 1.15rem; margin-top: 2.4em; border-left: 3px solid var(--accent2); padding-left: 10px; }
+    h3 { color: #ffaa00; font-size: 0.98rem; margin-top: 1.8em; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, pre code { color: #00ff88; }
+    code { background: var(--bg-box); padding: 1px 5px; border-radius: 3px; }
+    pre {
+        background: var(--bg-box);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 14px 16px;
+        overflow-x: auto;
+        font-size: 0.85rem;
+    }
+    table { width: 100%; border-collapse: collapse; margin: 14px 0; font-size: 0.88rem; }
+    th, td { border: 1px solid var(--border); padding: 6px 10px; text-align: left; vertical-align: top; }
+    th { background: var(--bg-box); color: var(--accent); }
+    .dir-in  { color: #00aaff; }
+    .dir-out { color: #ff66aa; }
+    .note { border-left: 3px solid #555; padding: 8px 14px; background: #0d0d0d; color: #999; margin: 14px 0; font-size: 0.88rem; }
+    .top-link { font-size: 0.8rem; }
+    nav.toc { background: var(--bg-box); border: 1px solid var(--border); border-radius: 6px; padding: 14px 18px; }
+    nav.toc ul { margin: 0.3em 0; padding-left: 1.4em; }
+    nav.toc a { color: #aaa; }
+    nav.toc a:hover { color: var(--accent); }
+    .badge {
+        display: inline-block;
+        font-size: 0.72rem;
+        padding: 1px 6px;
+        border-radius: 3px;
+        vertical-align: middle;
+        margin-left: 4px;
+        font-weight: bold;
+    }
+    .badge-in  { background: #002244; color: #00aaff; border: 1px solid #00aaff44; }
+    .badge-out { background: #330022; color: #ff66aa; border: 1px solid #ff66aa44; }
+    .badge-rw  { background: #1a1a00; color: #ffcc00; border: 1px solid #ffcc0044; }
+</style>
+</head>
+<body>
+
+<p class="top-link"><a href="index.html">&larr; Retour à l'interface</a></p>
+
+<h1>flip-g80 — Documentation API</h1>
+
+<p>
+<strong>flip-g80</strong> est un bundle JavaScript autoexécutable qui encapsule le moteur PinMAME
+(Gottlieb System 80) compilé en WebAssembly. Un seul fichier (<code>web/flip-g80</code>), deux consommateurs :
+</p>
+
+<table>
+<tr><th>Consommateur</th><th>Comment</th><th>Rôle</th></tr>
+<tr>
+<td><code>web/index.html</code></td>
+<td><code>new Worker('flip-g80')</code></td>
+<td>Workbench navigateur — UI, afficheur, lampes, audio via Web Audio.</td>
+</tr>
+<tr>
+<td><code>node/main.js</code></td>
+<td><code>require('flip-g80')</code></td>
+<td>Serveur Node.js — expose le moteur sur WebSocket (port 8765) + BLE peripheral.<br><code>node node/main.js --rom=bonebstr</code></td>
+</tr>
+</table>
+
+<p>
+Le bundle expose deux couches d'API distinctes, choisir selon le contexte :
+</p>
+<ul>
+    <li><strong>API directe</strong> (§2) — utiliser <code>createEmulator()</code> dans le même process. Méthodes JS synchrones, événements typés. C'est la couche de base.</li>
+    <li><strong>Protocole texte</strong> (§3-4) — client externe sur WebSocket ou BLE. Langage-agnostique. <code>handleLine()</code> est un désérialiseur qui appelle l'API directe en interne.</li>
+</ul>
+
+<nav class="toc">
+<strong>Sommaire</strong>
+<ul>
+    <li><a href="#direct">2. API directe — <code>createEmulator()</code></a>
+        <ul>
+            <li><a href="#direct-events">2a. Abonnements (événements)</a></li>
+            <li><a href="#direct-getters">2b. Getters (lecture synchrone)</a></li>
+            <li><a href="#direct-setters">2c. Setters (écriture)</a></li>
+        </ul>
+    </li>
+    <li><a href="#proto-in">3. Protocole texte — entrées (client → moteur)</a></li>
+    <li><a href="#proto-out">4. Protocole texte — sorties (moteur → client)</a></li>
+    <li><a href="#audio">5. Canal audio</a></li>
+    <li><a href="#server">6. Serveur Node.js</a></li>
+    <li><a href="#annexe">7. Annexe — <code>web/interface.js</code></a></li>
+</ul>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2 id="direct">2. API directe — <code>createEmulator()</code></h2>
+
+<p>
+Utilisée quand le bundle tourne dans le même process que votre code (Worker navigateur, script Node.js).
+<code>createEmulator()</code> retourne un objet avec trois familles de méthodes : abonnements, getters, setters.
+Le protocole texte (§3-4) est simplement un désérialiseur au-dessus de ces méthodes — il n'ajoute aucune
+logique propre.
+</p>
+
+<div class="note">
+<strong>Hardware réel :</strong> sur un flipper physique, les switches sont déclenchés par la bille et les mécanismes
+(bumpers, cibles…). C'est le HAL (ESP32 GPIO, ou votre code capteur) qui appelle <code>setSwitch()</code>.
+Les lampes et solenoids sont émis <em>par</em> le moteur vers votre code. Les switches vont donc dans le
+sens inverse des lampes/solenoids — mais tous sont exposés symétriquement via abonnements et getters.
+</div>
+
+<h3 id="direct-events">2a. Abonnements aux événements</h3>
+
+<p>Plusieurs abonnés peuvent coexister sur chaque événement (tableaux internes, pas de remplacement).</p>
+
+<table>
+<tr><th>Méthode</th><th>Signature du callback</th><th>Déclenché quand</th><th>Sens</th></tr>
+<tr>
+    <td><code>onSwitch(id, cb)</code></td>
+    <td><code>cb(state: 0|1)</code></td>
+    <td>Le switch <code>id</code> change d'état (bille, bouton, capteur — appelant <code>setSwitch()</code>).</td>
+    <td><span class="badge badge-in">→ moteur</span></td>
+</tr>
+<tr>
+    <td><code>onSwitches(cb)</code></td>
+    <td><code>cb(id: number, state: 0|1)</code></td>
+    <td>N'importe quel switch change — version globale.</td>
+    <td><span class="badge badge-in">→ moteur</span></td>
+</tr>
+<tr>
+    <td><code>onLamps(cb)</code></td>
+    <td><code>cb(lamps: Uint8Array[12])</code></td>
+    <td>La matrice de lampes change (émis par le moteur à chaque frame modifiée).</td>
+    <td><span class="badge badge-out">← moteur</span></td>
+</tr>
+<tr>
+    <td><code>onSolenoid(id, cb)</code></td>
+    <td><code>cb(state: 0|1)</code></td>
+    <td>Le solénoïde <code>id</code> change d'état (émis par le moteur).</td>
+    <td><span class="badge badge-out">← moteur</span></td>
+</tr>
+<tr>
+    <td><code>onSolenoids(cb)</code></td>
+    <td><code>cb(mask: uint32)</code></td>
+    <td>N'importe quel solénoïde change — version globale (bitmask 32 bits).</td>
+    <td><span class="badge badge-out">← moteur</span></td>
+</tr>
+<tr>
+    <td><code>onDisplay(cb)</code></td>
+    <td><code>cb(raw: string)</code></td>
+    <td>L'afficheur VFD est mis à jour — 160 chars hex (40 × uint16).</td>
+    <td><span class="badge badge-out">← moteur</span></td>
+</tr>
+<tr>
+    <td><code>onDisplayText(cb)</code></td>
+    <td><code>cb(text: string)</code></td>
+    <td>Même contenu décodé en texte ASCII (System 80B : alphanumérique ; 80/80A : 7-seg).</td>
+    <td><span class="badge badge-out">← moteur</span></td>
+</tr>
+</table>
+
+<div class="note">
+<strong>Switches vs Solenoids :</strong> ce sont deux circuits hardware distincts sur un vrai flipper.
+Les switches (<code>swMatrix</code>) sont une matrice de capteurs lus par le CPU — ils vont de l'extérieur vers le moteur.
+Les solenoids (<code>coreGlobals.solenoids</code>) sont des sorties transistor directes activées par le CPU — ils vont du moteur vers l'extérieur.
+Les lampes (<code>lampMatrix</code>) sont une troisième matrice multiplexée, elle aussi émise par le moteur.
+</div>
+
+<h3 id="direct-getters">2b. Getters — lecture synchrone</h3>
+
+<table>
+<tr><th>Méthode</th><th>Retour</th><th>Source</th></tr>
+<tr><td><code>getSwitch(id)</code></td><td><code>0|1</code></td><td>Lit directement <code>HEAPU8[corridor+100+id]</code>.</td></tr>
+<tr><td><code>getDip(id)</code></td><td><code>0|1</code></td><td>Lit directement <code>HEAPU8[corridor+400+id]</code>.</td></tr>
+<tr><td><code>getLamps()</code></td><td><code>Uint8Array(12)</code></td><td>Copie de <code>coreGlobals.lampMatrix</code> via <code>HEAPU8[corridor+300..311]</code>.</td></tr>
+<tr><td><code>getLamp(col, row)</code></td><td><code>0|1</code></td><td>Bit extrait de la même zone (col 0-11, row 0-7).</td></tr>
+<tr><td><code>getSolenoids()</code></td><td><code>uint32</code></td><td>Dernière valeur poussée par le moteur (cache local JS).</td></tr>
+<tr><td><code>getSolenoid(id)</code></td><td><code>0|1</code></td><td>Bit extrait du cache solenoids.</td></tr>
+<tr><td><code>getDisplayRaw()</code></td><td><code>string</code></td><td>160 chars hex — dernier push <code>pushWasmDisplay</code>.</td></tr>
+<tr><td><code>getDisplayText()</code></td><td><code>string</code></td><td>Texte ASCII — dernier push <code>pushWasmDisplayText</code>.</td></tr>
+</table>
+
+<h3 id="direct-setters">2c. Setters — écriture vers le moteur</h3>
+
+<p>Chaque setter écrit dans la mémoire partagée lue par le CPU WASM à la prochaine frame, <em>et</em> notifie immédiatement les abonnés enregistrés.</p>
+
+<table>
+<tr><th>Méthode</th><th>Paramètres</th><th>Effet</th></tr>
+<tr><td><code>setSwitch(id, state)</code></td><td>id 0-79, state 0|1</td><td>Écrit <code>HEAPU8[corridor+100+id]</code>. Notifie <code>onSwitch</code> / <code>onSwitches</code>.</td></tr>
+<tr><td><code>setDip(id, state)</code></td><td>id 0-31, state 0|1</td><td>Écrit <code>HEAPU8[corridor+400+id]</code>.</td></tr>
+<tr><td><code>setSoundCmd(cmd)</code></td><td>cmd 0-255</td><td>Injecte une commande sonore directe (bypass CPU).</td></tr>
+<tr><td><code>setAudioDistance(dist)</code></td><td>entier</td><td>Distance simulateur (mix audio).</td></tr>
+<tr><td><code>setAudioMix(chip, dac)</code></td><td>float, float</td><td>Balance chip/DAC.</td></tr>
+<tr><td><code>setAudioSep(on)</code></td><td>boolean</td><td>Séparation stéréo.</td></tr>
+<tr><td><code>setScopeActive(on)</code></td><td>boolean</td><td>Active/désactive le flux oscilloscope.</td></tr>
+<tr><td><code>startCapture()</code></td><td>—</td><td>Démarre la capture brute des bus son.</td></tr>
+<tr><td><code>stopCapture()</code></td><td>—</td><td>Arrête la capture.</td></tr>
+</table>
+
+<h3>Exemple complet — usage direct</h3>
+
+<pre><code>const { createEmulator } = require('flip-g80');
+
+const emu = createEmulator({
+    sendLine(channel, line) {},          // requis mais peut être vide si on n'utilise pas le protocole texte
+    sendAudio(left, right) { /* PCM */ },
+    loadRom: (name) => require('fs').promises.readFile(`./roms/${name}.zip`)
+});
+
+emu.sendMessage('INIT_ENGINE', { customRomName: 'bonebstr' });
+
+// Abonnements — déclarés avant le boot, actifs dès la première frame
+emu.onSwitch(14, state => console.log(`Bumper central → ${state ? 'actif' : 'relâché'}`));
+emu.onSolenoid(4, state => console.log(`Flipper gauche → ${state ? 'ON' : 'OFF'}`));
+emu.onLamps(lamps => {
+    // lamps : Uint8Array(12) — col × 8 lampes
+    const allumee = (col, row) => (lamps[col] >> row) & 1;
+});
+emu.onDisplay(raw => { /* 160 chars hex */ });
+emu.onDisplayText(text => console.log('Score :', text));
+
+// Depuis un capteur physique (GPIO, tilt, bille) :
+emu.setSwitch(14, 1);   // bille touche le bumper
+emu.setSwitch(14, 0);   // bille repart
+
+// Lecture synchrone à tout moment :
+console.log('Flipper gauche actif :', emu.getSolenoid(4));
+console.log('Lampe [col=3, row=5] :', emu.getLamp(3, 5));</code></pre>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2 id="proto-in">3. Protocole texte — entrées <span class="dir-in">(client → moteur)</span></h2>
+
+<p>
+Utilisé quand le client est externe (WebSocket, BLE). En interne, <code>handleLine(line)</code> parse ces
+lignes et appelle directement les setters de l'API directe (§2c) — il n'existe aucune logique
+supplémentaire dans cette couche.
+</p>
+
+<table>
+<tr><th>Ligne</th><th>Paramètres</th><th>Appel interne</th></tr>
+<tr><td><code>@set:id=&lt;n&gt;&amp;state=&lt;0|1&gt;</code></td><td>id 0-79</td><td><code>setSwitch(id, state)</code></td></tr>
+<tr><td><code>@dip:id=&lt;n&gt;&amp;state=&lt;0|1&gt;</code></td><td>id 0-31</td><td><code>setDip(id, state)</code></td></tr>
+<tr><td><code>@sound:cmd=&lt;n&gt;</code></td><td>cmd 0-255</td><td><code>setSoundCmd(cmd)</code></td></tr>
+<tr><td><code>@audio:distance=&lt;n&gt;&amp;chip=&lt;f&gt;&amp;dac=&lt;f&gt;&amp;sep=&lt;0|1&gt;</code></td><td>tous optionnels</td><td><code>setAudioDistance / setAudioMix / setAudioSep</code></td></tr>
+<tr><td><code>@scope:on=&lt;0|1&gt;</code></td><td></td><td><code>setScopeActive(on)</code></td></tr>
+<tr><td><code>@capture:action=start|stop</code></td><td></td><td><code>startCapture() / stopCapture()</code></td></tr>
+<tr><td><code>@connect:input=1&amp;display=1&amp;driver=1</code></td><td colspan="2">(géré par le serveur Node.js, pas par <code>handleLine</code>) — renvoie liste ROMs + derniers états.</td></tr>
+<tr><td><code>@reboot:</code></td><td colspan="2">(idem serveur) — recrée l'émulateur.</td></tr>
+<tr><td><code>@rom:name=&lt;n&gt;&amp;data=&lt;base64&gt;</code></td><td colspan="2">(idem serveur) — change la ROM puis reboot.</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2 id="proto-out">4. Protocole texte — sorties <span class="dir-out">(moteur → client)</span></h2>
+
+<p>
+Émises par <code>sendLine(channel, line)</code> à chaque événement interne — simultanément aux callbacks
+de l'API directe (§2a). Un client WebSocket/BLE ne voit que ces lignes texte.
+</p>
+
+<table>
+<tr><th>Ligne</th><th>Paramètres</th><th>Événement</th></tr>
+<tr>
+    <td><code>!set:id=&lt;n&gt;&amp;state=&lt;0|1&gt;</code></td>
+    <td>id solénoïde 0-31</td>
+    <td>Solénoïde activé/désactivé par le CPU (émis uniquement sur changement).</td>
+</tr>
+<tr>
+    <td><code>!lamp:&lt;24 hex&gt;</code></td>
+    <td>12 octets en hex</td>
+    <td>Matrice lampes complète (96 lampes), renvoyée en bloc à chaque frame modifiée.</td>
+</tr>
+<tr>
+    <td><code>!display:action=raw&amp;data=&lt;hex&gt;</code></td>
+    <td>160 chars hex (40 × uint16)</td>
+    <td>Afficheur VFD brut.</td>
+</tr>
+<tr>
+    <td><code>!display:action=text&amp;data=&lt;urlencoded&gt;</code></td>
+    <td>texte ASCII</td>
+    <td>Afficheur décodé en texte.</td>
+</tr>
+<tr>
+    <td><code>@status:state=loading|ready&amp;rom=&lt;nom&gt;</code></td>
+    <td></td>
+    <td>Cycle de vie du moteur.</td>
+</tr>
+<tr>
+    <td><code>@machine:rom=…|cpu=…|snd=…|stereo=0|1|rate=…|dsp=80|80B</code></td>
+    <td></td>
+    <td>Infos machine au boot. <code>dsp=80B</code> = 14 segments alphanumérique ; <code>dsp=80</code> = 7 segments. Le client choisit son renderer en conséquence.</td>
+</tr>
+<tr>
+    <td><code>@sound:chips=&lt;liste&gt;</code></td>
+    <td></td>
+    <td>Puces son actives.</td>
+</tr>
+<tr>
+    <td><code>@roms:list=&lt;a,b,c&gt;</code></td>
+    <td>noms encodés URL</td>
+    <td>Liste ROMs disponibles (envoyée après <code>@connect:</code>).</td>
+</tr>
+<tr>
+    <td><code>@audio:cmd=0x&lt;hex&gt;</code></td>
+    <td></td>
+    <td>Log commande audio (diagnostic).</td>
+</tr>
+</table>
+
+<h3>Exemple — client WebSocket minimal</h3>
+
+<pre><code>const WebSocket = require('ws');
+const ws = new WebSocket('ws://localhost:8765');
+
+ws.on('open', () => ws.send('@connect:input=1&display=1&driver=1'));
+
+ws.on('message', (data) => {
+    const line = data.toString().trim();
+    if (line.startsWith('!set:')) {
+        const p = new URLSearchParams(line.slice(5));
+        console.log(`Solénoïde ${p.get('id')} → ${p.get('state') === '1' ? 'ON' : 'OFF'}`);
+    }
+    if (line.startsWith('!lamp:')) {
+        const hex = line.slice(6);
+        // 12 octets, bit col×8+row = lampe id
+    }
+});
+
+// Signaler que la bille a touché le switch n°14
+ws.send('@set:id=14&state=1');</code></pre>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2 id="audio">5. Canal audio</h2>
+
+<p>L'audio ne passe jamais par le protocole texte.</p>
+<ul>
+    <li><strong>API directe</strong> : le callback <code>sendAudio(left, right)</code> passé à <code>createEmulator()</code> reçoit des <code>Float32Array</code> stéréo à 44 100 Hz à intervalle régulier.</li>
+    <li><strong>Serveur Node.js</strong> : l'audio est envoyé au haut-parleur local (SoX/ALSA). Il n'est pas transmis sur le WebSocket ni le BLE — un client réseau ne reçoit pas l'audio.</li>
+    <li><strong>Worker navigateur</strong> : forwarde via <code>postMessage({ channel: 'audio', left, right })</code>.</li>
+    <li><strong>ESP32 natif</strong> : streamé sur BLE avec flag <code>0x02</code> (vs <code>0x00</code>/<code>0x01</code> pour le texte). Format : PCM mono unsigned 8-bit à 11 025 Hz (sous-échantillonnage ×4). Le client navigateur (<code>ble-central.js</code>) joue les échantillons via un <code>AudioContext</code> dédié.</li>
+</ul>
+
+<table>
+<tr><th>Canal</th><th>Activation</th><th>Payload</th><th>Usage</th></tr>
+<tr><td><code>capture</code></td><td><code>startCapture()</code> / <code>@capture:action=start</code></td><td><code>{ ym_L, ym_R, dac }</code> Float32Array</td><td>Enregistrement brut des bus son.</td></tr>
+<tr><td><code>scope</code></td><td><code>setScopeActive(true)</code> / <code>@scope:on=1</code></td><td><code>{ ym_L, ym_R, dac, spk_L, spk_R }</code></td><td>Oscilloscope temps réel.</td></tr>
+</table>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2 id="server">6. Serveur Node.js</h2>
+
+<pre><code>node node/main.js --rom=bonebstr</code></pre>
+
+<p>Démarre un serveur WebSocket sur <code>ws://localhost:8765</code> (configurable via <code>--port=</code>)
+et un périphérique BLE (service <code>ab120001-…</code>), sauf <code>--no-ble</code>.</p>
+
+<p>À la connexion d'un client, le serveur envoie :</p>
+<pre><code>@master:name=runtime-node&version=1</code></pre>
+<p>Si le client répond <code>@connect:input=1&display=1&driver=1</code>, le serveur renvoie la liste des
+ROMs et les derniers états connus (display, lampes, statut) pour que le client rattrape l'état courant.</p>
+
+<!-- ═══════════════════════════════════════════════════════════ -->
+<h2 id="annexe">7. Annexe — <code>web/interface.js</code> (client navigateur du repo)</h2>
+
+<div class="note">
+<code>SerialMaster</code> n'est utile que pour le workbench de ce repo. Si vous écrivez votre propre client
+(Python, microcontrôleur, autre navigateur…), ignorez cette section et utilisez directement l'API directe (§2)
+ou le protocole texte sur WebSocket/BLE (§3-4).
+</div>
+
+<p>
+Enveloppe un transport (Worker / WebSocket / BLE) derrière une API unique orientée lignes texte — c'est
+la couche utilisée par <code>web/index.html</code> pour unifier ses trois modes de connexion.
+</p>
+
+<table>
+<tr><th>Méthode</th><th>Signature</th><th>Rôle</th></tr>
+<tr><td><code>send</code></td><td><code>send(line: string)</code></td><td>Envoie une ligne <code>@…</code> vers le moteur.</td></tr>
+<tr><td><code>onMessage</code></td><td><code>onMessage(cb: (line: string) => void)</code></td><td>S'abonne à toutes les lignes sortantes texte.</td></tr>
+<tr><td><code>onAudio</code></td><td><code>onAudio(cb: (left, right: Float32Array) => void)</code></td><td>Flux audio PCM (mode Worker uniquement).</td></tr>
+<tr><td><code>onCapture</code></td><td><code>onCapture(cb)</code></td><td>Canal capture brute.</td></tr>
+<tr><td><code>onScope</code></td><td><code>onScope(cb)</code></td><td>Flux oscilloscope.</td></tr>
+<tr><td><code>onDisconnect</code></td><td><code>onDisconnect(cb)</code></td><td>Fermeture du transport.</td></tr>
+<tr><td><code>name</code></td><td>getter</td><td>Nom du maître connecté.</td></tr>
+</table>
+
+<p class="note">
+Sources : <code>node/runtime.js</code> (<code>createEmulator</code>, getters, setters, abonnements),
+<code>node/runtime-audio.js</code> (mixeur audio), <code>api.cpp</code> (pont C↔WASM),
+<code>web/interface.js</code> (<code>SerialMaster</code>).
+Bundle généré par <code>node/bundle.js</code> → <code>web/flip-g80</code>.
+</p>
+
+</body>
+</html>

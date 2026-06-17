@@ -321,7 +321,7 @@ static int gap_event_cb(struct ble_gap_event* event, void* arg) {
 static void start_advertising(void) {
     // Nom seul dans l'adv (UUID → scan response pour rester ≤31 octets)
     struct ble_hs_adv_fields fields = {};
-    const char* name           = "tilt_esp32";
+    const char* name           = "flip-g80-esp32";
     fields.flags               = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
     fields.name                = (const uint8_t*)name;
     fields.name_len            = (uint8_t)strlen(name);
@@ -345,7 +345,7 @@ static void start_advertising(void) {
     rc = ble_gap_adv_start(BLE_OWN_ADDR_PUBLIC, NULL, BLE_HS_FOREVER,
                            &adv_params, gap_event_cb, NULL);
     if (rc) { ESP_LOGE(TAG, "ble_gap_adv_start: %d", rc); return; }
-    ESP_LOGI(TAG, "BLE advertising 'tilt_esp32'");
+    ESP_LOGI(TAG, "BLE advertising 'flip-g80-esp32'");
 }
 
 static void ble_sync_cb(void) {

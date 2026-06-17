@@ -47,7 +47,7 @@ async function createBleCentralTransport() {
     }
 
     const device = await navigator.bluetooth.requestDevice({
-        filters: [{ namePrefix: 'flip-g80' }, { services: [BLE_SVC_UUID] }],
+        acceptAllDevices: true,
         optionalServices: [BLE_SVC_UUID]
     });
 

@@ -76,8 +76,9 @@ static void uac_driver_cb(uint8_t addr, uint8_t iface_num,
             g_uac_handle = NULL;
             return;
         }
-        uac_host_device_set_mute(g_uac_handle, false);
-        uac_host_device_set_volume(g_uac_handle, 80);
+        // Pas de set_mute / set_volume : les casques UAC sans firmware de contrôle
+        // de volume ne répondent pas à ces requêtes → timeout 5 s chacune.
+        // L'utilisateur règle le volume via les touches physiques du casque.
         g_uac_ready = true;
         ESP_LOGE(TAG, "UAC: streaming 48000 Hz stereo 16-bit OK");
     }

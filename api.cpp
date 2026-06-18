@@ -94,10 +94,10 @@ extern "C" {
 }
 
 #define ABMAX 131072
-// Sur ESP32 : synthèse à 11025Hz (BLE sort aussi à 11025Hz, pas de décimation).
+// Sur ESP32 : synthèse à 22050Hz → sortie UAC (USB-C).
 // Sur WASM/natif : 44100Hz pour la qualité maximale.
 #ifdef ESP_PLATFORM
-#define SPF   184    // 11025 / 60 fps
+#define SPF   368    // 22050 / 60 fps
 #else
 #define SPF   735    // 44100 / 60 fps
 #endif
@@ -415,29 +415,6 @@ extern "C" {
         if (n > DMAX) n = DMAX;
         for (int i = 0; i < n; i++) { g_lin[i] = g_ring[g_ri]; g_ri = (g_ri + 1) % ABMAX; }
         hal_push_audio((uintptr_t)g_lin, n, gen);
-    }
-
-    // ─── Prototype audio-over-BLE : curseur de lecture indépendant ───────────
-    // Sous-échantillonne le ring buffer 44100Hz stéréo 16-bit → mono 8-bit,
-    // ratio configurable (STEP), pour tenir dans la bande passante BLE.
-    int api_get_ble_audio_chunk(uint8_t *out, int max_bytes) {
-        static int g_ble_ri = 0;
-        const int STEP = 1; // synthèse native à 11025Hz sur ESP32, pas de décimation
-        int produced = 0;
-
-        while (produced < max_bytes) {
-            int n = (g_wi - g_ble_ri + ABMAX) % ABMAX;
-            if (n < STEP * 2) break;
-            // Moyenne des STEP échantillons (filtre anti-repliement avant décimation,
-            // sinon le contenu >5.5kHz des chips son se replie en bruit large bande)
-            int sum = 0;
-            for (int j = 0; j < STEP; j++) sum += g_ring[(g_ble_ri + j * 2) % ABMAX];
-            int v = (sum / STEP >> 8) + 128;
-            if (v < 0) v = 0; else if (v > 255) v = 255;
-            out[produced++] = (uint8_t)v;
-            g_ble_ri = (g_ble_ri + STEP * 2) % ABMAX;
-        }
-        return produced;
     }
 
     static void (*g_irq)(int, int) = nullptr;
@@ -950,7 +927,7 @@ extern "C" {
             drivers[game_index]->driver_init();
         if (!rompath_extra) rompath_extra = (char*)hal_rompath();
 #ifdef ESP_PLATFORM
-        options.samplerate = 11025;
+        options.samplerate = 22050;
 #else
         options.samplerate = 44100;
 #endif

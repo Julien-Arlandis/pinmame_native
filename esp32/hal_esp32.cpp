@@ -112,56 +112,6 @@ extern "C" void ble_resend_last_state(void) {
 
 // ─── Prototype audio-over-BLE ─────────────────────────────────────────────
 // Paquet = [0x02][échantillons mono 8-bit, 11025Hz] — tag 0x02 distinct des
-// flags texte (0x00/0x01) utilisés par bleSend(). Pas de réassemblage côté
-// navigateur : chaque notify est un chunk audio autonome.
-extern "C" int api_get_ble_audio_chunk(uint8_t *out, int max_bytes);
-
-static void ble_audio_task(void*) {
-    static uint8_t packet[247];
-    int64_t last_log_us = 0;
-    uint32_t bytes_sent = 0, sends_ok = 0, sends_fail = 0, empty_reads = 0;
-    for (;;) {
-        if (g_ble_conn_handle != BLE_HS_CONN_HANDLE_NONE && g_ble_out_handle) {
-            uint16_t att_mtu = ble_att_mtu(g_ble_conn_handle);
-            if (att_mtu < 4) att_mtu = 23;
-            int max_payload = (int)att_mtu - 3 - 1;
-            if (max_payload > (int)sizeof(packet) - 1) max_payload = (int)sizeof(packet) - 1;
-            if (max_payload > 0) {
-                // Rafale : vider le buffer audio disponible en une passe (max 5 paquets).
-                // Limite à 5 pour ne pas épuiser le pool mbuf NimBLE (~20 blocs au total).
-                // En régime établi (24 fps = 80% temps réel), 1-2 paquets sont disponibles
-                // par cycle de 20ms → fill rate ~80%.
-                bool had_audio = false;
-                for (int burst = 0; burst < 5; burst++) {
-                    int n = api_get_ble_audio_chunk(packet + 1, max_payload);
-                    if (n <= 0) break;
-                    had_audio = true;
-                    packet[0] = 0x02;
-                    struct os_mbuf* om = ble_hs_mbuf_from_flat(packet, n + 1);
-                    if (!om) { sends_fail++; break; } // pool mbuf épuisé : arrêter la rafale
-                    int rc = ble_gatts_notify_custom(g_ble_conn_handle, g_ble_out_handle, om);
-                    if (rc != 0) { sends_fail++; break; } // congestion BLE : arrêter la rafale
-                    sends_ok++; bytes_sent += n;
-                }
-                if (!had_audio) empty_reads++;
-            }
-        }
-        int64_t now_us = esp_timer_get_time();
-        if (now_us - last_log_us >= 3000000LL) {
-            ESP_LOGE("BLEAUDIO", "conn=%d out_handle=%d bytes=%u ok=%u fail=%u empty=%u",
-                     (int)g_ble_conn_handle, (int)g_ble_out_handle,
-                     (unsigned)bytes_sent, (unsigned)sends_ok, (unsigned)sends_fail, (unsigned)empty_reads);
-            last_log_us = now_us;
-            bytes_sent = sends_ok = sends_fail = empty_reads = 0;
-        }
-        vTaskDelay(pdMS_TO_TICKS(20));
-    }
-}
-
-extern "C" void ble_audio_task_start(void) {
-    xTaskCreate(ble_audio_task, "ble_audio", 4096, NULL, 5, NULL);
-}
-
 extern "C" {
 
 hal_cycles_t hal_cycles(void) {
@@ -179,9 +129,9 @@ void hal_osd_exit(void) {
 }
 
 // ─── Audio USB ───────────────────────────────────────────────────────────────
-// 184 samples stéréo 16-bit par frame × 2 octets = 736 octets/frame (11025Hz)
+// 368 samples stéréo 16-bit par frame × 2 octets = 1472 octets/frame (22050Hz)
 // 16 frames de tampon ≈ 267 ms de latence max
-#define USB_AUDIO_FRAME_BYTES  736
+#define USB_AUDIO_FRAME_BYTES  1472
 #define USB_AUDIO_SB_SIZE      (USB_AUDIO_FRAME_BYTES * 16)
 
 static StreamBufferHandle_t g_audio_sb = NULL;

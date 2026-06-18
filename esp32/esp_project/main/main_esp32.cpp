@@ -65,13 +65,13 @@ static void uac_driver_cb(uint8_t addr, uint8_t iface_num,
         uac_host_stream_config_t stream_cfg = {};
         stream_cfg.channels      = 2;
         stream_cfg.bit_resolution = 16;
-        stream_cfg.sample_freq   = 11025;
+        stream_cfg.sample_freq   = 22050;
         stream_cfg.flags         = 0;
         rc = uac_host_device_start(g_uac_handle, &stream_cfg);
         if (rc != ESP_OK) { ESP_LOGE(TAG, "uac_host_device_start: %d", rc); return; }
         uac_host_device_set_mute(g_uac_handle, false);
         uac_host_device_set_volume(g_uac_handle, 80);
-        ESP_LOGE(TAG, "UAC: streaming 11025 Hz stereo 16-bit OK");
+        ESP_LOGE(TAG, "UAC: streaming 22050 Hz stereo 16-bit OK");
     }
 }
 
@@ -89,7 +89,7 @@ static void usb_host_task(void* arg) {
 
 // Tâche de lecture du buffer audio → écriture vers les écouteurs USB
 static void uac_audio_task(void* arg) {
-    static uint8_t buf[736]; // 1 frame = 184 samples × 2 ch × 2 octets à 11025Hz
+    static uint8_t buf[1472]; // 1 frame = 368 samples × 2 ch × 2 octets à 22050Hz
     while (true) {
         size_t got = usb_audio_read(buf, sizeof(buf), 500);
         if (got > 0 && g_uac_handle) {
@@ -467,8 +467,6 @@ extern "C" void app_main(void) {
 
     nimble_port_freertos_init(ble_host_task);
 
-    extern void ble_audio_task_start(void);
-    ble_audio_task_start();
 
     ESP_LOGE(TAG, "[MEM] apres BLE  — SRAM libre: %u  bloc max: %u",
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),

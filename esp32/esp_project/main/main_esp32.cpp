@@ -9,6 +9,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/queue.h"
 #include "esp_log.h"
 #include "esp_spiffs.h"
 #include "nvs_flash.h"
@@ -38,7 +39,15 @@ extern "C" size_t usb_audio_read(void* dst, size_t want, uint32_t timeout_ms);
 static uac_host_device_handle_t g_uac_handle = NULL;
 static volatile bool g_uac_ready = false;
 
-// Appelé par le driver UAC quand l'état de l'interface change
+// ─── Queue pour découpler uac_driver_cb de event_handler_task ────────────────
+// uac_driver_cb est appelé depuis event_handler_task. Si on y appelle
+// uac_host_device_open/start, les control transfers bloquent → deadlock car
+// ctrl_xfer_done est aussi délivré par event_handler_task.
+// Solution : poster dans la queue, traiter dans uac_setup_task (tâche séparée).
+typedef struct { uint8_t addr; uint8_t iface_num; } uac_setup_req_t;
+static QueueHandle_t g_uac_setup_queue = NULL;
+
+// Appelé par le driver UAC quand l'état de l'interface change (event_handler_task)
 static void uac_device_cb(uac_host_device_handle_t handle,
                            const uac_host_device_event_t event, void* arg) {
     ESP_LOGE(TAG, "UAC device event: %d", (int)event);
@@ -50,35 +59,52 @@ static void uac_device_cb(uac_host_device_handle_t handle,
     }
 }
 
-// Appelé par le driver UAC quand un nouveau périphérique audio est détecté
+// Appelé depuis event_handler_task — NE PAS faire de control transfer ici.
 static void uac_driver_cb(uint8_t addr, uint8_t iface_num,
                            const uac_host_driver_event_t event, void* arg) {
     ESP_LOGE(TAG, "UAC driver event: %d  addr=%d iface=%d", (int)event, addr, iface_num);
     if (event == UAC_HOST_DRIVER_EVENT_TX_CONNECTED) {
+        uac_setup_req_t req = {addr, iface_num};
+        xQueueSend(g_uac_setup_queue, &req, 0);
+    }
+}
+
+// Tâche séparée : fait le setup UAC avec control transfers (open + start).
+// event_handler_task reste libre → ctrl_xfer_done peut être appelé sans deadlock.
+static void uac_setup_task(void* arg) {
+    uac_setup_req_t req;
+    while (true) {
+        if (xQueueReceive(g_uac_setup_queue, &req, portMAX_DELAY) != pdTRUE) continue;
+
         uac_host_device_config_t dev_cfg = {};
-        dev_cfg.addr            = addr;
-        dev_cfg.iface_num       = iface_num;
-        dev_cfg.buffer_size     = 16 * 1024;
+        dev_cfg.addr             = req.addr;
+        dev_cfg.iface_num        = req.iface_num;
+        dev_cfg.buffer_size      = 16 * 1024;
         dev_cfg.buffer_threshold = 4 * 1024;
-        dev_cfg.callback        = uac_device_cb;
-        dev_cfg.callback_arg    = NULL;
+        dev_cfg.callback         = uac_device_cb;
+        dev_cfg.callback_arg     = NULL;
+
         esp_err_t rc = uac_host_device_open(&dev_cfg, &g_uac_handle);
-        if (rc != ESP_OK) { ESP_LOGE(TAG, "uac_host_device_open: %d", rc); g_uac_handle = NULL; return; }
+        if (rc != ESP_OK) {
+            ESP_LOGE(TAG, "uac_host_device_open: %d", rc);
+            g_uac_handle = NULL;
+            continue;
+        }
+
         uac_host_stream_config_t stream_cfg = {};
-        stream_cfg.channels      = 2;
+        stream_cfg.channels       = 2;
         stream_cfg.bit_resolution = 16;
-        stream_cfg.sample_freq   = 48000;
-        stream_cfg.flags         = 0;
+        stream_cfg.sample_freq    = 48000;
+        stream_cfg.flags          = 0;
+
         rc = uac_host_device_start(g_uac_handle, &stream_cfg);
         if (rc != ESP_OK) {
             ESP_LOGE(TAG, "uac_host_device_start: %d", rc);
             uac_host_device_close(g_uac_handle);
             g_uac_handle = NULL;
-            return;
+            continue;
         }
-        // Pas de set_mute / set_volume : les casques UAC sans firmware de contrôle
-        // de volume ne répondent pas à ces requêtes → timeout 5 s chacune.
-        // L'utilisateur règle le volume via les touches physiques du casque.
+
         g_uac_ready = true;
         ESP_LOGE(TAG, "UAC: streaming 48000 Hz stereo 16-bit OK");
     }
@@ -452,7 +478,10 @@ extern "C" void app_main(void) {
     uac_cfg.core_id                = 0;
     uac_cfg.callback               = uac_driver_cb;
     uac_cfg.callback_arg           = NULL;
+    g_uac_setup_queue = xQueueCreate(4, sizeof(uac_setup_req_t));
     ESP_ERROR_CHECK(uac_host_install(&uac_cfg));
+    xTaskCreatePinnedToCoreWithCaps(uac_setup_task, "uac_setup", 4096, NULL, 9, NULL, 0,
+        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
     xTaskCreatePinnedToCoreWithCaps(uac_audio_task, "uac_audio", 4096, NULL, 8, NULL, 0,
         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 

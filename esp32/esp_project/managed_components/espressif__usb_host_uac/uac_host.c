@@ -112,7 +112,7 @@ typedef struct uac_host_device {
     usb_device_handle_t dev_hdl;                    /*!< USB device handle */
     uint8_t addr;                                   /*!< USB device address */
     SemaphoreHandle_t device_busy;                  /*!< UAC device main mutex */
-    SemaphoreHandle_t ctrl_xfer_done;               /*!< Control transfer semaphore */
+    volatile uint32_t ctrl_xfer_done_flag;          /*!< Completion flag (atomic, pas de FreeRTOS) */
     usb_transfer_t *ctrl_xfer;                      /*!< Pointer to control transfer buffer */
     uint8_t ctrl_iface_num;                         /*!< Control interface number */
     uint8_t *cs_ac_desc;                            /*!< Class-Specific Audio Control Interface descriptor */
@@ -1556,8 +1556,8 @@ static esp_err_t _uac_host_device_add(uint8_t addr, usb_device_handle_t dev_hdl,
         iface_desc = GET_NEXT_INTERFACE_DESC(iface_desc, total_length, iface_offset);
     }
 
-    // Create Semaphore for control transfer
-    UAC_GOTO_ON_FALSE(uac_device->ctrl_xfer_done = xSemaphoreCreateBinary(), ESP_ERR_NO_MEM, "Unable to create semaphore");
+    // Pas de sémaphore : on utilise un flag volatile (ctrl_xfer_done_flag)
+    uac_device->ctrl_xfer_done_flag = 0;
     UAC_GOTO_ON_FALSE(uac_device->device_busy =  xSemaphoreCreateMutex(), ESP_ERR_NO_MEM, "Unable to create mutex");
 
     // Allocate control transfer buffer
@@ -1591,10 +1591,6 @@ static esp_err_t _uac_host_device_delete(uac_device_t *uac_device)
 
     if (uac_device->ctrl_xfer) {
         UAC_RETURN_ON_ERROR(usb_host_transfer_free(uac_device->ctrl_xfer), "Unable to free transfer buffer for EP0");
-    }
-
-    if (uac_device->ctrl_xfer_done) {
-        vSemaphoreDelete(uac_device->ctrl_xfer_done);
     }
 
     if (uac_device->device_busy) {
@@ -1646,13 +1642,12 @@ static void ctrl_xfer_done(usb_transfer_t *ctrl_xfer)
 {
     assert(ctrl_xfer);
     uac_device_t *uac_device = (uac_device_t *)ctrl_xfer->context;
-    /* Appelé depuis event_handler_task qui peut tenir un spinlock scheduler.
-     * xSemaphoreGive() appelle portENTER_CRITICAL() → spinlock_acquire() →
-     * assertion "lock->count == 0" si déjà verrouillé.
-     * xSemaphoreGiveFromISR() est sûr dans ce contexte (sémaphore binaire). */
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    xSemaphoreGiveFromISR(uac_device->ctrl_xfer_done, &xHigherPriorityTaskWoken);
-    if (xHigherPriorityTaskWoken) portYIELD_FROM_ISR();
+    /* Appelé depuis usb_host_client_handle_events() qui tient le spinlock global
+     * FreeRTOS. Tout appel FreeRTOS (xSemaphoreGive, xSemaphoreGiveFromISR,
+     * xTaskNotifyGive…) tente d'acquérir ce même spinlock → assert lock->count==0.
+     * Solution : store atomique pur, aucun appel FreeRTOS. Le polling est fait
+     * côté uac_control_transfer via vTaskDelay depuis une tâche séparée. */
+    __atomic_store_n(&uac_device->ctrl_xfer_done_flag, 1u, __ATOMIC_SEQ_CST);
 }
 
 /**
@@ -1675,17 +1670,24 @@ static esp_err_t uac_control_transfer(uac_device_t *uac_device, int len, uint32_
     ctrl_xfer->timeout_ms = timeout_ms;
     ctrl_xfer->num_bytes = len;
 
+    /* Reset flag AVANT soumission pour éviter une fausse completion stale */
+    __atomic_store_n(&uac_device->ctrl_xfer_done_flag, 0u, __ATOMIC_SEQ_CST);
+
     UAC_RETURN_ON_ERROR(usb_host_transfer_submit_control(s_uac_driver->client_handle, ctrl_xfer), "Unable to submit control transfer");
 
-    BaseType_t received = xSemaphoreTake(uac_device->ctrl_xfer_done, pdMS_TO_TICKS(ctrl_xfer->timeout_ms));
-
-    if (received != pdTRUE) {
-        /* Timeout : le transfert est toujours en vol dans le stack USB.
-         * Ne PAS tenter de HALT/FLUSH/CLEAR sur EP 0 (endpoint de contrôle) :
-         * usb_host_endpoint_halt(dev, 0) échoue avec INVALID_ARG et corrompt
-         * l'état interne, rendant tout transfert de contrôle ultérieur impossible. */
-        ESP_LOGE(TAG, "Control Transfer Timeout");
-        return ESP_ERR_TIMEOUT;
+    /* Polling sur le flag atomic — pas de xSemaphoreTake (spinlock interdit ici).
+     * Cette fonction est appelée depuis uac_setup_task (tâche séparée), donc
+     * vTaskDelay() est safe et event_handler_task reste libre de traiter les
+     * completions via ctrl_xfer_done(). */
+    const uint32_t poll_ms = 5;
+    uint32_t elapsed = 0;
+    while (!__atomic_load_n(&uac_device->ctrl_xfer_done_flag, __ATOMIC_SEQ_CST)) {
+        vTaskDelay(pdMS_TO_TICKS(poll_ms));
+        elapsed += poll_ms;
+        if (elapsed >= ctrl_xfer->timeout_ms) {
+            ESP_LOGE(TAG, "Control Transfer Timeout");
+            return ESP_ERR_TIMEOUT;
+        }
     }
 
     UAC_RETURN_ON_FALSE(ctrl_xfer->status == USB_TRANSFER_STATUS_COMPLETED, ESP_ERR_INVALID_RESPONSE, "Control transfer error");

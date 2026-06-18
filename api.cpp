@@ -113,7 +113,6 @@ extern "C" {
 static PSRAM_BSS_ATTR INT16 g_ring[ABMAX];
 static INT16 g_lin[DMAX];
 static int   g_wi = 0, g_ri = 0;
-static bool  g_audio_started = false; // muet jusqu'à la première commande son
 static int   g_dac[2][DMAX], g_dn[2] = {};
 
 extern "C" void stream_update(int, int);
@@ -425,7 +424,7 @@ extern "C" {
         static int g_ble_ri = 0;
         const int STEP = 1; // synthèse native à 11025Hz sur ESP32, pas de décimation
         int produced = 0;
-        if (!g_audio_started) { g_ble_ri = g_wi; return 0; }
+
         while (produced < max_bytes) {
             int n = (g_wi - g_ble_ri + ABMAX) % ABMAX;
             if (n < STEP * 2) break;
@@ -647,7 +646,6 @@ extern "C" {
         uint8_t sound_user_cmd = g_shared_corridor[1060];
         if (sound_user_cmd > 0) {
             g_shared_corridor[1060] = 0;
-            g_audio_started = true;
             sndbrd_0_data_w(0, sound_user_cmd);
             hal_post_log(sound_user_cmd, emulator_generation);
         }

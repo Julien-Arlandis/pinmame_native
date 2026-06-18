@@ -36,12 +36,14 @@ extern "C" void   usb_audio_init(void);
 extern "C" size_t usb_audio_read(void* dst, size_t want, uint32_t timeout_ms);
 
 static uac_host_device_handle_t g_uac_handle = NULL;
+static volatile bool g_uac_ready = false;
 
 // Appelé par le driver UAC quand l'état de l'interface change
 static void uac_device_cb(uac_host_device_handle_t handle,
                            const uac_host_device_event_t event, void* arg) {
     ESP_LOGE(TAG, "UAC device event: %d", (int)event);
     if (event == UAC_HOST_DRIVER_EVENT_DISCONNECTED) {
+        g_uac_ready = false;
         uac_host_device_stop(handle);
         uac_host_device_close(handle);
         g_uac_handle = NULL;
@@ -61,16 +63,22 @@ static void uac_driver_cb(uint8_t addr, uint8_t iface_num,
         dev_cfg.callback        = uac_device_cb;
         dev_cfg.callback_arg    = NULL;
         esp_err_t rc = uac_host_device_open(&dev_cfg, &g_uac_handle);
-        if (rc != ESP_OK) { ESP_LOGE(TAG, "uac_host_device_open: %d", rc); return; }
+        if (rc != ESP_OK) { ESP_LOGE(TAG, "uac_host_device_open: %d", rc); g_uac_handle = NULL; return; }
         uac_host_stream_config_t stream_cfg = {};
         stream_cfg.channels      = 2;
         stream_cfg.bit_resolution = 16;
         stream_cfg.sample_freq   = 48000;
         stream_cfg.flags         = 0;
         rc = uac_host_device_start(g_uac_handle, &stream_cfg);
-        if (rc != ESP_OK) { ESP_LOGE(TAG, "uac_host_device_start: %d", rc); return; }
+        if (rc != ESP_OK) {
+            ESP_LOGE(TAG, "uac_host_device_start: %d", rc);
+            uac_host_device_close(g_uac_handle);
+            g_uac_handle = NULL;
+            return;
+        }
         uac_host_device_set_mute(g_uac_handle, false);
         uac_host_device_set_volume(g_uac_handle, 80);
+        g_uac_ready = true;
         ESP_LOGE(TAG, "UAC: streaming 48000 Hz stereo 16-bit OK");
     }
 }
@@ -92,7 +100,7 @@ static void uac_audio_task(void* arg) {
     static uint8_t buf[3200]; // 1 frame = 800 samples × 2 ch × 2 octets à 48000Hz
     while (true) {
         size_t got = usb_audio_read(buf, sizeof(buf), 500);
-        if (got > 0 && g_uac_handle) {
+        if (got > 0 && g_uac_ready && g_uac_handle) {
             uac_host_device_write(g_uac_handle, buf, (uint32_t)got, 200);
         }
     }

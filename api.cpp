@@ -94,10 +94,10 @@ extern "C" {
 }
 
 #define ABMAX 131072
-// Sur ESP32 : synthèse à 22050Hz → sortie UAC (USB-C).
+// Sur ESP32 : synthèse à 48000Hz → sortie UAC (USB-C, taux standard).
 // Sur WASM/natif : 44100Hz pour la qualité maximale.
 #ifdef ESP_PLATFORM
-#define SPF   368    // 22050 / 60 fps
+#define SPF   800    // 48000 / 60 fps
 #else
 #define SPF   735    // 44100 / 60 fps
 #endif
@@ -927,7 +927,7 @@ extern "C" {
             drivers[game_index]->driver_init();
         if (!rompath_extra) rompath_extra = (char*)hal_rompath();
 #ifdef ESP_PLATFORM
-        options.samplerate = 22050;
+        options.samplerate = 48000;
 #else
         options.samplerate = 44100;
 #endif

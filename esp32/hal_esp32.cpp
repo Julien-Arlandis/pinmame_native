@@ -129,9 +129,9 @@ void hal_osd_exit(void) {
 }
 
 // ─── Audio USB ───────────────────────────────────────────────────────────────
-// 368 samples stéréo 16-bit par frame × 2 octets = 1472 octets/frame (22050Hz)
+// 800 samples stéréo 16-bit par frame × 2 octets = 3200 octets/frame (48000Hz)
 // 16 frames de tampon ≈ 267 ms de latence max
-#define USB_AUDIO_FRAME_BYTES  1472
+#define USB_AUDIO_FRAME_BYTES  3200
 #define USB_AUDIO_SB_SIZE      (USB_AUDIO_FRAME_BYTES * 16)
 
 static StreamBufferHandle_t g_audio_sb = NULL;

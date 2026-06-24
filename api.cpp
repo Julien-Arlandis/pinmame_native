@@ -410,7 +410,8 @@ extern "C" {
     // répondent immédiatement au lieu d'attendre leur prochain tour skippé.
     static volatile int32_t g_nmi_pending[4] = {};
     static volatile int32_t g_nmi_pm_total = 0; // cumulatif NMIs reçus par cpu1
-    static volatile int32_t g_irq_hold_cpu1 = 0; // HOLD_LINE IRQ0 cpu1
+    static volatile int32_t g_irq_hold_cpu1 = 0; // HOLD_LINE IRQ0 cpu1 (soundlatches)
+    static volatile bool    g_attract_started = false; // vrai après soundlatch 0xe4
     static uint8_t          g_cpu0_skip = 0;
     static uint8_t          g_cpu23_skip = 0; // skip 87.5% quand pas de NMI en attente
 
@@ -434,6 +435,9 @@ extern "C" {
         if (n <= 20)
             ESP_LOGE("SLATCH", "soundlatch_w #%ld data=0x%02x hold_cpu1=%ld",
                      (long)n, (unsigned)data & 0xff, (long)g_irq_hold_cpu1);
+        // 0xe4 = commande "musique attract" → activer le skip cpu0 (50%)
+        if (((unsigned)data & 0xff) == 0xe4)
+            g_attract_started = true;
         __real_soundlatch_w(offset, data);
     }
 
@@ -444,11 +448,11 @@ extern "C" {
     extern "C" int cpu_getactivecpu(void);
     extern "C" int __wrap_m6502_execute(int cycles) {
         const int cpu = cpu_getactivecpu();
-        // cpu0 : pleine vitesse jusqu'au 4ème soundlatch (0xe4 ou dernier d'init).
-        // Après : skip 87.5% → 60fps, musique à vitesse correcte.
-        // Seuil 4 : fonctionne pour les séquences de 4 (sw[27]×1) ou 5 soundlatches.
-        if (cpu == 0 && g_irq_hold_cpu1 >= 4) {
-            if ((++g_cpu0_skip & 7) != 0) return cycles;
+        // cpu0 : pleine vitesse jusqu'à la commande "musique attract" (0xe4).
+        // Après 0xe4 : skip 50% (& 1) → FPS ≈ 59fps → NMI ≈ 961/s ≈ 976Hz correct.
+        // Déclenché par 0xe4 dans __wrap_soundlatch_w, pas par hold_cpu1 (pollué YM IRQ).
+        if (cpu == 0 && g_attract_started) {
+            if ((++g_cpu0_skip & 1) != 0) return cycles;
         }
 
         // cpu2/3 (DAC cards) : exécuter UNIQUEMENT sur NMI (s80bs_cause_dac_nmi_w).

@@ -261,13 +261,10 @@ static void mixer_channel_resample_set(struct mixer_channel_data * const channel
 	channel->to_frequency = to_frequency;
 
 #ifdef ESP_PLATFORM
-	// Sur ESP32-S3 (Xtensa LX7 sans SIMD), le filtre SINC_FASTEST coûte ~169 MACs
-	// par échantillon de sortie pour les canaux DAC à 192kHz (ratio 8.7×), ce qui
-	// fait chuter le FPS à ~4. Les DAC jouent des samples 8-bit ROM : la qualité SINC
-	// y est gaspillée. On bascule sur le resampler entier legacy (décalage+fraction)
-	// qui ne dépend pas de libsamplerate pour ces canaux haute fréquence.
-	if (channel->from_frequency > 100000.0)
-		channel->legacy_resample = 1;
+	// Sur ESP32-S3, libsamplerate (SINC) est trop coûteux (~87% du CPU pour YM2151).
+	// Le legacy resample (interpolation entière) est suffisant pour du son de flipper.
+	// Forcer legacy pour TOUS les canaux, quelle que soit leur fréquence source.
+	channel->legacy_resample = 1;
 #endif
 
 	/* reset the filter state */

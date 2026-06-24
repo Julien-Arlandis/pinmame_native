@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <dirent.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -18,6 +19,7 @@
 #include "esp_heap_caps.h"
 #include "esp_task_wdt.h"
 
+#if TRANSPORT_BLE
 // NimBLE
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
@@ -25,6 +27,7 @@
 #include "host/util/util.h"
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
+#endif
 
 // USB Host + UAC
 #include "usb/usb_host.h"
@@ -50,8 +53,9 @@ static QueueHandle_t g_uac_setup_queue = NULL;
 // Appelé par le driver UAC quand l'état de l'interface change (event_handler_task)
 static void uac_device_cb(uac_host_device_handle_t handle,
                            const uac_host_device_event_t event, void* arg) {
-    ESP_LOGE(TAG, "UAC device event: %d", (int)event);
+    // TX_DONE (event=1) fire ~187×/sec — ne pas logger pour ne pas bloquer l'UART
     if (event == UAC_HOST_DRIVER_EVENT_DISCONNECTED) {
+        ESP_LOGE(TAG, "UAC device event: %d", (int)event);
         g_uac_ready = false;
         uac_host_device_stop(handle);
         uac_host_device_close(handle);
@@ -79,8 +83,11 @@ static void uac_setup_task(void* arg) {
         uac_host_device_config_t dev_cfg = {};
         dev_cfg.addr             = req.addr;
         dev_cfg.iface_num        = req.iface_num;
-        dev_cfg.buffer_size      = 16 * 1024;
-        dev_cfg.buffer_threshold = 4 * 1024;
+        /* Petit buffer SRAM : la SRAM interne peut être très réduite si le casque
+         * se connecte après le démarrage de l'émulation. 4 Ko suffisent pour un
+         * débit 48kHz/16bit/2ch (3200 octets/frame à 60fps). */
+        dev_cfg.buffer_size      = 4 * 1024;
+        dev_cfg.buffer_threshold = 1 * 1024;
         dev_cfg.callback         = uac_device_cb;
         dev_cfg.callback_arg     = NULL;
 
@@ -110,25 +117,47 @@ static void uac_setup_task(void* arg) {
     }
 }
 
-// Gestion des événements de la librairie USB host
+// Gestion des événements de la librairie USB host.
+// NE PAS logger les events ISO normaux (err=0, flags=0) : ils arrivent ~200×/sec
+// pendant le streaming audio et chaque ESP_LOGE bloque le port série assez longtemps
+// pour retarder les transferts ISO suivants → gaps audio → son haché/lent.
 static void usb_host_task(void* arg) {
     while (true) {
         uint32_t flags = 0;
         esp_err_t err = usb_host_lib_handle_events(portMAX_DELAY, &flags);
-        ESP_LOGE(TAG, "USB host event: err=%d flags=0x%x", err, (unsigned)flags);
+        if (err != ESP_OK || flags) {
+            ESP_LOGE(TAG, "USB host event: err=%d flags=0x%x", err, (unsigned)flags);
+        }
         if (flags & USB_HOST_LIB_EVENT_FLAGS_NO_CLIENTS) {
             usb_host_device_free_all();
         }
     }
 }
 
-// Tâche de lecture du buffer audio → écriture vers les écouteurs USB
+// Tâche de lecture du buffer audio → écriture vers les écouteurs USB.
+// Stratégie : si aucune nouvelle donnée n'arrive dans les 20ms (emulation lente),
+// répéter le dernier chunk connu. Le son "boucle" légèrement mais reste continu
+// et à la bonne vitesse, au lieu de jouer 66% de silence (emulation à 20fps).
+// uac_host_device_write bloque naturellement quand le buffer interne UAC (4KB) est
+// plein, ce qui régule le débit à 48kHz sans qu'on ait besoin d'un timer.
 static void uac_audio_task(void* arg) {
-    static uint8_t buf[3200]; // 1 frame = 800 samples × 2 ch × 2 octets à 48000Hz
+    static uint8_t cur[3200];
+    static uint8_t last[3200];
+    static bool    has_last = false;
+
     while (true) {
-        size_t got = usb_audio_read(buf, sizeof(buf), 500);
-        if (got > 0 && g_uac_ready && g_uac_handle) {
-            uac_host_device_write(g_uac_handle, buf, (uint32_t)got, 200);
+        size_t got = usb_audio_read(cur, sizeof(cur), 20);
+        if (got == sizeof(cur)) {
+            memcpy(last, cur, sizeof(last));
+            has_last = true;
+        } else if (has_last) {
+            got = sizeof(last);
+            memcpy(cur, last, got);
+        } else {
+            continue;
+        }
+        if (g_uac_ready && g_uac_handle) {
+            uac_host_device_write(g_uac_handle, cur, (uint32_t)got, 200);
         }
     }
 }
@@ -153,6 +182,7 @@ static void nvs_save_rom(const char* name) {
     }
 }
 
+#if TRANSPORT_BLE
 // ─── UUIDs — identiques au runtime Node.js (LSB-first pour NimBLE) ──────────
 // Service :  ab120001-b5a3-f393-e0a9-e50e24dcca9e
 // OUT(notify): ab120002-…    IN(write): ab120003-…
@@ -180,9 +210,11 @@ uint16_t g_ble_out_handle  = 0;   // handle valeur de la caractéristique OUT
 static char s_last_display[128] = {};
 static char s_last_lamp[64]     = {};
 static char s_last_status[128]  = {};
+#endif
 
 extern "C" void     ble_resend_last_state(void);
 extern "C" uint8_t* pinmame_get_dsprom_ptr(void);
+extern "C" void     api_start_synth_task(void);
 
 // ─── Parsing des commandes BLE entrantes ─────────────────────────────────────
 static void handle_ble_command(const char* line) {
@@ -210,6 +242,14 @@ static void handle_ble_command(const char* line) {
         int cmd = atoi(line + 11);
         corridor[1060] = (uint8_t)cmd;
         ESP_LOGI(TAG, "  → sound cmd=%d", cmd);
+        return;
+    }
+
+    // @sound:enabled=0/1  →  corridor[1061] : 0=activé, 1=muet
+    if (strncmp(line, "@sound:enabled=", 15) == 0) {
+        int on = atoi(line + 15);
+        corridor[1061] = (uint8_t)(on ? 0 : 1);
+        ESP_LOGI(TAG, "  → sound enabled=%d (corridor[1061]=%d)", on, corridor[1061]);
         return;
     }
 
@@ -261,6 +301,7 @@ static void handle_ble_command(const char* line) {
     ESP_LOGW(TAG, "  → commande non reconnue : %s", line);
 }
 
+#if TRANSPORT_BLE
 // ─── Buffer d'assemblage des chunks IN ───────────────────────────────────────
 static char  s_in_buf[512] = {};
 static int   s_in_len      = 0;
@@ -398,6 +439,7 @@ static void ble_host_task(void* param) {
     nimble_port_run();           // bloquant jusqu'à nimble_port_stop()
     nimble_port_freertos_deinit();
 }
+#endif // TRANSPORT_BLE
 
 // ─── Tâche d'émulation ───────────────────────────────────────────────────────
 extern "C" {
@@ -407,8 +449,10 @@ extern "C" {
 
 static void emulation_task(void* arg) {
     (void)arg;
+#if TRANSPORT_BLE
     // Laisser le BLE s'initialiser avant de démarrer l'émulation
     vTaskDelay(pdMS_TO_TICKS(1500));
+#endif
     // La tâche monopolise intentionnellement le core 1 — désactiver le watchdog
     esp_task_wdt_delete(xTaskGetCurrentTaskHandle());
     ESP_LOGI(TAG, "Démarrage émulation ROM: %s", ROM_NAME);
@@ -441,7 +485,18 @@ extern "C" void app_main(void) {
     } else {
         size_t total = 0, used = 0;
         esp_spiffs_info(NULL, &total, &used);
-        ESP_LOGI(TAG, "SPIFFS monté : %u Ko / %u Ko", (unsigned)(used/1024), (unsigned)(total/1024));
+        ESP_LOGE(TAG, "SPIFFS monté : %u Ko / %u Ko", (unsigned)(used/1024), (unsigned)(total/1024));
+        // Lister les fichiers présents dans SPIFFS pour diagnostiquer le chemin
+        DIR* d = opendir("/spiffs");
+        if (!d) {
+            ESP_LOGE(TAG, "SPIFFS: opendir('/spiffs') impossible");
+        } else {
+            struct dirent* ent;
+            while ((ent = readdir(d)) != NULL) {
+                ESP_LOGE(TAG, "SPIFFS fichier: /%s", ent->d_name);
+            }
+            closedir(d);
+        }
     }
 
     // Charger le nom de ROM depuis NVS (si sauvegardé via @rom:name=)
@@ -481,7 +536,7 @@ extern "C" void app_main(void) {
     g_uac_setup_queue = xQueueCreate(4, sizeof(uac_setup_req_t));
     ESP_ERROR_CHECK(uac_host_install(&uac_cfg));
     xTaskCreatePinnedToCoreWithCaps(uac_setup_task, "uac_setup", 4096, NULL, 9, NULL, 0,
-        MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     xTaskCreatePinnedToCoreWithCaps(uac_audio_task, "uac_audio", 4096, NULL, 8, NULL, 0,
         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
 
@@ -489,6 +544,7 @@ extern "C" void app_main(void) {
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
 
+#if TRANSPORT_BLE
     // NimBLE
     ret = nimble_port_init();
     if (ret != ESP_OK) { ESP_LOGE(TAG, "nimble_port_init failed: %d", ret); return; }
@@ -505,14 +561,19 @@ extern "C" void app_main(void) {
 
     nimble_port_freertos_init(ble_host_task);
 
-
     ESP_LOGE(TAG, "[MEM] apres BLE  — SRAM libre: %u  bloc max: %u",
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+#endif
+
 
     // Pile agrandie 32K -> 49K : suspectée trop juste (cf. canary réactivé dans
     // sdkconfig.defaults), un dépassement silencieux pouvant corrompre des
     // variables locales (ex. IntegerDivideByZero observé dans le resampler).
+    // SRAM INTERNAL obligatoire : la tâche accède à SPIFFS (cache SPI désactivé
+    // pendant la lecture flash → SPIRAM inaccessible → crash immédiat si stack en PSRAM).
+    api_start_synth_task();  // YM2151 sur Core 0 à débit wall-clock (v3.161)
+
     BaseType_t ok = xTaskCreatePinnedToCoreWithCaps(
         emulation_task, "pinmame", 49152, NULL, 5, NULL, 1,
         MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT

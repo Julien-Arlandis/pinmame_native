@@ -16,9 +16,11 @@
 #include "freertos/stream_buffer.h"
 #include "esp_log.h"
 
+#if TRANSPORT_BLE
 // NimBLE
 #include "host/ble_hs.h"
 #include "host/ble_att.h"
+#endif
 
 static const char* TAG = "HAL";
 
@@ -28,9 +30,11 @@ extern "C" void esp_loge_fps(float fps) {
 
 typedef int64_t hal_cycles_t;
 
+#if TRANSPORT_BLE
 // Déclarés dans main_esp32.cpp
 extern uint16_t g_ble_conn_handle;
 extern uint16_t g_ble_out_handle;
+#endif
 
 // DAC depuis api.cpp
 extern "C" {
@@ -62,6 +66,7 @@ static void url_encode(const char* src, char* dst, size_t dstlen) {
     dst[j] = '\0';
 }
 
+#if TRANSPORT_BLE
 // ─── bleSend : envoie une ligne via BLE notify (chunking identique Node.js) ──
 static void bleSend(const char* line) {
     if (g_ble_conn_handle == BLE_HS_CONN_HANDLE_NONE) return;
@@ -109,6 +114,10 @@ extern "C" void ble_resend_last_state(void) {
     if (s_last_display[0]) bleSend(s_last_display);
     if (s_last_lamp[0])    bleSend(s_last_lamp);
 }
+#else
+static void bleSend(const char*) {}
+extern "C" void ble_resend_last_state(void) {}
+#endif
 
 // ─── Prototype audio-over-BLE ─────────────────────────────────────────────
 // Paquet = [0x02][échantillons mono 8-bit, 11025Hz] — tag 0x02 distinct des

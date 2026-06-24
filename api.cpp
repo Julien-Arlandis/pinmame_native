@@ -94,10 +94,11 @@ extern "C" {
 }
 
 #define ABMAX 131072
-// Sur ESP32 : synthèse à 48000Hz → sortie UAC (USB-C, taux standard).
+// Sur ESP32 : synthèse à 6000Hz, puis 8× upsample (repeat) vers 48kHz UAC.
+// Halving the sample rate halves the YM2151 work per frame → ~2× more FPS.
 // Sur WASM/natif : 44100Hz pour la qualité maximale.
 #ifdef ESP_PLATFORM
-#define SPF   800    // 48000 / 60 fps
+#define SPF   100    // 6000Hz → ring rempli par OPMUpdateOne (Core 1), upsample wall-clock dans audio_push_frame
 #else
 #define SPF   735    // 44100 / 60 fps
 #endif
@@ -112,7 +113,7 @@ extern "C" {
 // Gros buffers : 256KB + 8KB + 32KB → PSRAM sur ESP32, SRAM sur natif/WASM
 static PSRAM_BSS_ATTR INT16 g_ring[ABMAX];
 static INT16 g_lin[DMAX];
-static int   g_wi = 0, g_ri = 0;
+static volatile int g_wi = 0, g_ri = 0;  // volatile : partagé Core 0 (prod) / Core 1 (cons)
 static int   g_dac[2][DMAX], g_dn[2] = {};
 
 extern "C" void stream_update(int, int);
@@ -380,6 +381,13 @@ extern "C" {
 #ifdef ESP_PLATFORM
     #include "esp_log.h"
     #include "esp_timer.h"
+    // BIT(x,n) de PinMAME/common.h entre en conflit avec BIT(x) d'ESP-IDF/xt_utils.h
+    #pragma push_macro("BIT")
+    #undef BIT
+    #include "freertos/FreeRTOS.h"
+    #include "freertos/task.h"
+    #include "freertos/semphr.h"
+    #pragma pop_macro("BIT")
     // Carte son GTS80B (gts80s.c) : nmi_callback() se réarme indéfiniment via
     // timer_set() et appelle cpu_boost_interleave(10us,800us) à chaque réarmement
     // -> c'est ça qui hache le scheduler (1378 appels/frame). On neutralise
@@ -387,6 +395,157 @@ extern "C" {
     // il n'a pas besoin de ce boost d'interleave pour produire le son).
     extern "C" void __real_cpu_boost_interleave(double timeslice_time, double boost_duration);
     extern "C" void __wrap_cpu_boost_interleave(double timeslice_time, double boost_duration) {}
+
+    static volatile bool     g_sound_enabled = true;
+    static volatile int32_t  g_ym_irq_count  = 0;
+    static volatile bool     g_ym2151_ready  = false;
+    static void (*g_irq)(int, int) = nullptr;
+    static volatile int32_t  g_bridge_s1 = 0;
+    static volatile int32_t  g_bridge_s0 = 0;
+
+    // Skip adaptatif cpu2/3 (DAC cards GTS80B) :
+    // - NMI en attente → exécuter immédiatement (pas de skip)
+    // - Pas de NMI → skip 87.5% pour économiser le CPU
+    // Cela résout le deadlock de v3.182 : cpu1 envoie NMI à cpu2/3, cpu2/3
+    // répondent immédiatement au lieu d'attendre leur prochain tour skippé.
+    static volatile int32_t g_nmi_pending[4] = {};
+    static volatile int32_t g_nmi_pm_total = 0; // cumulatif NMIs reçus par cpu1
+    static volatile int32_t g_irq_hold_cpu1 = 0; // HOLD_LINE IRQ0 cpu1
+    static uint8_t          g_cpu0_skip = 0;
+    static uint8_t          g_cpu23_skip = 0; // skip 87.5% quand pas de NMI en attente
+
+    // v3.174 : wrapper YM2151_word_0_w pour tracer les writes de cpu1 vers le YM2151.
+    // Diagnostic clé : si jamais appelé → cpu1 ne programme pas le YM2151.
+    extern "C" void __real_YM2151_word_0_w(unsigned int offset, unsigned char data);
+    extern "C" void __wrap_YM2151_word_0_w(unsigned int offset, unsigned char data) {
+        static int32_t g_ym_wc = 0;
+        int32_t n = ++g_ym_wc;
+        if (n <= 30 || (n % 500) == 0)
+            ESP_LOGE("YM2151", "write #%ld port=%d data=0x%02x hold_cpu1=%ld nmi_total=%ld",
+                     (long)n, (int)offset, (int)data, (long)g_irq_hold_cpu1, (long)g_nmi_pm_total);
+        __real_YM2151_word_0_w(offset, data);
+    }
+
+    // v3.174 : wrapper soundlatch_w pour tracer les commandes cpu0→cpu1.
+    extern "C" void __real_soundlatch_w(int offset, int data);
+    extern "C" void __wrap_soundlatch_w(int offset, int data) {
+        static int32_t g_sl = 0;
+        int32_t n = ++g_sl;
+        if (n <= 20)
+            ESP_LOGE("SLATCH", "soundlatch_w #%ld data=0x%02x hold_cpu1=%ld",
+                     (long)n, (unsigned)data & 0xff, (long)g_irq_hold_cpu1);
+        __real_soundlatch_w(offset, data);
+    }
+
+    extern "C" void __real_cpu_set_irq_line(int cpu_num, int irq_line, int state);
+
+    // Wrapper m6502_execute
+    extern "C" int __real_m6502_execute(int cycles);
+    extern "C" int cpu_getactivecpu(void);
+    extern "C" int __wrap_m6502_execute(int cycles) {
+        const int cpu = cpu_getactivecpu();
+        // cpu0 : pleine vitesse jusqu'au 4ème soundlatch (0xe4 ou dernier d'init).
+        // Après : skip 87.5% → 60fps, musique à vitesse correcte.
+        // Seuil 4 : fonctionne pour les séquences de 4 (sw[27]×1) ou 5 soundlatches.
+        if (cpu == 0 && g_irq_hold_cpu1 >= 4) {
+            if ((++g_cpu0_skip & 7) != 0) return cycles;
+        }
+
+        // cpu2/3 (DAC cards) : exécuter UNIQUEMENT sur NMI (s80bs_cause_dac_nmi_w).
+        // Sans NMI : skip 100% (return cycles). Le scheduler MAME avance normalement
+        // mais les cpu2/3 n'écrivent rien au DAC → zéro son parasite.
+        // Sans ce skip, la boucle d'attente des cpu2/3 génère du bruit DAC aléatoire.
+        if (cpu == 2 || cpu == 3) {
+            if (g_nmi_pending[cpu] > 0) {
+                __atomic_sub_fetch(&g_nmi_pending[cpu], 1, __ATOMIC_RELAXED);
+            } else {
+                return cycles;
+            }
+        }
+
+        static int64_t s_in_us = 0, s_in_cycles = 0;
+        static int64_t s_out_us = 0;
+        static int64_t s_last_exit_us = 0;
+        static int64_t s_report_t0 = 0;
+        static int64_t s_call_count = 0;
+        static int64_t s_irq_delivered = 0;
+
+        if (g_ym_irq_count > 0 && g_irq && cpu > 0) {
+            __atomic_sub_fetch(&g_ym_irq_count, 1, __ATOMIC_RELAXED);
+            g_irq(0, 1);  // IRQHandler(chip=0, state=ASSERT=1) → ym2151_irq(1) → cpu1 IRQ0
+            s_irq_delivered++;
+        }
+
+        int64_t enter_us = esp_timer_get_time();
+        if (s_last_exit_us > 0)
+            s_out_us += enter_us - s_last_exit_us;
+
+        int ret = __real_m6502_execute(cycles);
+
+        int64_t exit_us = esp_timer_get_time();
+        s_in_us     += exit_us - enter_us;
+        s_in_cycles += cycles;
+        s_call_count++;
+        s_last_exit_us = exit_us;
+
+        if (exit_us - s_report_t0 >= 3000000LL) {
+            int64_t esp_in  = s_in_cycles > 0 ? (s_in_us  * 240LL / s_in_cycles)  : 0;
+            int64_t avg_cyc = s_call_count > 0 ? s_in_cycles / s_call_count : 0;
+            int32_t hold = (int32_t)g_irq_hold_cpu1;
+            int32_t bs1 = __atomic_exchange_n(&g_bridge_s1, 0, __ATOMIC_RELAXED);
+            int32_t bs0 = __atomic_exchange_n(&g_bridge_s0, 0, __ATOMIC_RELAXED);
+            ESP_LOGE("M6502", "cpu=%d cyc=%lld calls=%lld avg_cyc/call=%lld in_ms=%lld out_ms=%lld esp/cyc_in=%lld irq_del=%lld nmi_total=%ld hold_cpu1=%ld nmi_p2=%ld nmi_p3=%ld ym_tmr_fire=%ld ym_tmr_clr=%ld",
+                cpu,
+                (long long)s_in_cycles, (long long)s_call_count, (long long)avg_cyc,
+                (long long)(s_in_us/1000), (long long)(s_out_us/1000),
+                (long long)esp_in, (long long)s_irq_delivered,
+                (long)g_nmi_pm_total, (long)hold,
+                (long)g_nmi_pending[2], (long)g_nmi_pending[3],
+                (long)bs1, (long)bs0);
+            s_in_us = 0; s_in_cycles = 0; s_out_us = 0; s_call_count = 0; s_irq_delivered = 0;
+            s_report_t0 = exit_us;
+        }
+        return ret;
+    }
+
+    // NMIs cpu1 et cpu2/3 tous débloqués.
+    // cpu2/3 : g_nmi_pending[] permet le skip adaptatif dans __wrap_m6502_execute.
+    extern "C" void __wrap_cpu_set_irq_line(int cpu_num, int irq_line, int state) {
+        if (cpu_num == 1 && irq_line == 0 && (state == 1 || state == 2))
+            __atomic_add_fetch(&g_irq_hold_cpu1, 1, __ATOMIC_RELAXED);
+        if (irq_line == 127 && state == 3) {
+            if (cpu_num == 1)
+                __atomic_add_fetch(&g_nmi_pm_total, 1, __ATOMIC_RELAXED);
+            else if (cpu_num == 2 || cpu_num == 3)
+                __atomic_add_fetch(&g_nmi_pending[cpu_num], 1, __ATOMIC_RELAXED);
+        }
+        __real_cpu_set_irq_line(cpu_num, irq_line, state);
+    }
+
+    // Impose un minimum de timeslice pour éviter l'overhead des milliers d'appels
+    // à cpu_timeslice() par seconde (avg=160µs, min=0µs par perte de précision float).
+    // 1ms → ~600 appels/s (÷6 baseline). Timeslice plus grand n'aide pas car les
+    // callbacks audio (YM2151, DAC) dominent le out_ms indépendamment de la taille.
+    static constexpr double MIN_TIMESLICE_S = 0.001;  // 1ms = 2000 cycles @ 2MHz
+
+    extern "C" double __real_timer_time_until_next_timer(void);
+    extern "C" double __wrap_timer_time_until_next_timer(void) {
+        double t = __real_timer_time_until_next_timer();
+        static double  s_min = 1.0, s_sum = 0.0;
+        static int64_t s_count = 0, s_last = 0;
+        if (t < s_min) s_min = t;
+        s_sum += t;
+        s_count++;
+        int64_t now = esp_timer_get_time();
+        if (now - s_last >= 3000000LL) {
+            double avg_us = s_count > 0 ? s_sum / s_count * 1e6 : 0.0;
+            ESP_LOGE("TMR", "calls=%lld min_us=%.1f avg_us=%.1f",
+                (long long)s_count, s_min * 1e6, avg_us);
+            s_min = 1.0; s_sum = 0.0; s_count = 0; s_last = now;
+        }
+        return t < MIN_TIMESLICE_S ? MIN_TIMESLICE_S : t;
+    }
+
 #endif
 
     int osd_update_audio_stream(INT16 *b) {
@@ -410,54 +569,63 @@ extern "C" {
     void OKIM6295_sh_stop() {} void OKIM6295_sh_update() {}
 
     void audio_push_frame(uint32_t gen) {
+#ifdef ESP_PLATFORM
+        // synth_task (Core 0) avance le YM2151 et pousse directement vers UAC.
+        // Ici : juste vider les buffers DAC (inutilisés sur GTS80B).
+        (void)gen;
+        g_dn[0] = g_dn[1] = 0;
+#else
         int n = (g_wi - g_ri + ABMAX) % ABMAX;
         if (!n) return;
         if (n > DMAX) n = DMAX;
         for (int i = 0; i < n; i++) { g_lin[i] = g_ring[g_ri]; g_ri = (g_ri + 1) % ABMAX; }
         hal_push_audio((uintptr_t)g_lin, n, gen);
+#endif
     }
 
-    static void (*g_irq)(int, int) = nullptr;
-    static void irq_bridge(int s) { if (g_irq) g_irq(0, s); }
-    int OPMInit(int n, int c, int r, void (*)(int,int,int,double), void (*ih)(int,int)) {
-        g_irq = ih; int res = YM2151Init(n,(double)c,(double)r); YM2151SetIrqHandler(n,irq_bridge); return res;
+    // irq_bridge : appelé par le YM2151 dans deux contextes distincts.
+    //   s=1 : timer overflow depuis synth_task (Core 0) → queue l'ASSERT pour Core 1
+    //   s=0 : flag effacé par YM2151WriteReg (Core 1, inside CPU IRQ handler)
+    //          → livre le CLEAR immédiatement (on est déjà sur Core 1)
+    // Sans ce CLEAR, la ligne IRQ reste assertée → le 6808 reboucle en permanence
+    // dans son handler → musique figée → son de plus en plus lent.
+    static void IRAM_ATTR irq_bridge(int s) {
+        if (s) {
+            __atomic_add_fetch(&g_ym_irq_count, 1, __ATOMIC_RELAXED);
+            __atomic_add_fetch(&g_bridge_s1, 1, __ATOMIC_RELAXED);
+        } else {
+            __atomic_add_fetch(&g_bridge_s0, 1, __ATOMIC_RELAXED);
+            if (g_irq) g_irq(0, 0); // CLEAR sur Core 1 : safe (YM2151WriteReg l'appelle)
+        }
     }
+    int OPMInit(int n, int c, int r, void (*)(int,int,int,double), void (*ih)(int,int)) {
+        g_irq = ih;
+        ESP_LOGE("OPM", "OPMInit n=%d g_irq=%s", n, ih ? "NON-NULL" : "NULL");
+        int res = YM2151Init(n,(double)c,(double)r); YM2151SetIrqHandler(n,irq_bridge);
+        g_ym2151_ready = true;
+        return res;
+    }
+
     void OPMShutdown() { YM2151Shutdown(); }
     void OPMResetChip(int n) { YM2151ResetChip(n); }
     void OPMUpdateOne(int n, INT16 **b, int l) {
-        // Synthèse FM réelle réactivée : nécessaire au prototype audio-over-BLE
-        // (avant, sans speaker, on zappait le calcul pour gagner ~90ms/frame).
+#ifdef ESP_PLATFORM
+        (void)n; (void)b; (void)l; // synth_task (Core 0) avance le YM2151
+#else
         YM2151UpdateOne(n, b, l);
+#endif
     }
     void OPMSetPortHander(int, void (*)(unsigned, unsigned char)) {}
     int  YM2151TimerOver(int, int) { return 0; }
     static int g_reg = 0;
     void YM2151_register_port_0_w(offs_t, data8_t d) { g_reg = d; }
     void YM2151_data_port_0_w(offs_t, data8_t d) {
-#ifdef ESP_PLATFORM
-        /* Diagnostic temporaire : compter les écritures de registres YM2151
-           pour savoir si le jeu envoie réellement des commandes au chip
-           (bug "aucun son" — peak=0 systématique côté synthèse). */
-        {
-            static uint32_t s_writes = 0;
-            static int64_t s_last_log_us = 0;
-            s_writes++;
-            int64_t now_us = esp_timer_get_time();
-            if (now_us - s_last_log_us >= 3000000LL) {
-                s_last_log_us = now_us;
-                ESP_LOGE("YM2151W", "writes=%u last_reg=0x%02X last_data=0x%02X", (unsigned)s_writes, (unsigned)g_reg, (unsigned)d);
-                s_writes = 0;
-            }
-        }
-#endif
 #ifndef ESP_PLATFORM
-        // Flush l'audio avant chaque write pour la précision de timing intratrame.
-        // Sur ESP32 : désactivé — stream_update() sur chaque write déclenchait la
-        // synthèse YM2151 3-4× trop souvent (155 writes/3s × 4 streams = 620 appels
-        // vs 19 fps × 4 = 76 appels/3s), ce qui causait une chute de FPS de 24→19.
-        // La synthèse se fait une fois par frame via le mixer, ce qui est suffisant.
         for (int i = 0; i < 4; i++) stream_update(i, 0);
 #endif
+        // Sur ESP32 : pas de mutex — les writes registres (Core 1) sont fréquents
+        // (~centaines/sec). Un conflit avec YM2151UpdateOne (Core 0) produit au pire
+        // un sample incorrect, inaudible sur un flipper.
         YM2151WriteReg(0, g_reg, d);
     }
     EMSCRIPTEN_KEEPALIVE int  api_get_dac_count(int c)   { return (unsigned)c < 2 ? g_dn[c] : 0; }
@@ -471,9 +639,15 @@ extern "C" {
         static bool     machine_info_posted = false;
 
 #ifdef ESP_PLATFORM
-        // Compteur FPS
+        // Compteur FPS + mesure temps frame total vs temps callback
         static int64_t fps_t0 = 0;
         static int fps_count = 0;
+        static int64_t s_last_frame_us = 0;
+        static int64_t s_cb_us = 0, s_emu_us = 0, s_frame_count = 0;
+        int64_t cb_enter_us = esp_timer_get_time();
+        if (s_last_frame_us > 0)
+            s_emu_us += cb_enter_us - s_last_frame_us;  // temps pur emulation entre 2 callbacks
+        s_frame_count++;
         int64_t now_us = hal_cycles() / 1000LL;
         fps_count++;
         if (now_us - fps_t0 >= 5000000LL) {
@@ -627,7 +801,24 @@ extern "C" {
             hal_post_log(sound_user_cmd, emulator_generation);
         }
 
+        g_sound_enabled = (g_shared_corridor[1061] == 0);
+
         audio_push_frame(emulator_generation);
+
+#ifdef ESP_PLATFORM
+        {
+            int64_t cb_exit_us = esp_timer_get_time();
+            s_cb_us += cb_exit_us - cb_enter_us;
+            s_last_frame_us = cb_exit_us;
+            if (s_frame_count >= 20) {
+                ESP_LOGE("FRAME", "frames=%lld emu_ms=%lld cb_ms=%lld emu%%=%lld",
+                    (long long)s_frame_count,
+                    (long long)(s_emu_us/1000), (long long)(s_cb_us/1000),
+                    s_emu_us ? (long long)(s_emu_us*100/(s_emu_us+s_cb_us)) : 0);
+                s_emu_us = 0; s_cb_us = 0; s_frame_count = 0;
+            }
+        }
+#endif
 
 #ifndef ESP_PLATFORM
         uint32_t js_buffer_dist = 0;
@@ -927,7 +1118,7 @@ extern "C" {
             drivers[game_index]->driver_init();
         if (!rompath_extra) rompath_extra = (char*)hal_rompath();
 #ifdef ESP_PLATFORM
-        options.samplerate = 48000;
+        options.samplerate = 6000;   // Synthèse réduite → YM2151 8× moins cher ; upsample ×8 dans audio_push_frame
 #else
         options.samplerate = 44100;
 #endif
@@ -936,6 +1127,62 @@ extern "C" {
         run_game(game_index);
     }
 
+}
+
+// YM2151 interne : clock/64 = 4MHz/64 = 62500 Hz. Buffers en SRAM statique.
+#ifdef ESP_PLATFORM
+#define YM_RATE  62500
+#define YM_BUF   1300   // 17ms × 62500 = 1062, marge pour drift scheduler
+static INT16 s_synth_L[YM_BUF], s_synth_R[YM_BUF];
+
+static void synth_task(void* pv) {
+    while (!g_ym2151_ready) vTaskDelay(pdMS_TO_TICKS(10));
+
+    INT16* bufs[2] = { s_synth_L, s_synth_R };
+    int64_t s_last_us = 0;
+    TickType_t tick = xTaskGetTickCount();
+
+    for (;;) {
+        vTaskDelayUntil(&tick, pdMS_TO_TICKS(17));
+
+        int64_t now_us = esp_timer_get_time();
+        if (s_last_us == 0) { s_last_us = now_us; continue; }
+        int64_t elapsed_us = now_us - s_last_us;
+        s_last_us = now_us;
+
+        // Générer exactement elapsed_us de temps YM2151 (taux interne 62500 Hz)
+        int in_count = (int)((int64_t)YM_RATE * elapsed_us / 1000000LL);
+        if (in_count <= 0) continue;
+        if (in_count > YM_BUF) in_count = YM_BUF;
+
+        if (g_sound_enabled) {
+            YM2151UpdateOne(0, bufs, in_count);
+        } else {
+            memset(s_synth_L, 0, in_count * sizeof(INT16));
+            memset(s_synth_R, 0, in_count * sizeof(INT16));
+        }
+
+        // Downsample 62500 Hz → 48000 Hz : sélectionner target_pairs parmi in_count
+        int target_pairs = (int)((int64_t)48000 * elapsed_us / 1000000LL);
+        if (target_pairs <= 0) continue;
+        if (target_pairs > DMAX / 2) target_pairs = DMAX / 2;
+
+        int out = 0;
+        for (int j = 0; j < target_pairs; j++) {
+            int src = (j * in_count) / target_pairs;  // Bresenham select
+            g_lin[out++] = s_synth_L[src];
+            g_lin[out++] = s_synth_R[src];
+        }
+        if (out > 0) hal_push_audio((uintptr_t)g_lin, out, 0);
+    }
+}
+#endif
+
+extern "C" void api_start_synth_task(void) {
+#ifdef ESP_PLATFORM
+    xTaskCreatePinnedToCore(synth_task, "synth", 4096, NULL,
+                            configMAX_PRIORITIES - 2, NULL, 0);
+#endif
 }
 
 extern "C" void __wrap_DAC_DC_offset_correction_data_16_w(int n, int d) {

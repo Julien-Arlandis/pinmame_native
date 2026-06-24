@@ -81,11 +81,21 @@ set(PINMAME_INCS
     ${PM}/src/sound
 )
 
+# --- Transport BLE : mettre TRANSPORT_BLE à 0 pour mesurer le coût CPU ------
+# (rebuild complet nécessaire après changement ; retirer aussi "bt" de REQUIRES)
+set(TRANSPORT_BLE 1)
+
 # --- Enregistrement du composant ------------------------------------------
+if(TRANSPORT_BLE)
+    set(TRANSPORT_REQUIRES bt)
+else()
+    set(TRANSPORT_REQUIRES "")
+endif()
+
 idf_component_register(
     SRCS        ${PINMAME_SRCS} ${APP_SRCS}
     INCLUDE_DIRS ${PINMAME_INCS}
-    REQUIRES    esp_timer freertos nvs_flash spiffs app_update esp_system zlib bt usb
+    REQUIRES    esp_timer freertos nvs_flash spiffs app_update esp_system zlib ${TRANSPORT_REQUIRES} usb
     LDFRAGMENTS "linker.lf"
 )
 
@@ -107,9 +117,12 @@ target_compile_options(${COMPONENT_LIB} PRIVATE
     -O2
 )
 
+# --- Passe TRANSPORT_BLE au préprocesseur C/C++ (suit la variable CMake) ----
+target_compile_definitions(${COMPONENT_LIB} PRIVATE TRANSPORT_BLE=${TRANSPORT_BLE})
+
 # --- api.cpp : force déclaration logerror (comme le build natif) ----------
 set_source_files_properties(${ROOT}/api.cpp PROPERTIES
-    COMPILE_FLAGS "-DMAME_DEBUG -std=gnu++17"
+    COMPILE_FLAGS "-DMAME_DEBUG -std=gnu++17 -O3"
 )
 
 # --- hal_esp32.cpp & main_esp32.cpp : C++17 --------------------------------
@@ -117,6 +130,23 @@ set_source_files_properties(
     ${ROOT}/esp32/hal_esp32.cpp
     main_esp32.cpp
     PROPERTIES COMPILE_FLAGS "-std=gnu++17"
+)
+
+# --- PINMAME_SRCS en -O3 : aucun IRAM_ATTR → pas de risque de débordement IRAM ----------
+# api.cpp/hal_esp32.cpp/main_esp32.cpp ont des IRAM_ATTR et restent à -O2.
+# Les sources PinMAME (cpuexec.c, m6502.c, timer.c, ym2151.c, fm.c …) n'en ont pas.
+foreach(src ${PINMAME_SRCS})
+    set_source_files_properties(${src} PROPERTIES COMPILE_FLAGS "-O3")
+endforeach()
+
+# mixer_patched.c est aussi dans le chemin chaud (resampling par frame)
+set_source_files_properties(${ROOT}/esp32/mixer_patched.c PROPERTIES COMPILE_FLAGS "-O3")
+
+# -ffast-math en plus pour la synthèse FM pure (maths float, safe avec double_as_float.c)
+set_source_files_properties(
+    ${PM}/src/sound/ym2151.c
+    ${PM}/src/sound/fm.c
+    PROPERTIES COMPILE_FLAGS "-O3 -ffast-math"
 )
 
 # --- unix/fileio.c : renommer osd_display_loading_rom_message --------------
@@ -148,5 +178,14 @@ target_link_libraries(${COMPONENT_LIB} INTERFACE
     # GTS80B : neutralise cpu_boost_interleave une fois le CPU audio suspendu
     # (sinon le timer NMI orphelin de gts80s.c continue à hacher le scheduler)
     -Wl,--wrap=cpu_boost_interleave
+    # Profiling v3.143 : mesure temps intérieur vs overhead cpuexec entre appels
+    -Wl,--wrap=m6502_execute
+    # Dichotomie v3.144 : mesure taille réelle des timeslices (valeurs min/avg)
+    -Wl,--wrap=timer_time_until_next_timer
+    # v3.170 : bloquer NMI PinMAME cpu1 pour remplacer par NMI wall-clock calibrés
+    -Wl,--wrap=cpu_set_irq_line
+    # v3.174 : tracer les writes YM2151 (cpu1→YM2151) et les commandes soundlatch (cpu0→cpu1)
+    -Wl,--wrap=YM2151_word_0_w
+    -Wl,--wrap=soundlatch_w
 )
 

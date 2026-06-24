@@ -283,7 +283,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.128';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.196';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();
@@ -653,6 +653,7 @@ async function bootstrap() {
 
     window.setAudioMix = (chip, dac) => _masterRef.current?.send(`@audio:chip=${chip}&dac=${dac}`);
     window.setAudioSep = (s)         => _masterRef.current?.send(`@audio:sep=${s ? 1 : 0}`);
+    window.setSoundEnabled = (on)    => _masterRef.current?.send(`@sound:enabled=${on ? 1 : 0}`);
     window.startCapture = () => _masterRef.current?.send('@capture:action=start');
     window.stopCapture  = () => _masterRef.current?.send('@capture:action=stop');
 

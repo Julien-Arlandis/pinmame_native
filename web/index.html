@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PinMAME Workbench v3.128</title>
+    <title>PinMAME Workbench v3.196</title>
     <style>
         :root {
             --bg-main: #050505;
@@ -798,9 +798,12 @@
                     <div style="margin-bottom:10px; display:flex; flex-direction:column; gap:8px;">
                         <div style="display:flex; justify-content:space-between; align-items:center;">
                             <div style="font-size:0.65rem; color:#555; text-transform:uppercase; font-weight:bold; letter-spacing:1px;">Mix Audio</div>
-                            <div style="display:flex; border:1px solid #333; border-radius:4px; overflow:hidden;">
-                                <button id="btnMix" class="mode-btn"        style="font-size:0.65rem; padding:3px 10px;">MONO</button>
-                                <button id="btnSep" class="mode-btn active" style="font-size:0.65rem; padding:3px 10px;">SPLIT</button>
+                            <div style="display:flex; gap:6px; align-items:center;">
+                                <button id="btnSoundToggle" class="mode-btn active" style="font-size:0.65rem; padding:3px 10px; border-color:#00cc44; color:#00cc44;">SON ON</button>
+                                <div style="display:flex; border:1px solid #333; border-radius:4px; overflow:hidden;">
+                                    <button id="btnMix" class="mode-btn"        style="font-size:0.65rem; padding:3px 10px;">MONO</button>
+                                    <button id="btnSep" class="mode-btn active" style="font-size:0.65rem; padding:3px 10px;">SPLIT</button>
+                                </div>
                             </div>
                         </div>
                         <div style="display:flex; align-items:center; gap:10px;">
@@ -905,6 +908,18 @@
             }
             btnMix.addEventListener('click', () => setSepMode(false));
             btnSep.addEventListener('click', () => setSepMode(true));
+
+            const btnSoundToggle = document.getElementById('btnSoundToggle');
+            let _soundOn = true;
+            btnSoundToggle.addEventListener('click', () => {
+                _soundOn = !_soundOn;
+                btnSoundToggle.textContent = _soundOn ? 'SON ON' : 'SON OFF';
+                btnSoundToggle.style.borderColor = _soundOn ? '#00cc44' : '#ff4444';
+                btnSoundToggle.style.color        = _soundOn ? '#00cc44' : '#ff4444';
+                btnSoundToggle.classList.toggle('active', _soundOn);
+                if (window.setSoundEnabled) window.setSoundEnabled(_soundOn);
+            });
+
             window._onEngineReady = function() {
                 if (window.setAudioSep) window.setAudioSep(btnSep.classList.contains('active'));
                 if (scopeOverlay.style.display !== 'none') {

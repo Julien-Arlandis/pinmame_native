@@ -272,6 +272,11 @@ function createEmulator({ sendLine, sendAudio, sendCapture, sendScope, loadRom }
         pinmameInstance.HEAPU8[vfdMemoryPointer + 1060] = cmd;
     }
 
+    function setSoundEnabled(on) {
+        if (!pinmameInstance || !vfdMemoryPointer) return;
+        pinmameInstance.HEAPU8[vfdMemoryPointer + 1061] = on ? 0 : 1;
+    }
+
     function setAudioDistance(dist) {
         if (!pinmameInstance || !vfdMemoryPointer) return;
         if (isNaN(dist)) return;
@@ -311,7 +316,10 @@ function createEmulator({ sendLine, sendAudio, sendCapture, sendScope, loadRom }
             setDip(parseInt(p.get('id')), parseInt(p.get('state')));
         } else if (line.startsWith('@sound:')) {
             p = new URLSearchParams(line.slice(7));
-            setSoundCmd(parseInt(p.get('cmd')));
+            const cmd = p.get('cmd');
+            if (cmd !== null) setSoundCmd(parseInt(cmd));
+            const enabled = p.get('enabled');
+            if (enabled !== null) setSoundEnabled(enabled === '1');
         } else if (line.startsWith('@audio:')) {
             p = new URLSearchParams(line.slice(7));
             setAudioDistance(parseInt(p.get('distance')));

@@ -511,7 +511,9 @@ extern "C" {
     // NMIs cpu1 et cpu2/3 tous débloqués.
     // cpu2/3 : g_nmi_pending[] permet le skip adaptatif dans __wrap_m6502_execute.
     extern "C" void __wrap_cpu_set_irq_line(int cpu_num, int irq_line, int state) {
-        if (cpu_num == 1 && irq_line == 0 && (state == 1 || state == 2))
+        // HOLD_LINE=2 = soundlatch, ASSERT_LINE=1 = IRQ YM2151 timer (très fréquente).
+        // Compter uniquement les soundlatches (state==2) sinon hold_cpu1 monte en ms.
+        if (cpu_num == 1 && irq_line == 0 && state == 2)
             __atomic_add_fetch(&g_irq_hold_cpu1, 1, __ATOMIC_RELAXED);
         if (irq_line == 127 && state == 3) {
             if (cpu_num == 1)

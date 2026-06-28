@@ -149,9 +149,9 @@ void hal_osd_exit(void) {
 }
 
 // ─── Audio USB ───────────────────────────────────────────────────────────────
-// Après SRC : ~857 paires stéréo 16-bit/frame × 4 octets ≈ 3428 octets.
-// On arrondit à 4096 pour la trigger threshold du StreamBuffer.
-#define USB_AUDIO_FRAME_BYTES  4096
+// Après SRC : ~857 paires/frame × 4 octets ≈ 3428 octets.
+// Trigger conservé à 3200 (seuil de réveil OK, légèrement sous la taille réelle).
+#define USB_AUDIO_FRAME_BYTES  3200
 #define USB_AUDIO_SB_SIZE      (USB_AUDIO_FRAME_BYTES * 16)
 
 static StreamBufferHandle_t g_audio_sb  = NULL;

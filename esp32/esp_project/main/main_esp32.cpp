@@ -210,7 +210,7 @@ static char s_last_lamp[64]     = {};
 static char s_last_status[128]  = {};
 #endif
 
-#define ESP_FW_VER "3.222"
+#define ESP_FW_VER "3.223"
 
 extern "C" void     ble_resend_last_state(void);
 extern "C" void     ble_send_msg(const char* msg);
@@ -385,6 +385,16 @@ static int gap_event_cb(struct ble_gap_event* event, void* arg) {
         if (event->connect.status == 0) {
             g_ble_conn_handle = event->connect.conn_handle;
             ESP_LOGI(TAG, "BLE connecté (handle=%d)", g_ble_conn_handle);
+            // Demander l'intervalle de connexion minimum (6×1.25ms=7.5ms) pour
+            // maximiser le débit display. Le central peut refuser ou arrondir.
+            struct ble_gap_upd_params upd = {};
+            upd.itvl_min         = 6;    // 6 × 1.25ms = 7.5ms
+            upd.itvl_max         = 12;   // 12 × 1.25ms = 15ms
+            upd.latency          = 0;
+            upd.supervision_timeout = 200; // 2s
+            upd.min_ce_len       = BLE_GAP_INITIAL_CONN_MIN_CE_LEN;
+            upd.max_ce_len       = BLE_GAP_INITIAL_CONN_MAX_CE_LEN;
+            ble_gap_update_params(g_ble_conn_handle, &upd);
             // Renvoi de l'état courant au nouveau client
             vTaskDelay(pdMS_TO_TICKS(50));  // laisser le CCCD s'activer
             ble_send_msg("FW:" ESP_FW_VER);

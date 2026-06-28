@@ -26,6 +26,8 @@
 
 static const char* TAG = "HAL";
 
+extern "C" void ble_send_msg(const char* msg);
+
 extern "C" void esp_loge_fps(float fps) {
     ESP_LOGE("FPS", "emulation: %.1f fps", fps);
     char msg[32];

@@ -210,7 +210,7 @@ static char s_last_lamp[64]     = {};
 static char s_last_status[128]  = {};
 #endif
 
-#define ESP_FW_VER "3.225"
+#define ESP_FW_VER "3.226"
 
 extern "C" void     ble_resend_last_state(void);
 extern "C" void     ble_send_msg(const char* msg);

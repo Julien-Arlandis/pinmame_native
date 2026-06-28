@@ -589,14 +589,13 @@ extern "C" {
         g_dn[0] = g_dn[1] = 0;
 
         // Throttle emulation_task à exactement 60fps (16667µs/frame) avec phase-lock.
-        // Les 6 premières secondes sont laissées libres : l'émulation tourne à pleine
-        // vitesse pour que le test des lampes au boot soit aussi rapide qu'en WASM.
-        // Après 6s, le throttle stabilise le tempo de la musique YM2151.
-        static int64_t s_next_us  = 0;
-        static int64_t s_start_us = 0;
+        // esp_timer donne la précision µs ; vTaskDelay libère Core 1 pendant l'attente.
+        // Quand un frame dépasse 16.667ms (émulation trop lourde), on ne dort pas :
+        // s_next_us reste en avance et la dette se résorbe automatiquement sur les frames suivants.
+        // Si le retard dépasse 2 frames (>33ms), on réancre pour éviter un spiral-down.
+        static int64_t s_next_us = 0;
         int64_t now_us = esp_timer_get_time();
-        if (s_next_us == 0) { s_start_us = now_us; s_next_us = now_us + 16667; return; }
-        if (now_us - s_start_us < 6000000LL) { s_next_us = now_us + 16667; return; }
+        if (s_next_us == 0) { s_next_us = now_us + 16667; return; }
         int64_t wait_us = s_next_us - now_us;
         if (wait_us > 1000) {
             vTaskDelay(pdMS_TO_TICKS((wait_us + 500) / 1000));

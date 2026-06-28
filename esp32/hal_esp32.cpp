@@ -28,8 +28,12 @@ static const char* TAG = "HAL";
 
 extern "C" void ble_send_msg(const char* msg);
 
+// FPS mesuré, mis à jour toutes les 5 s — utilisé pour le SRC audio.
+static volatile float g_emulation_fps = 56.0f;
+
 extern "C" void esp_loge_fps(float fps) {
     ESP_LOGE("FPS", "emulation: %.1f fps", fps);
+    if (fps > 1.0f) g_emulation_fps = fps;
     char msg[32];
     snprintf(msg, sizeof(msg), "FPS:%.1f", fps);
     ble_send_msg(msg);
@@ -145,9 +149,9 @@ void hal_osd_exit(void) {
 }
 
 // ─── Audio USB ───────────────────────────────────────────────────────────────
-// 800 samples stéréo 16-bit par frame × 2 octets = 3200 octets/frame (48000Hz)
-// 16 frames de tampon ≈ 267 ms de latence max
-#define USB_AUDIO_FRAME_BYTES  3200
+// Après SRC : ~857 paires stéréo 16-bit/frame × 4 octets ≈ 3428 octets.
+// On arrondit à 4096 pour la trigger threshold du StreamBuffer.
+#define USB_AUDIO_FRAME_BYTES  4096
 #define USB_AUDIO_SB_SIZE      (USB_AUDIO_FRAME_BYTES * 16)
 
 static StreamBufferHandle_t g_audio_sb  = NULL;
@@ -169,16 +173,45 @@ extern "C" size_t usb_audio_read(void* dst, size_t want, uint32_t timeout_ms) {
     return xStreamBufferReceive(g_audio_sb, dst, want, pdMS_TO_TICKS(timeout_ms));
 }
 
+// SRC linéaire : compense l'écart entre le débit réel (fps × 800 paires) et
+// le taux fixe du DAC UAC (48000 Hz).  count = nb de int16 (paires L+R × 2).
 void hal_push_audio(uintptr_t ptr, int count, uint32_t gen) {
     (void)gen;
     for (int c = 0; c < 2; c++) api_reset_dac_buffer(c);
     if (!g_audio_sb || !ptr || count <= 0) return;
-    size_t bytes = (size_t)(count * 2);  // count INT16 → count*2 octets
-    xStreamBufferSend(g_audio_sb, (const void*)ptr, bytes, 0);
-    // Capture pour dump diagnostic (déclenchée uniquement par @getaudio:)
+
+    const int16_t* src  = (const int16_t*)ptr;
+    int in_pairs        = count / 2;           // paires stéréo en entrée
+    float fps           = g_emulation_fps;
+    if (fps < 10.0f) fps = 56.0f;             // garde-fou au démarrage
+    int out_pairs       = (int)(48000.0f / fps + 0.5f);  // ≈ 857 @ 56 fps
+    if (out_pairs < 1) out_pairs = 1;
+
+    // Buffer statique : 1024 paires max (4096 octets)
+    static int16_t s_out[1024 * 2];
+    if (out_pairs > 1024) out_pairs = 1024;
+
+    float step = (float)(in_pairs) / (float)(out_pairs);
+    for (int i = 0; i < out_pairs; i++) {
+        float pos  = i * step;
+        int   idx  = (int)pos;
+        float frac = pos - (float)idx;
+        if (idx >= in_pairs - 1) idx = in_pairs - 1;
+        int next   = (idx + 1 < in_pairs) ? idx + 1 : idx;
+        // canal gauche
+        s_out[i * 2]     = (int16_t)(src[idx * 2]     + frac * (src[next * 2]     - src[idx * 2]));
+        // canal droit
+        s_out[i * 2 + 1] = (int16_t)(src[idx * 2 + 1] + frac * (src[next * 2 + 1] - src[idx * 2 + 1]));
+    }
+
+    size_t bytes = (size_t)(out_pairs * 4);
+    xStreamBufferSend(g_audio_sb, s_out, bytes, 0);
+
+    // Capture dump diagnostic (brut, avant SRC)
     if (s_dump_buf && s_dump_capturing && !s_dump_done) {
+        size_t raw   = (size_t)(count * 2);
         uint32_t avail = DUMP_PCM_BYTES - s_dump_pos;
-        uint32_t n = (uint32_t)(bytes < (size_t)avail ? bytes : (size_t)avail);
+        uint32_t n   = (uint32_t)(raw < (size_t)avail ? raw : (size_t)avail);
         memcpy(s_dump_buf + s_dump_pos, (const void*)ptr, n);
         s_dump_pos += n;
         if (s_dump_pos >= DUMP_PCM_BYTES) {

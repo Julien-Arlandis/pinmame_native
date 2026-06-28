@@ -410,7 +410,9 @@ extern "C" {
     static volatile int g_opm_sample_rate = 0;
     // Mutex YM2151 : sérialise YM2151UpdateOne (Core 0, synth_task) et
     // YM2151WriteReg (Core 1, emulation_task) pour éviter le data race SMP.
+#ifdef ESP_PLATFORM
     static SemaphoreHandle_t g_ym_mutex = NULL;
+#endif
 
     // Skip adaptatif cpu2/3 (DAC cards GTS80B) :
     // - NMI en attente → exécuter immédiatement (pas de skip)
@@ -619,6 +621,7 @@ extern "C" {
     //          → livre le CLEAR immédiatement (on est déjà sur Core 1)
     // Sans ce CLEAR, la ligne IRQ reste assertée → le 6808 reboucle en permanence
     // dans son handler → musique figée → son de plus en plus lent.
+#ifdef ESP_PLATFORM
     static void IRAM_ATTR irq_bridge(int s) {
         if (s) {
             __atomic_add_fetch(&g_ym_irq_count, 1, __ATOMIC_RELAXED);
@@ -628,13 +631,18 @@ extern "C" {
             if (g_irq) g_irq(0, 0); // CLEAR sur Core 1 : safe (YM2151WriteReg l'appelle)
         }
     }
+#endif
     int OPMInit(int n, int c, int r, void (*)(int,int,int,double), void (*ih)(int,int)) {
+#ifdef ESP_PLATFORM
         g_irq = ih;
         g_opm_sample_rate = r;  // baseclock/64 = taux réel UpdateOne (≈62500 pour GTS80B)
         if (!g_ym_mutex) g_ym_mutex = xSemaphoreCreateMutex();
         ESP_LOGE("OPM", "OPMInit n=%d clock=%d rate=%d g_irq=%s", n, c, r, ih ? "NON-NULL" : "NULL");
         int res = YM2151Init(n,(double)c,(double)r); YM2151SetIrqHandler(n,irq_bridge);
         g_ym2151_ready = true;
+#else
+        int res = YM2151Init(n,(double)c,(double)r);
+#endif
         return res;
     }
 
@@ -848,7 +856,9 @@ extern "C" {
             hal_post_log(sound_user_cmd, emulator_generation);
         }
 
+#ifdef ESP_PLATFORM
         g_sound_enabled = (g_shared_corridor[1061] == 0);
+#endif
 
         audio_push_frame(emulator_generation);
 

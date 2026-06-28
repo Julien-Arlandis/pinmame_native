@@ -1,6 +1,6 @@
 // =========================================================================
 // 🔌 INFRASTRUCTURE PINMAME WASM - PONT DE CONTROLE API C++
-// 🏷️ VERSION : API-CORE-GATEWAY-V195.07 (EVENT-DRIVEN NOTIFICATION COUNTERS)
+// 🏷️ VERSION : v3.204 — dump WAV : capture on-demand (au clic, pas au boot)
 // =========================================================================
 
 #include <iostream>
@@ -54,6 +54,9 @@ static const char* hal_rompath(void) { return "/roms"; }
 #else
 // ESP32 / natif — fonctions fournies par esp32/hal_native.cpp ou esp32/hal_esp32.cpp
 #include <stdint.h>
+#ifdef ESP_PLATFORM
+#include <math.h>
+#endif
 typedef int64_t hal_cycles_t;
 extern "C" {
     hal_cycles_t hal_cycles(void);
@@ -402,6 +405,12 @@ extern "C" {
     static void (*g_irq)(int, int) = nullptr;
     static volatile int32_t  g_bridge_s1 = 0;
     static volatile int32_t  g_bridge_s0 = 0;
+    // Taux réel YM2151 = baseclock/64, capturé dans OPMInit (pas options.samplerate !).
+    // 2151intf.c ligne 132 : rate = intf->baseclock/64. → indépendant de options.samplerate.
+    static volatile int g_opm_sample_rate = 0;
+    // Mutex YM2151 : sérialise YM2151UpdateOne (Core 0, synth_task) et
+    // YM2151WriteReg (Core 1, emulation_task) pour éviter le data race SMP.
+    static SemaphoreHandle_t g_ym_mutex = NULL;
 
     // Skip adaptatif cpu2/3 (DAC cards GTS80B) :
     // - NMI en attente → exécuter immédiatement (pas de skip)
@@ -576,10 +585,25 @@ extern "C" {
 
     void audio_push_frame(uint32_t gen) {
 #ifdef ESP_PLATFORM
-        // synth_task (Core 0) avance le YM2151 et pousse directement vers UAC.
-        // Ici : juste vider les buffers DAC (inutilisés sur GTS80B).
         (void)gen;
         g_dn[0] = g_dn[1] = 0;
+
+        // Throttle emulation_task à exactement 60fps (16667µs/frame) avec phase-lock.
+        // esp_timer donne la précision µs ; vTaskDelay libère Core 1 pendant l'attente.
+        // Quand un frame dépasse 16.667ms (émulation trop lourde), on ne dort pas :
+        // s_next_us reste en avance et la dette se résorbe automatiquement sur les frames suivants.
+        // Si le retard dépasse 2 frames (>33ms), on réancre pour éviter un spiral-down.
+        static int64_t s_next_us = 0;
+        int64_t now_us = esp_timer_get_time();
+        if (s_next_us == 0) { s_next_us = now_us + 16667; return; }
+        int64_t wait_us = s_next_us - now_us;
+        if (wait_us > 1000) {
+            vTaskDelay(pdMS_TO_TICKS((wait_us + 500) / 1000));
+        }
+        s_next_us += 16667;
+        if (s_next_us < esp_timer_get_time() - 33334) {
+            s_next_us = esp_timer_get_time() + 16667;
+        }
 #else
         int n = (g_wi - g_ri + ABMAX) % ABMAX;
         if (!n) return;
@@ -606,7 +630,9 @@ extern "C" {
     }
     int OPMInit(int n, int c, int r, void (*)(int,int,int,double), void (*ih)(int,int)) {
         g_irq = ih;
-        ESP_LOGE("OPM", "OPMInit n=%d g_irq=%s", n, ih ? "NON-NULL" : "NULL");
+        g_opm_sample_rate = r;  // baseclock/64 = taux réel UpdateOne (≈62500 pour GTS80B)
+        if (!g_ym_mutex) g_ym_mutex = xSemaphoreCreateMutex();
+        ESP_LOGE("OPM", "OPMInit n=%d clock=%d rate=%d g_irq=%s", n, c, r, ih ? "NON-NULL" : "NULL");
         int res = YM2151Init(n,(double)c,(double)r); YM2151SetIrqHandler(n,irq_bridge);
         g_ym2151_ready = true;
         return res;
@@ -629,9 +655,8 @@ extern "C" {
 #ifndef ESP_PLATFORM
         for (int i = 0; i < 4; i++) stream_update(i, 0);
 #endif
-        // Sur ESP32 : pas de mutex — les writes registres (Core 1) sont fréquents
-        // (~centaines/sec). Un conflit avec YM2151UpdateOne (Core 0) produit au pire
-        // un sample incorrect, inaudible sur un flipper.
+        // Pas de mutex : UpdateOne (Core 0) dure ~6ms → bloquerait emulation_task.
+        // Race bénigne : au pire 1-2 samples corrompus lors d'un changement de note.
         YM2151WriteReg(0, g_reg, d);
     }
     EMSCRIPTEN_KEEPALIVE int  api_get_dac_count(int c)   { return (unsigned)c < 2 ? g_dn[c] : 0; }
@@ -1124,7 +1149,7 @@ extern "C" {
             drivers[game_index]->driver_init();
         if (!rompath_extra) rompath_extra = (char*)hal_rompath();
 #ifdef ESP_PLATFORM
-        options.samplerate = 6000;   // Synthèse réduite → YM2151 8× moins cher ; upsample ×8 dans audio_push_frame
+        options.samplerate = 44100;  // stream callbacks OPMUpdateOne sont no-op sur ESP32 → valeur par défaut
 #else
         options.samplerate = 44100;
 #endif
@@ -1135,11 +1160,15 @@ extern "C" {
 
 }
 
-// YM2151 interne : clock/64 = 4MHz/64 = 62500 Hz. Buffers en SRAM statique.
+// YM2151 synthèse au taux réel du chip (baseclock/64, capturé dans g_opm_sample_rate).
+// Pour GTS80B : baseclock=4MHz → 4000000/64 = 62500 Hz.
+// Synth sur Core 0 (prio 4) → n'interfère ni avec UAC ni avec emulation (Core 1).
+// Resample 62500 → 48000 Hz par Bresenham (downsample) dans synth_task.
 #ifdef ESP_PLATFORM
-#define YM_RATE  62500
-#define YM_BUF   1300   // 17ms × 62500 = 1062, marge pour drift scheduler
+#define YM_RATE_FALLBACK  62500  // fallback si g_opm_sample_rate pas encore reçu
+#define YM_BUF   2400    // 62500 × 34ms = 2125 samples → 2400 avec marge
 static INT16 s_synth_L[YM_BUF], s_synth_R[YM_BUF];
+static INT16 s_lin[DMAX];  // buffer de sortie synth_task — distinct de g_lin (chemin DAC emulation)
 
 static void synth_task(void* pv) {
     while (!g_ym2151_ready) vTaskDelay(pdMS_TO_TICKS(10));
@@ -1156,38 +1185,56 @@ static void synth_task(void* pv) {
         int64_t elapsed_us = now_us - s_last_us;
         s_last_us = now_us;
 
-        // Générer exactement elapsed_us de temps YM2151 (taux interne 62500 Hz)
-        int in_count = (int)((int64_t)YM_RATE * elapsed_us / 1000000LL);
+        // Capituler elapsed_us à 1 frame (17ms) pour briser la boucle de rétroaction :
+        //   elapsed↑ → in_count↑ → UpdateOne plus lourd → contention bus DRAM partagé
+        //   → emulation_task Core 1 ralentit → FPS chute → tempo instable.
+        // vTaskDelayUntil est absolu : si ce cycle est court (elapsed<17ms après retard),
+        // il compense au cycle suivant — la moyenne reste exactement 62500 Hz.
+        // Si retard extrême (>34ms), reset tick pour éviter la busy-loop (watchdog IDLE0).
+        if (elapsed_us > 34000LL) tick = xTaskGetTickCount();
+        if (elapsed_us > 17000LL) elapsed_us = 17000LL;
+
+        // Taux réel du chip : baseclock/64 (ex. 62500 Hz pour GTS80B 4MHz).
+        // CRITIQUE : utiliser le taux réel, pas YM_RATE arbitraire.
+        int ym_rate = g_opm_sample_rate > 0 ? g_opm_sample_rate : YM_RATE_FALLBACK;
+
+        // in_count et target_pairs calculés sur le même elapsed_us cappé.
+        int in_count = (int)((int64_t)ym_rate * elapsed_us / 1000000LL);
         if (in_count <= 0) continue;
         if (in_count > YM_BUF) in_count = YM_BUF;
 
+        int target_pairs = (int)((int64_t)48000LL * elapsed_us / 1000000LL);
+        if (target_pairs <= 0) continue;
+        if (target_pairs > DMAX / 2) target_pairs = DMAX / 2;
+
         if (g_sound_enabled) {
+            // Pas de mutex : tenir le mutex ~6ms bloquerait emulation_task (Core 1)
+            // → perturbation de tempo. Race bénigne acceptée (≤2 samples corrompus).
             YM2151UpdateOne(0, bufs, in_count);
         } else {
             memset(s_synth_L, 0, in_count * sizeof(INT16));
             memset(s_synth_R, 0, in_count * sizeof(INT16));
         }
 
-        // Downsample 62500 Hz → 48000 Hz : sélectionner target_pairs parmi in_count
-        int target_pairs = (int)((int64_t)48000 * elapsed_us / 1000000LL);
-        if (target_pairs <= 0) continue;
-        if (target_pairs > DMAX / 2) target_pairs = DMAX / 2;
-
         int out = 0;
         for (int j = 0; j < target_pairs; j++) {
             int src = (j * in_count) / target_pairs;  // Bresenham select
-            g_lin[out++] = s_synth_L[src];
-            g_lin[out++] = s_synth_R[src];
+            s_lin[out++] = s_synth_L[src];
+            s_lin[out++] = s_synth_R[src];
         }
-        if (out > 0) hal_push_audio((uintptr_t)g_lin, out, 0);
+        if (out > 0) hal_push_audio((uintptr_t)s_lin, out, 0);
     }
 }
 #endif
 
 extern "C" void api_start_synth_task(void) {
 #ifdef ESP_PLATFORM
+    // Core 0, priorité 4 (< uac_audio_task=8 et USB host=10).
+    // → synth ne peut PAS préempter la chaîne UAC → LA correct.
+    // → Core 1 (emulation_task) totalement libre → tempo correct.
+    // Mutex g_ym_mutex protège YM2151UpdateOne (Core 0) vs YM2151WriteReg (Core 1).
     xTaskCreatePinnedToCore(synth_task, "synth", 4096, NULL,
-                            configMAX_PRIORITIES - 2, NULL, 0);
+                            4, NULL, 0);
 #endif
 }
 

@@ -283,7 +283,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.198';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.222';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();
@@ -335,9 +335,50 @@ function connectMaster(master, displayRef) {
             const names = line.slice(11).split(',').map(decodeURIComponent).filter(Boolean);
             romSelector.innerHTML = names.map(n => `<option value="${n}">${stripExt(n)}</option>`).join('');
             if (romSelector.options.length > 0) { romSelector.style.display = 'inline-block'; applyCurrentRom(); }
+        } else if (line === 'WAVE_CAP') {
+            logToTerminal('🎙️ Capture en cours (0,5 s)…');
+        } else if (line.startsWith('WAVE_START:')) {
+            const total = parseInt(line.slice(11), 10);
+            waveRecv.buf    = new Uint8Array(total);
+            waveRecv.pos    = 0;
+            waveRecv.total  = total;
+            waveRecv.chunks = 0;
+            logToTerminal(`📥 Réception WAV : ${total} octets…`);
+        } else if (line.startsWith('WAVE:')) {
+            const colon2 = line.indexOf(':', 5);
+            if (colon2 !== -1 && waveRecv.buf) {
+                const hex = line.slice(colon2 + 1);
+                for (let i = 0; i < hex.length - 1 && waveRecv.pos < waveRecv.buf.length; i += 2) {
+                    waveRecv.buf[waveRecv.pos++] = parseInt(hex.slice(i, i+2), 16);
+                }
+                waveRecv.chunks++;
+                if (waveRecv.chunks % 100 === 0)
+                    logToTerminal(`📥 WAV : ${waveRecv.chunks} chunks, ${waveRecv.pos}/${waveRecv.total} octets…`);
+            }
+        } else if (line === 'WAVE_END') {
+            if (waveRecv.buf) {
+                const blob = new Blob([waveRecv.buf.buffer], { type: 'audio/wav' });
+                const url  = URL.createObjectURL(blob);
+                const a    = document.createElement('a');
+                a.href = url;
+                a.download = 'pinmame_audio.wav';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                setTimeout(() => URL.revokeObjectURL(url), 2000);
+                logToTerminal(`✅ WAV prêt — ${waveRecv.chunks} chunks, ${waveRecv.pos} octets`);
+                waveRecv.buf = null;
+            }
+        } else if (line.startsWith('WAVE_ERR:')) {
+            logToTerminal(`⚠️ Dump audio : ${line.slice(9)}`);
+        } else if (line.startsWith('FW:')) {
+            const ver = line.slice(3);
+            logToTerminal(`🔧 Firmware ESP32 : v${ver}`);
         }
     });
 }
+
+const waveRecv = { buf: null, pos: 0, total: 0, chunks: 0 };
 
 // ── Grilles ───────────────────────────────────────────────────────────────────
 
@@ -498,6 +539,14 @@ function setupSystemHandlers(restartFn) {
         btn.addEventListener('mouseleave', up);  btn.addEventListener('touchcancel', up,  { passive:false });
     };
     attachMacro('coinBtn', COIN_ID); attachMacro('startBtn', START_ID); attachMacro('testBtn', TEST_ID);
+
+    const audioDumpBtn = document.getElementById('audioDumpBtn');
+    if (audioDumpBtn) {
+        audioDumpBtn.addEventListener('click', () => {
+            _masterRef.current?.send('@getaudio:');
+            logToTerminal('📥 Demande dump WAV envoyée…');
+        });
+    }
 
 }
 

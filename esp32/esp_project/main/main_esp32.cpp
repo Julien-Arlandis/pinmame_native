@@ -38,6 +38,8 @@ static const char* TAG = "PinMAME";
 // ─── Audio USB ───────────────────────────────────────────────────────────────
 extern "C" void   usb_audio_init(void);
 extern "C" size_t usb_audio_read(void* dst, size_t want, uint32_t timeout_ms);
+extern "C" void   audio_dump_init(void);
+extern "C" void   audio_dump_send_ble(void);
 
 static uac_host_device_handle_t g_uac_handle = NULL;
 static volatile bool g_uac_ready = false;
@@ -83,11 +85,10 @@ static void uac_setup_task(void* arg) {
         uac_host_device_config_t dev_cfg = {};
         dev_cfg.addr             = req.addr;
         dev_cfg.iface_num        = req.iface_num;
-        /* Petit buffer SRAM : la SRAM interne peut être très réduite si le casque
-         * se connecte après le démarrage de l'émulation. 4 Ko suffisent pour un
-         * débit 48kHz/16bit/2ch (3200 octets/frame à 60fps). */
-        dev_cfg.buffer_size      = 4 * 1024;
-        dev_cfg.buffer_threshold = 1 * 1024;
+        /* 16 Ko = ~85ms d'audio 48kHz/16bit/2ch. Assez large pour absorber le jitter
+         * entre les frames synth (typiquement 17ms mais jusqu'à 25ms parfois). */
+        dev_cfg.buffer_size      = 16 * 1024;
+        dev_cfg.buffer_threshold = 4 * 1024;
         dev_cfg.callback         = uac_device_cb;
         dev_cfg.callback_arg     = NULL;
 
@@ -112,6 +113,15 @@ static void uac_setup_task(void* arg) {
             continue;
         }
 
+        // Pré-remplir le ring buffer UAC avec ~34ms de silence.
+        // Sans ce pré-remplissage, les 2 URB soumis au 1er uac_host_device_write
+        // consomment 384 octets immédiatement, ce qui vide le ring buffer 2ms avant
+        // la frame suivante → underrun cyclique de 2ms toutes les 17ms → son "haché".
+        {
+            uint8_t z[192] = {};
+            for (int i = 0; i < 34; i++)
+                uac_host_device_write(g_uac_handle, z, sizeof(z), pdMS_TO_TICKS(10));
+        }
         g_uac_ready = true;
         ESP_LOGE(TAG, "UAC: streaming 48000 Hz stereo 16-bit OK");
     }
@@ -135,28 +145,16 @@ static void usb_host_task(void* arg) {
 }
 
 // Tâche de lecture du buffer audio → écriture vers les écouteurs USB.
-// Stratégie : si aucune nouvelle donnée n'arrive dans les 20ms (emulation lente),
-// répéter le dernier chunk connu. Le son "boucle" légèrement mais reste continu
-// et à la bonne vitesse, au lieu de jouer 66% de silence (emulation à 20fps).
-// uac_host_device_write bloque naturellement quand le buffer interne UAC (4KB) est
-// plein, ce qui régule le débit à 48kHz sans qu'on ait besoin d'un timer.
+// On envoie toujours les octets réellement reçus du StreamBuffer, même si le
+// lot est partiel (timeout 20ms). Répéter l'ancien chunk causait un décalage
+// du pitch vers le grave : les données partielles étaient jetées, l'ancien
+// chunk rejoué, ce qui divisait le débit effectif et produisait un son "très
+// grave". Le ring buffer UAC de 16 Ko absorbe le jitter inter-frame synth.
 static void uac_audio_task(void* arg) {
-    static uint8_t cur[3200];
-    static uint8_t last[3200];
-    static bool    has_last = false;
-
+    static uint8_t cur[4096];
     while (true) {
         size_t got = usb_audio_read(cur, sizeof(cur), 20);
-        if (got == sizeof(cur)) {
-            memcpy(last, cur, sizeof(last));
-            has_last = true;
-        } else if (has_last) {
-            got = sizeof(last);
-            memcpy(cur, last, got);
-        } else {
-            continue;
-        }
-        if (g_uac_ready && g_uac_handle) {
+        if (got > 0 && g_uac_ready && g_uac_handle) {
             uac_host_device_write(g_uac_handle, cur, (uint32_t)got, 200);
         }
     }
@@ -212,7 +210,10 @@ static char s_last_lamp[64]     = {};
 static char s_last_status[128]  = {};
 #endif
 
+#define ESP_FW_VER "3.222"
+
 extern "C" void     ble_resend_last_state(void);
+extern "C" void     ble_send_msg(const char* msg);
 extern "C" uint8_t* pinmame_get_dsprom_ptr(void);
 extern "C" void     api_start_synth_task(void);
 
@@ -287,6 +288,18 @@ static void handle_ble_command(const char* line) {
         nvs_save_rom(decoded);
         vTaskDelay(pdMS_TO_TICKS(200));
         esp_restart();
+        return;
+    }
+
+    // @getaudio:  →  envoyer les 0,5 s de PCM capturés en WAV via BLE
+    if (strcmp(line, "@getaudio:") == 0) {
+        audio_dump_send_ble();
+        return;
+    }
+
+    // @version:  →  répondre avec la version firmware
+    if (strcmp(line, "@version:") == 0) {
+        ble_send_msg("FW:" ESP_FW_VER);
         return;
     }
 
@@ -374,6 +387,7 @@ static int gap_event_cb(struct ble_gap_event* event, void* arg) {
             ESP_LOGI(TAG, "BLE connecté (handle=%d)", g_ble_conn_handle);
             // Renvoi de l'état courant au nouveau client
             vTaskDelay(pdMS_TO_TICKS(50));  // laisser le CCCD s'activer
+            ble_send_msg("FW:" ESP_FW_VER);
             ble_resend_last_state();
         } else {
             g_ble_conn_handle = BLE_HS_CONN_HANDLE_NONE;
@@ -463,6 +477,15 @@ static void emulation_task(void* arg) {
 
 // ─── app_main ────────────────────────────────────────────────────────────────
 extern "C" void app_main(void) {
+    // Supprimer les logs diagnostiques verbeux du workspace (toutes les ~3s) qui
+    // causent des rafales UART bloquantes perturbant le budget de frame de l'émulation.
+    esp_log_level_set("MIXSRC", ESP_LOG_NONE);
+    esp_log_level_set("MIXER",  ESP_LOG_NONE);
+    esp_log_level_set("M6502",  ESP_LOG_NONE);
+    esp_log_level_set("TMR",    ESP_LOG_NONE);
+    esp_log_level_set("CPUCYC", ESP_LOG_NONE);
+    esp_log_level_set("SLATCH", ESP_LOG_NONE);
+
     ESP_LOGI(TAG, "PinMAME ESP32-S3 démarrage (mode BLE)...");
 
     // NVS
@@ -514,6 +537,7 @@ extern "C" void app_main(void) {
         (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
 
     usb_audio_init();
+    audio_dump_init();  // buffer PSRAM 96 Ko pour dump WAV diagnostic
 
     usb_host_config_t host_cfg = {};
     host_cfg.skip_phy_setup = false;
@@ -538,7 +562,7 @@ extern "C" void app_main(void) {
     xTaskCreatePinnedToCoreWithCaps(uac_setup_task, "uac_setup", 4096, NULL, 9, NULL, 0,
         MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     xTaskCreatePinnedToCoreWithCaps(uac_audio_task, "uac_audio", 4096, NULL, 8, NULL, 0,
-        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);  // Core 0 avec synth — libère Core 1 pour emulation
 
     ESP_LOGE(TAG, "[MEM] apres UAC  — SRAM libre: %u  bloc max: %u",
         (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
@@ -572,7 +596,7 @@ extern "C" void app_main(void) {
     // variables locales (ex. IntegerDivideByZero observé dans le resampler).
     // SRAM INTERNAL obligatoire : la tâche accède à SPIFFS (cache SPI désactivé
     // pendant la lecture flash → SPIRAM inaccessible → crash immédiat si stack en PSRAM).
-    api_start_synth_task();  // YM2151 sur Core 0 à débit wall-clock (v3.161)
+    api_start_synth_task();  // synth sur Core 0 — emulation_task seule sur Core 1
 
     BaseType_t ok = xTaskCreatePinnedToCoreWithCaps(
         emulation_task, "pinmame", 49152, NULL, 5, NULL, 1,

@@ -210,7 +210,7 @@ static char s_last_lamp[64]     = {};
 static char s_last_status[128]  = {};
 #endif
 
-#define ESP_FW_VER "3.223"
+#define ESP_FW_VER "3.224"
 
 extern "C" void     ble_resend_last_state(void);
 extern "C" void     ble_send_msg(const char* msg);
@@ -474,8 +474,12 @@ extern "C" {
 static void emulation_task(void* arg) {
     (void)arg;
 #if TRANSPORT_BLE
-    // Laisser le BLE s'initialiser avant de démarrer l'émulation
-    vTaskDelay(pdMS_TO_TICKS(1500));
+    // Attendre la connexion BLE effective avant de démarrer l'émulation,
+    // pour que le test des lampes et l'affichage au boot soient visibles.
+    while (g_ble_conn_handle == BLE_HS_CONN_HANDLE_NONE) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+    vTaskDelay(pdMS_TO_TICKS(300));  // laisser le CCCD s'activer
 #endif
     // La tâche monopolise intentionnellement le core 1 — désactiver le watchdog
     esp_task_wdt_delete(xTaskGetCurrentTaskHandle());

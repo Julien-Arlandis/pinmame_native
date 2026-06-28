@@ -1,9 +1,23 @@
-== Build ==
+== Architecture ==
 
-    git clone https://github.com/Julien-Arlandis/pinmame_native.git
-    cd pinmame_native && make all
+    web/flip-g80       Bundle universel : WASM + runtime JS (navigateur Worker et Node.js)
+    web/index.html     Interface web (PinMAME Workbench)
+    node/main.js       Point d'entrée Node.js (BLE + WebSocket)
+    api.cpp            Pont C++ entre PinMAME et le runtime JS/WASM
+    workspace/         Sources PinMAME — NE PAS MODIFIER
 
-Génère web/tilt_web (navigateur) et node/tilt_node (Node.js).
+
+== Build WASM ==
+
+Prérequis : Emscripten installé dans ~/emsdk/
+
+    # Compiler la lib statique PinMAME (à faire une seule fois ou après maj workspace/)
+    bash node/wasm_lib.sh
+
+    # Compiler api.cpp et assembler web/flip-g80
+    bash node/wasm.sh
+
+web/flip-g80 contient le WASM et le runtime embarqués en un seul fichier.
 
 
 == Environnement web ==
@@ -20,7 +34,7 @@ ROMs : web/roms/
 
 == Environnement Node (BLE + WebSocket) ==
 
-    node node/tilt_node [--rom=<nom>] [--port=<n>]
+    node node/main.js [--rom=<nom>] [--port=<n>]
 
 Lance l'émulateur sur le port WebSocket 8765.
 ROMs : node/roms/

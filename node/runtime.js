@@ -152,6 +152,11 @@ function createEmulator({ sendLine, sendAudio, sendCapture, sendScope, loadRom }
         if (m) sendLine('status', `@sound:chips=${m.slice(4).split('+').join(', ')}`);
     };
 
+    globalThis.postWasmFps = function(fps) {
+        if (generation !== _emulatorGeneration) return;
+        sendLine('status', `@fps:${fps.toFixed(1)}`);
+    };
+
     async function initialiserMoteur(customRomBytes, customRomName, baseUrl) {
         sendLine('status', '@status:state=loading');
 

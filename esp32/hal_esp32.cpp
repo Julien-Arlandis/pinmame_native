@@ -14,7 +14,9 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/stream_buffer.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 
 #if TRANSPORT_BLE
 // NimBLE
@@ -26,6 +28,9 @@ static const char* TAG = "HAL";
 
 extern "C" void esp_loge_fps(float fps) {
     ESP_LOGE("FPS", "emulation: %.1f fps", fps);
+    char msg[32];
+    snprintf(msg, sizeof(msg), "FPS:%.1f", fps);
+    ble_send_msg(msg);
 }
 
 typedef int64_t hal_cycles_t;
@@ -114,9 +119,14 @@ extern "C" void ble_resend_last_state(void) {
     if (s_last_display[0]) bleSend(s_last_display);
     if (s_last_lamp[0])    bleSend(s_last_lamp);
 }
+
+// Wrapper pour envoyer un message BLE arbitraire depuis d'autres TUs.
+extern "C" void ble_send_msg(const char* msg) { bleSend(msg); }
+
 #else
 static void bleSend(const char*) {}
 extern "C" void ble_resend_last_state(void) {}
+extern "C" void ble_send_msg(const char*) {}
 #endif
 
 // ─── Prototype audio-over-BLE ─────────────────────────────────────────────
@@ -143,7 +153,15 @@ void hal_osd_exit(void) {
 #define USB_AUDIO_FRAME_BYTES  3200
 #define USB_AUDIO_SB_SIZE      (USB_AUDIO_FRAME_BYTES * 16)
 
-static StreamBufferHandle_t g_audio_sb = NULL;
+static StreamBufferHandle_t g_audio_sb  = NULL;
+
+// ─── Dump PCM diagnostic (0,5 s → WAV → BLE) ─────────────────────────────────
+#define DUMP_PCM_BYTES 96000U   // 0,5 s stéréo 16-bit 48kHz = 96000 octets
+static uint8_t*          s_dump_buf       = NULL;
+static uint32_t          s_dump_pos       = 0;
+static bool              s_dump_done      = false;
+static volatile bool     s_dump_capturing = false;  // capture déclenchée par @getaudio:
+static volatile bool     s_dump_sending   = false;
 
 extern "C" void usb_audio_init(void) {
     g_audio_sb = xStreamBufferCreate(USB_AUDIO_SB_SIZE, USB_AUDIO_FRAME_BYTES);
@@ -158,8 +176,120 @@ void hal_push_audio(uintptr_t ptr, int count, uint32_t gen) {
     (void)gen;
     for (int c = 0; c < 2; c++) api_reset_dac_buffer(c);
     if (!g_audio_sb || !ptr || count <= 0) return;
-    // count = nombre de INT16 (stéréo interleaved) → count*2 octets
-    xStreamBufferSend(g_audio_sb, (const void*)ptr, (size_t)(count * 2), 0);
+    size_t bytes = (size_t)(count * 2);  // count INT16 → count*2 octets
+    xStreamBufferSend(g_audio_sb, (const void*)ptr, bytes, 0);
+    // Capture pour dump diagnostic (déclenchée uniquement par @getaudio:)
+    if (s_dump_buf && s_dump_capturing && !s_dump_done) {
+        uint32_t avail = DUMP_PCM_BYTES - s_dump_pos;
+        uint32_t n = (uint32_t)(bytes < (size_t)avail ? bytes : (size_t)avail);
+        memcpy(s_dump_buf + s_dump_pos, (const void*)ptr, n);
+        s_dump_pos += n;
+        if (s_dump_pos >= DUMP_PCM_BYTES) {
+            s_dump_done = true;
+            ESP_LOGE(TAG, "audio_dump: capture terminée (%u octets)", s_dump_pos);
+        }
+    }
+}
+
+void audio_dump_init(void) {
+    s_dump_buf = (uint8_t*)heap_caps_malloc(DUMP_PCM_BYTES,
+                    MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    ESP_LOGE(TAG, "audio_dump: %s (%u octets)",
+             s_dump_buf ? "PSRAM OK" : "ÉCHEC alloc PSRAM", DUMP_PCM_BYTES);
+}
+
+static void audio_dump_task(void* pv) {
+    (void)pv;
+
+    // 1. Déclencher la capture du son actuel
+    s_dump_pos  = 0;
+    s_dump_done = false;
+    s_dump_capturing = true;
+    bleSend("WAVE_CAP");
+    ESP_LOGE(TAG, "audio_dump: capture démarrée…");
+
+    // 2. Attendre la fin (max 1,5 s)
+    for (int i = 0; i < 150 && !s_dump_done; i++)
+        vTaskDelay(pdMS_TO_TICKS(10));
+    s_dump_capturing = false;
+
+    if (!s_dump_done) {
+        bleSend("WAVE_ERR:timeout");
+        s_dump_sending = false;
+        vTaskDelete(NULL);
+        return;
+    }
+
+    // 3. Construire et envoyer le WAV
+    static const char hx[] = "0123456789ABCDEF";
+    uint32_t pcm_bytes = s_dump_pos;
+    uint32_t riff_sz   = 36 + pcm_bytes;
+    uint32_t byte_rate = 48000u * 2u * 2u;  // 192000
+    uint8_t hdr[44]    = {};
+    hdr[0]='R'; hdr[1]='I'; hdr[2]='F'; hdr[3]='F';
+    for (int i=0;i<4;i++) hdr[ 4+i]=(uint8_t)(riff_sz  >>(i*8));
+    hdr[8]='W'; hdr[9]='A'; hdr[10]='V'; hdr[11]='E';
+    hdr[12]='f'; hdr[13]='m'; hdr[14]='t'; hdr[15]=' ';
+    hdr[16]=16; hdr[20]=1; hdr[22]=2;  // PCM, 2 canaux
+    for (int i=0;i<4;i++) hdr[24+i]=(uint8_t)(48000u   >>(i*8));
+    for (int i=0;i<4;i++) hdr[28+i]=(uint8_t)(byte_rate>>(i*8));
+    hdr[32]=4; hdr[34]=16;  // block_align=4, bits=16
+    hdr[36]='d'; hdr[37]='a'; hdr[38]='t'; hdr[39]='a';
+    for (int i=0;i<4;i++) hdr[40+i]=(uint8_t)(pcm_bytes>>(i*8));
+
+    // Taille de chunk adaptée au MTU réel : chaque WAVE: doit tenir dans 1 seul paquet BLE.
+    // ATT payload = MTU - 3 (header ATT) - 1 (flag protocole) = MTU - 4.
+    // Overhead ligne WAVE: "WAVE:NNNN:\n" = 11 chars → rest = hex.
+    // 1 byte = 2 chars hex → bytes_per_chunk = (ATT_payload - 11) / 2.
+    uint16_t att_mtu = ble_att_mtu(g_ble_conn_handle);
+    if (att_mtu < 16) att_mtu = 23;
+    int att_payload    = (int)(att_mtu - 4);
+    int bytes_per_chunk = (att_payload - 11) / 2;
+    if (bytes_per_chunk < 1)   bytes_per_chunk = 1;
+    if (bytes_per_chunk > 120) bytes_per_chunk = 120;
+
+    uint32_t total = 44 + pcm_bytes;
+    ESP_LOGE(TAG, "audio_dump: MTU=%u chunk=%d bytes total=%u", att_mtu, bytes_per_chunk, (unsigned)total);
+
+    char line[300];
+    snprintf(line, sizeof(line), "WAVE_START:%u", (unsigned)total);
+    bleSend(line);
+    vTaskDelay(pdMS_TO_TICKS(30));
+
+    uint32_t offset = 0;
+    int chunk_id = 0;
+    while (offset < total) {
+        uint32_t n = (uint32_t)bytes_per_chunk;
+        if (offset + n > total) n = total - offset;
+        char* p = line;
+        p += snprintf(p, 12, "WAVE:%04d:", chunk_id);
+        for (uint32_t i = 0; i < n; i++) {
+            uint8_t b = (offset+i < 44) ? hdr[offset+i] : s_dump_buf[(offset+i)-44];
+            *p++ = hx[b>>4]; *p++ = hx[b&0xf];
+        }
+        *p = '\0';
+        bleSend(line);
+        vTaskDelay(pdMS_TO_TICKS(5));
+        offset += n;
+        chunk_id++;
+    }
+    bleSend("WAVE_END");
+    ESP_LOGE(TAG, "audio_dump: %d chunks envoyés via BLE", chunk_id);
+    s_dump_sending = false;
+    vTaskDelete(NULL);
+}
+
+void audio_dump_send_ble(void) {
+    if (!s_dump_buf)   { bleSend("WAVE_ERR:no_buffer"); return; }
+    // Note : s_dump_done est géré par audio_dump_task lui-même (capture on-demand).
+    // Ne pas vérifier s_dump_done ici, sinon on renvoyait toujours "not_ready".
+    if (s_dump_sending){ bleSend("WAVE_ERR:busy");      return; }
+    s_dump_sending = true;
+    ESP_LOGE(TAG, "audio_dump: lancement tâche BLE (%u octets)", s_dump_pos);
+    BaseType_t ok = xTaskCreatePinnedToCoreWithCaps(
+        audio_dump_task, "wavdump", 4096, NULL, 3, NULL, 0,
+        MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (ok != pdPASS) { s_dump_sending = false; bleSend("WAVE_ERR:task_fail"); }
 }
 
 void hal_push_display(uintptr_t ptr, uint32_t gen) {

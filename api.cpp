@@ -714,6 +714,22 @@ extern "C" {
         }
 #endif
 
+#ifndef ESP_PLATFORM
+        {
+            static int wasm_frame_count = 0;
+            static double wasm_fps_t0 = -1.0;
+            wasm_frame_count++;
+            double now_ms = emscripten_get_now();
+            if (wasm_fps_t0 < 0) wasm_fps_t0 = now_ms;
+            if (now_ms - wasm_fps_t0 >= 5000.0) {
+                double fps = wasm_frame_count * 1000.0 / (now_ms - wasm_fps_t0);
+                EM_ASM({ if (window.postWasmFps) window.postWasmFps($0); }, fps);
+                wasm_frame_count = 0;
+                wasm_fps_t0 = now_ms;
+            }
+        }
+#endif
+
         // Generation written by JS at boot (slot 1076). Passed to every callback so JS
         // can reject calls from stale Wasm instances that are still looping after ROM change.
         uint32_t emulator_generation = 0;

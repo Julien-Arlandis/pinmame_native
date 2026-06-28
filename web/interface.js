@@ -283,7 +283,7 @@ function handleStatusLine(line) {
     if (state === 'ready') {
         const rom = p.get('rom') || 'unknown';
         _currentRom = rom;
-        statusEl.textContent = '🟢 PinMAME Workbench v3.226';
+        statusEl.textContent = '🟢 PinMAME Workbench v3.227';
         statusEl.style.color = '#00ffcc';
         logToTerminal(`✅ ROM prête : ${rom}`);
         applyCurrentRom();
@@ -374,6 +374,10 @@ function connectMaster(master, displayRef) {
         } else if (line.startsWith('FW:')) {
             const ver = line.slice(3);
             logToTerminal(`🔧 Firmware ESP32 : v${ver}`);
+        } else if (line.startsWith('@fps:')) {
+            logToTerminal(`📊 FPS WASM : ${line.slice(5)}`);
+        } else if (line.startsWith('FPS:')) {
+            logToTerminal(`📊 FPS ESP32 : ${line.slice(4)}`);
         }
     });
 }

@@ -74,17 +74,22 @@ static void url_encode(const char* src, char* dst, size_t dstlen) {
 }
 
 #if TRANSPORT_BLE
-// ─── bleSend : envoie une ligne via BLE notify (chunking identique Node.js) ──
-static void bleSend(const char* line) {
+// ─── Queue async BLE : emulation_task (Core 1) enfile, ble_sender_task (Core 0) envoie ──
+#define BLE_QUEUE_DEPTH 32
+#define BLE_MSG_MAX     512
+
+struct BleMsg { char data[BLE_MSG_MAX]; };
+static QueueHandle_t s_ble_tx_queue = NULL;
+
+// Envoi réel NimBLE — appelé uniquement depuis ble_sender_task (Core 0)
+static void bleSend_real(const char* line) {
     if (g_ble_conn_handle == BLE_HS_CONN_HANDLE_NONE) return;
     if (!g_ble_out_handle) return;
 
-    // Buffer = line + '\n'
-    char buf[512];
+    char buf[BLE_MSG_MAX];
     size_t total = (size_t)snprintf(buf, sizeof(buf) - 1, "%s\n", line);
     if (total >= sizeof(buf)) total = sizeof(buf) - 1;
 
-    // MTU : ATT MTU - 3 (header ATT) - 1 (byte protocole) = max data par chunk
     uint16_t att_mtu = ble_att_mtu(g_ble_conn_handle);
     if (att_mtu < 4) att_mtu = 23;
     int chunk_size = (int)(att_mtu - 3 - 1);
@@ -96,8 +101,7 @@ static void bleSend(const char* line) {
         if (offset + chunk > total) chunk = total - offset;
         bool is_last = (offset + chunk >= total);
 
-        // Packet : [0x00|0x01][data...]
-        uint8_t packet[512];
+        uint8_t packet[BLE_MSG_MAX];
         packet[0] = is_last ? 0x01 : 0x00;
         memcpy(packet + 1, buf + offset, chunk);
 
@@ -106,13 +110,34 @@ static void bleSend(const char* line) {
 
         int rc = ble_gatts_notify_custom(g_ble_conn_handle, g_ble_out_handle, om);
         if (rc != 0) {
-            // om consommé par ble_gatts_notify_custom même en erreur
             g_ble_conn_handle = BLE_HS_CONN_HANDLE_NONE;
             break;
         }
-
         offset += chunk;
     }
+}
+
+// Enfile le message sans bloquer — l'émulation n'attend jamais BLE
+static void bleSend(const char* line) {
+    if (!s_ble_tx_queue) return;
+    BleMsg msg;
+    strncpy(msg.data, line, BLE_MSG_MAX - 1);
+    msg.data[BLE_MSG_MAX - 1] = '\0';
+    xQueueSend(s_ble_tx_queue, &msg, 0);  // 0 = non-bloquant, drop si plein
+}
+
+// Tâche dédiée sur Core 0 : vide la queue et envoie via NimBLE
+static void ble_sender_task(void* arg) {
+    BleMsg msg;
+    while (true) {
+        if (xQueueReceive(s_ble_tx_queue, &msg, portMAX_DELAY) == pdTRUE)
+            bleSend_real(msg.data);
+    }
+}
+
+extern "C" void ble_sender_init(void) {
+    s_ble_tx_queue = xQueueCreate(BLE_QUEUE_DEPTH, sizeof(BleMsg));
+    xTaskCreatePinnedToCore(ble_sender_task, "ble_tx", 4096, NULL, 3, NULL, 0);
 }
 
 // ─── Renvoi de l'état au client qui vient de se connecter ────────────────────
@@ -127,6 +152,7 @@ extern "C" void ble_send_msg(const char* msg) { bleSend(msg); }
 
 #else
 static void bleSend(const char*) {}
+extern "C" void ble_sender_init(void) {}
 extern "C" void ble_resend_last_state(void) {}
 extern "C" void ble_send_msg(const char*) {}
 #endif

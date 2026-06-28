@@ -40,6 +40,7 @@ extern "C" void   usb_audio_init(void);
 extern "C" size_t usb_audio_read(void* dst, size_t want, uint32_t timeout_ms);
 extern "C" void   audio_dump_init(void);
 extern "C" void   audio_dump_send_ble(void);
+extern "C" void   ble_sender_init(void);
 
 static uac_host_device_handle_t g_uac_handle = NULL;
 static volatile bool g_uac_ready = false;
@@ -210,7 +211,7 @@ static char s_last_lamp[64]     = {};
 static char s_last_status[128]  = {};
 #endif
 
-#define ESP_FW_VER "3.229"
+#define ESP_FW_VER "3.230"
 
 extern "C" void     ble_resend_last_state(void);
 extern "C" void     ble_send_msg(const char* msg);
@@ -552,6 +553,7 @@ extern "C" void app_main(void) {
 
     usb_audio_init();
     audio_dump_init();  // buffer PSRAM 96 Ko pour dump WAV diagnostic
+    ble_sender_init();  // queue async BLE : découple emulation_task des appels NimBLE
 
     usb_host_config_t host_cfg = {};
     host_cfg.skip_phy_setup = false;

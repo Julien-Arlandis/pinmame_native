@@ -210,7 +210,7 @@ static char s_last_lamp[64]     = {};
 static char s_last_status[128]  = {};
 #endif
 
-#define ESP_FW_VER "3.227"
+#define ESP_FW_VER "3.228"
 
 extern "C" void     ble_resend_last_state(void);
 extern "C" void     ble_send_msg(const char* msg);
@@ -613,7 +613,7 @@ extern "C" void app_main(void) {
     api_start_synth_task();  // synth sur Core 0 — emulation_task seule sur Core 1
 
     BaseType_t ok = xTaskCreatePinnedToCoreWithCaps(
-        emulation_task, "pinmame", 49152, NULL, 5, NULL, 1,
+        emulation_task, "pinmame", 49152, NULL, 15, NULL, 1,
         MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT
     );
     if (ok != pdPASS)

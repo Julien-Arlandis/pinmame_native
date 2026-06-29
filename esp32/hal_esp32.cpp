@@ -184,17 +184,23 @@ void hal_push_audio(uintptr_t ptr, int count, uint32_t gen) {
     const int16_t* src = (const int16_t*)ptr;
     int in_pairs = count / 2;
 
-    // Calcul du nombre de paires à produire pour coller à 48000 Hz
-    static int64_t s_t0       = 0;
-    static int64_t s_out_total = 0;
+    // Calcul du nombre de paires à produire pour coller à 48000 Hz.
+    // Mesure par intervalle entre frames (pas depuis t0) : immunisé contre
+    // les longues pauses au démarrage qui créaient une dette de samples.
+    static int64_t s_last_us = 0;
     int64_t now = (int64_t)esp_timer_get_time();   // µs
-    if (s_t0 == 0) { s_t0 = now; s_out_total = 0; }
-    int64_t elapsed_us  = now - s_t0;
-    int64_t expected    = elapsed_us * 48LL / 1000LL;  // = elapsed_us × 48000 / 1000000
-    int     out_pairs   = (int)(expected - s_out_total);
+    int out_pairs;
+    if (s_last_us == 0) {
+        out_pairs = in_pairs;                      // première frame : 1:1
+    } else {
+        int64_t dt = now - s_last_us;
+        if (dt < 8000LL)  dt = 8000LL;            // plancher  8 ms (125 fps max)
+        if (dt > 50000LL) dt = 50000LL;           // plafond  50 ms (rattrapage 1 frame max)
+        out_pairs = (int)(dt * 48LL / 1000LL);    // = dt × 48000 / 1 000 000
+    }
+    s_last_us = now;
     if (out_pairs < 1)    out_pairs = 1;
     if (out_pairs > 1024) out_pairs = 1024;
-    s_out_total += out_pairs;
 
     // Interpolation linéaire stéréo
     static int16_t s_out[1024 * 2];

@@ -173,39 +173,43 @@ extern "C" size_t usb_audio_read(void* dst, size_t want, uint32_t timeout_ms) {
     return xStreamBufferReceive(g_audio_sb, dst, want, pdMS_TO_TICKS(timeout_ms));
 }
 
-// SRC linéaire : compense l'écart entre le débit réel (fps × 800 paires) et
-// le taux fixe du DAC UAC (48000 Hz).  count = nb de int16 (paires L+R × 2).
+// ASRC basé sur l'horloge murale : out_pairs = delta exact pour maintenir 48kHz,
+// indépendamment du FPS instantané. Élimine les sauts de tempo toutes les 5 s.
+// count = nombre de int16 (in_pairs stéréo × 2).
 void hal_push_audio(uintptr_t ptr, int count, uint32_t gen) {
     (void)gen;
     for (int c = 0; c < 2; c++) api_reset_dac_buffer(c);
     if (!g_audio_sb || !ptr || count <= 0) return;
 
-    const int16_t* src  = (const int16_t*)ptr;
-    int in_pairs        = count / 2;           // paires stéréo en entrée
-    float fps           = g_emulation_fps;
-    if (fps < 10.0f) fps = 56.0f;             // garde-fou au démarrage
-    int out_pairs       = (int)(48000.0f / fps + 0.5f);  // ≈ 857 @ 56 fps
-    if (out_pairs < 1) out_pairs = 1;
+    const int16_t* src = (const int16_t*)ptr;
+    int in_pairs = count / 2;
 
-    // Buffer statique : 1024 paires max (4096 octets)
-    static int16_t s_out[1024 * 2];
+    // Calcul du nombre de paires à produire pour coller à 48000 Hz
+    static int64_t s_t0       = 0;
+    static int64_t s_out_total = 0;
+    int64_t now = (int64_t)esp_timer_get_time();   // µs
+    if (s_t0 == 0) { s_t0 = now; s_out_total = 0; }
+    int64_t elapsed_us  = now - s_t0;
+    int64_t expected    = elapsed_us * 48LL / 1000LL;  // = elapsed_us × 48000 / 1000000
+    int     out_pairs   = (int)(expected - s_out_total);
+    if (out_pairs < 1)    out_pairs = 1;
     if (out_pairs > 1024) out_pairs = 1024;
+    s_out_total += out_pairs;
 
-    float step = (float)(in_pairs) / (float)(out_pairs);
+    // Interpolation linéaire stéréo
+    static int16_t s_out[1024 * 2];
+    float step = (float)in_pairs / (float)out_pairs;
     for (int i = 0; i < out_pairs; i++) {
         float pos  = i * step;
         int   idx  = (int)pos;
         float frac = pos - (float)idx;
         if (idx >= in_pairs - 1) idx = in_pairs - 1;
-        int next   = (idx + 1 < in_pairs) ? idx + 1 : idx;
-        // canal gauche
-        s_out[i * 2]     = (int16_t)(src[idx * 2]     + frac * (src[next * 2]     - src[idx * 2]));
-        // canal droit
-        s_out[i * 2 + 1] = (int16_t)(src[idx * 2 + 1] + frac * (src[next * 2 + 1] - src[idx * 2 + 1]));
+        int next = (idx + 1 < in_pairs) ? idx + 1 : idx;
+        s_out[i * 2]     = (int16_t)(src[idx*2]     + frac * (src[next*2]     - src[idx*2]));
+        s_out[i * 2 + 1] = (int16_t)(src[idx*2 + 1] + frac * (src[next*2 + 1] - src[idx*2 + 1]));
     }
 
-    size_t bytes = (size_t)(out_pairs * 4);
-    xStreamBufferSend(g_audio_sb, s_out, bytes, 0);
+    xStreamBufferSend(g_audio_sb, s_out, (size_t)(out_pairs * 4), 0);
 
     // Capture dump diagnostic (brut, avant SRC)
     if (s_dump_buf && s_dump_capturing && !s_dump_done) {

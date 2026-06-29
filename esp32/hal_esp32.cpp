@@ -173,55 +173,17 @@ extern "C" size_t usb_audio_read(void* dst, size_t want, uint32_t timeout_ms) {
     return xStreamBufferReceive(g_audio_sb, dst, want, pdMS_TO_TICKS(timeout_ms));
 }
 
-// ASRC basé sur l'horloge murale : out_pairs = delta exact pour maintenir 48kHz,
-// indépendamment du FPS instantané. Élimine les sauts de tempo toutes les 5 s.
-// count = nombre de int16 (in_pairs stéréo × 2).
+// count = nb de int16 interleaved L+R (synth_task en produit déjà à 48kHz via Bresenham).
 void hal_push_audio(uintptr_t ptr, int count, uint32_t gen) {
     (void)gen;
     for (int c = 0; c < 2; c++) api_reset_dac_buffer(c);
     if (!g_audio_sb || !ptr || count <= 0) return;
-
-    const int16_t* src = (const int16_t*)ptr;
-    int in_pairs = count / 2;
-
-    // Calcul du nombre de paires à produire pour coller à 48000 Hz.
-    // Mesure par intervalle entre frames (pas depuis t0) : immunisé contre
-    // les longues pauses au démarrage qui créaient une dette de samples.
-    static int64_t s_last_us = 0;
-    int64_t now = (int64_t)esp_timer_get_time();   // µs
-    int out_pairs;
-    if (s_last_us == 0) {
-        out_pairs = in_pairs;                      // première frame : 1:1
-    } else {
-        int64_t dt = now - s_last_us;
-        if (dt < 8000LL)  dt = 8000LL;            // plancher  8 ms (125 fps max)
-        if (dt > 50000LL) dt = 50000LL;           // plafond  50 ms (rattrapage 1 frame max)
-        out_pairs = (int)(dt * 48LL / 1000LL);    // = dt × 48000 / 1 000 000
-    }
-    s_last_us = now;
-    if (out_pairs < 1)    out_pairs = 1;
-    if (out_pairs > 1024) out_pairs = 1024;
-
-    // Interpolation linéaire stéréo
-    static int16_t s_out[1024 * 2];
-    float step = (float)in_pairs / (float)out_pairs;
-    for (int i = 0; i < out_pairs; i++) {
-        float pos  = i * step;
-        int   idx  = (int)pos;
-        float frac = pos - (float)idx;
-        if (idx >= in_pairs - 1) idx = in_pairs - 1;
-        int next = (idx + 1 < in_pairs) ? idx + 1 : idx;
-        s_out[i * 2]     = (int16_t)(src[idx*2]     + frac * (src[next*2]     - src[idx*2]));
-        s_out[i * 2 + 1] = (int16_t)(src[idx*2 + 1] + frac * (src[next*2 + 1] - src[idx*2 + 1]));
-    }
-
-    xStreamBufferSend(g_audio_sb, s_out, (size_t)(out_pairs * 4), 0);
-
-    // Capture dump diagnostic (brut, avant SRC)
+    size_t bytes = (size_t)(count * 2);  // int16 → octets
+    xStreamBufferSend(g_audio_sb, (const void*)ptr, bytes, 0);
+    // Capture dump diagnostic
     if (s_dump_buf && s_dump_capturing && !s_dump_done) {
-        size_t raw   = (size_t)(count * 2);
         uint32_t avail = DUMP_PCM_BYTES - s_dump_pos;
-        uint32_t n   = (uint32_t)(raw < (size_t)avail ? raw : (size_t)avail);
+        uint32_t n   = (uint32_t)(bytes < (size_t)avail ? bytes : (size_t)avail);
         memcpy(s_dump_buf + s_dump_pos, (const void*)ptr, n);
         s_dump_pos += n;
         if (s_dump_pos >= DUMP_PCM_BYTES) {

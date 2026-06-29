@@ -1248,6 +1248,28 @@ static void synth_task(void* pv) {
             s_lin[out++] = s_synth_L[src];
             s_lin[out++] = s_synth_R[src];
         }
+
+        // Mixer le DAC/speech depuis g_ring (OPMUpdateOne est no-op sur ESP32,
+        // donc g_ring contient uniquement les chips non-YM2151).
+        // g_ring est rempli à SPF=100 paires stéréo/frame (≈6kHz).
+        {
+            static INT16 dac_buf[SPF * 4];  // max 2 frames de DAC
+            int dac_n = (g_wi - g_ri + ABMAX) % ABMAX;
+            if (dac_n > SPF * 4) dac_n = SPF * 4;
+            if (dac_n >= 2) {
+                for (int i = 0; i < dac_n; i++) { dac_buf[i] = g_ring[g_ri]; g_ri = (g_ri + 1) % ABMAX; }
+                int dac_pairs = dac_n / 2;
+                for (int j = 0; j < target_pairs; j++) {
+                    int dsrc = (dac_pairs > 1) ? (j * dac_pairs) / target_pairs : 0;
+                    if (dsrc >= dac_pairs) dsrc = dac_pairs - 1;
+                    int L = (int)s_lin[j*2]   + (int)dac_buf[dsrc*2];
+                    int R = (int)s_lin[j*2+1] + (int)dac_buf[dsrc*2+1];
+                    s_lin[j*2]   = (INT16)(L > 32767 ? 32767 : (L < -32768 ? -32768 : L));
+                    s_lin[j*2+1] = (INT16)(R > 32767 ? 32767 : (R < -32768 ? -32768 : R));
+                }
+            }
+        }
+
         if (out > 0) hal_push_audio((uintptr_t)s_lin, out, 0);
     }
 }
